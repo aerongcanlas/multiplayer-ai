@@ -1,0 +1,10 @@
+{
+    "name": "@multiplayer-ai/worker",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "dev": "tsx watch src/index.ts",
+        "build": "tsc --outDir dist src/index.ts",
+        "typecheck": "tsc --noEmit src/index.ts"
+    }
+}

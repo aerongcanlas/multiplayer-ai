@@ -1,0 +1,10 @@
+
+{
+  "name": "@multiplayer-ai/db",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --outDir dist src/index.ts",
+    "typecheck": "tsc --noEmit src/index.ts"
+  }
+}
