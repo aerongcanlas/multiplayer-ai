@@ -1,0 +1,12 @@
+**/.env
+**/.env.*
+!**/.env.example
+
+.lavish
+
+docs/
+scripts/
+
+node_modules/
+
+MEMORY.md
