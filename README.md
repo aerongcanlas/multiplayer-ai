@@ -20,9 +20,6 @@ packages/
   providers/      OpenAI, E2B, and other service connections
   config/         Environment settings and validation
   test-support/   Shared test data and helpers
-
-docs/             Project plans and technical decisions
-scripts/          Development and validation utilities
 ```
 
 Apps may import shared packages. Shared packages must never import from apps.
