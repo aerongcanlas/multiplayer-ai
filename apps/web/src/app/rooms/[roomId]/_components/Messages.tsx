@@ -3,24 +3,26 @@ import type { Message } from '../_types/message';
 import ChatMessageBubble from './ChatMessageBubble';
 
 interface Props {
+    currentUserId?: string;
     messages: Array<Message>;
 }
 
-function Messages({ messages }: Props) {
-    const userId: number = 1;
-
+function Messages({ messages, currentUserId }: Props) {
     return (
         <BoxColumn>
-            {messages.map((message, index) => (
+            {messages.map((message) => (
                 <ChatMessageBubble
-                    key={index}
+                    key={message.id}
                     message={message}
                     className={
-                        message.userId === userId ? 'self-end' : 'self-start'
+                        message.userId === currentUserId
+                            ? 'self-end'
+                            : 'self-start'
                     }
                 />
             ))}
         </BoxColumn>
     );
 }
+
 export default Messages;
