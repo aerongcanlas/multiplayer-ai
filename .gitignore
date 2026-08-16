@@ -10,3 +10,11 @@ scripts/
 node_modules/
 
 MEMORY.md
+
+# build output
+.next/
+.turbo/
+dist/
+out/
+build/
+next-env.d.ts
