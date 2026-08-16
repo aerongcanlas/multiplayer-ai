@@ -1,0 +1,33 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# builds
+dist/
+.next/
+out/
+build/
+
+docs/
+
+# turbo
+.turbo/
+
+# env — never commit secrets
+.env
+.env.*
+!.env.example
+
+# next
+next-env.d.ts
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# os / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
