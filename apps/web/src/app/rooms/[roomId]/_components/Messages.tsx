@@ -4,7 +4,7 @@ import ChatMessageBubble from './ChatMessageBubble';
 
 interface Props {
     currentUserId?: string;
-    messages: Array<Message>;
+    messages: Array<Pick<Message, 'id' | 'userId' | 'text'>>;
 }
 
 function Messages({ messages, currentUserId }: Props) {
