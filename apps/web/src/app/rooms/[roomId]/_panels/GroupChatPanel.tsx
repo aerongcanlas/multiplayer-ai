@@ -15,10 +15,7 @@ function GroupChatPanel() {
             <Box className='min-h-0 flex-1 overflow-y-auto'>
                 <Messages messages={messages} />
             </Box>
-            <TextEntryBubble
-                className='m-2 mt-2 rounded-2xl shrink-0 h-20'
-                onSubmit={() => null}
-            />
+            <TextEntryBubble className='m-2 mt-2 rounded-2xl shrink-0 h-20' />
         </BoxColumn>
     );
 }
