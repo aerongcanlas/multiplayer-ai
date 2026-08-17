@@ -2,8 +2,11 @@
 
 import { Box, BoxColumn, TextBox } from '@/components/ui';
 import { useChat } from '@ai-sdk/react';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Messages from '../_components/Messages';
+import ModelSwitcher, {
+    type ChatProvider,
+} from '../_components/ModelSwitcher';
 import TextEntryBubble from '../_components/TextEntryBubble';
 import type { Message } from '../_types/message';
 
@@ -12,6 +15,7 @@ const ASSISTANT_ID = 'assistant';
 
 function AIActivityPanel() {
     const { messages: chatMessages, sendMessage, status } = useChat();
+    const [provider, setProvider] = useState<ChatProvider>('gemini');
     const scrollRef = useRef<HTMLDivElement>(null);
 
     const messages: Array<Pick<Message, 'id' | 'userId' | 'text'>> =
@@ -36,7 +40,13 @@ function AIActivityPanel() {
 
     return (
         <BoxColumn className='h-full min-h-0 p-2'>
-            <TextBox className='shrink-0'>AIActivityPanel</TextBox>
+            <div className='flex shrink-0 items-center justify-between'>
+                <TextBox>AIActivityPanel</TextBox>
+                <ModelSwitcher
+                    value={provider}
+                    onChange={setProvider}
+                />
+            </div>
             <Box
                 ref={scrollRef}
                 className='min-h-0 flex-1 overflow-y-auto'
@@ -49,7 +59,9 @@ function AIActivityPanel() {
             <TextEntryBubble
                 className='m-2 mt-2 rounded-2xl shrink-0 h-20'
                 disabled={status !== 'ready'}
-                onSubmit={(text) => sendMessage({ text })}
+                onSubmit={(text) =>
+                    sendMessage({ text }, { body: { provider } })
+                }
             />
         </BoxColumn>
     );
