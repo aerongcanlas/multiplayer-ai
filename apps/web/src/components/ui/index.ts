@@ -1,6 +1,8 @@
 export { Box } from './Box';
 export { BoxColumn } from './BoxColumn';
 export { BoxRow } from './BoxRow';
+export { Button } from './Button';
+export { Input } from './Input';
 export {
     ResizableHandle,
     ResizablePanel,

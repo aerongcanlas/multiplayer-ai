@@ -4,10 +4,10 @@ import TextEntryBubble from '../_components/TextEntryBubble';
 import type { Message } from '../_types/message';
 
 function GroupChatPanel() {
-    const messages: Array<Message> = [
-        { userId: 2, text: 'hey' },
-        { userId: 1, text: 'wassup' },
-        { userId: 2, text: 'how are ya?' },
+    const messages: Array<Pick<Message, 'id' | 'userId' | 'text'>> = [
+        { id: '1', userId: '2', text: 'hey' },
+        { id: '2', userId: '1', text: 'wassup' },
+        { id: '3', userId: '2', text: 'how are ya?' },
     ];
     return (
         <BoxColumn className='h-full min-h-0 p-2'>

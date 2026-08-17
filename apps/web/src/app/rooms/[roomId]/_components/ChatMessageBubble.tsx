@@ -4,7 +4,7 @@ import type { Message } from '../_types/message';
 
 interface Props {
     className?: string;
-    message: Message;
+    message: Pick<Message, 'text'>;
 }
 function ChatMessageBubble({ className, message }: Props) {
     return (

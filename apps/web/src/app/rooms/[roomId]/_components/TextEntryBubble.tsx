@@ -1,41 +1,63 @@
 'use client';
 
-import { Box } from '@/components/ui';
+import { Button, Input } from '@/components/ui';
 import { cn } from '@/lib/utils';
-import { useState, type KeyboardEvent } from 'react';
+import { type SubmitEvent, useState } from 'react';
 
 interface Props {
     className?: string;
     disabled?: boolean;
-    onSubmit?: (text: string) => void;
+    placeholder?: string;
+    onSubmit: (text: string) => Promise<void> | void;
 }
 
-function TextEntryBubble({ onSubmit, className, disabled = false }: Props) {
-    const [value, setValue] = useState('');
+function TextEntryBubble({
+    onSubmit,
+    className,
+    disabled = false,
+    placeholder = 'Message the room',
+}: Props) {
+    const [text, setText] = useState('');
 
-    function submit() {
-        const text = value.trim();
-        if (disabled || !text || !onSubmit) return;
-        onSubmit(text);
-        setValue('');
-    }
-
-    function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-        if (event.key !== 'Enter' || event.shiftKey) return;
+    async function handleSubmit(event: SubmitEvent<HTMLFormElement>) {
         event.preventDefault();
-        submit();
+
+        const nextText = text.trim();
+        if (disabled || nextText.length === 0) return;
+
+        setText('');
+
+        try {
+            await onSubmit(nextText);
+        } catch {
+            setText(nextText);
+        }
     }
 
     return (
-        <Box className={cn('bg-[#2A2A2A] p-2 m-2 w-full', className)}>
-            <textarea
-                value={value}
-                onChange={(event) => setValue(event.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder='Type a message...'
-                className='h-full w-full resize-none bg-transparent outline-none'
+        <form
+            className={cn(
+                'flex w-full items-center gap-2 rounded-2xl bg-[#2A2A2A] p-2',
+                className,
+            )}
+            onSubmit={handleSubmit}
+        >
+            <Input
+                aria-label='Message'
+                disabled={disabled}
+                maxLength={2_000}
+                placeholder={placeholder}
+                value={text}
+                onChange={(event) => setText(event.target.value)}
             />
-        </Box>
+            <Button
+                disabled={disabled || text.trim().length === 0}
+                type='submit'
+            >
+                Send
+            </Button>
+        </form>
     );
 }
+
 export default TextEntryBubble;

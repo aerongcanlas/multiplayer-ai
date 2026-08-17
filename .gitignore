@@ -1,33 +1,42 @@
 # dependencies
 node_modules/
-.pnpm-store/
+.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
 
-# builds
-dist/
+# build output and caches
 .next/
 out/
 build/
-
-docs/
-
-# turbo
+dist/
+coverage/
 .turbo/
 
-# env — never commit secrets
+# environment
 .env
 .env.*
 !.env.example
 
-# next
-next-env.d.ts
-
-# logs
-*.log
-npm-debug.log*
-pnpm-debug.log*
-
-# os / editor
+# local tools
+/.lavish/
+docs/
+scripts/
+MEMORY.md
+memory.md
+.vercel/
 .DS_Store
-*.swp
-.idea/
-.vscode/
+*.pem
+
+# debug logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
