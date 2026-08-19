@@ -7,6 +7,7 @@
         "build": "next build",
         "start": "next start",
         "lint": "eslint",
+        "typecheck": "next typegen && tsc -p tsconfig.json --noEmit",
         "gen-types": "supabase gen types typescript --project-id ycwiicwvklctndfmxalz > ../../packages/db/src/generated/database.types.ts"
     },
     "dependencies": {

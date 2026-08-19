@@ -1,6 +1,7 @@
 packages:
   - 'apps/*'
   - 'packages/*'
+verifyDepsBeforeRun: false
 allowBuilds:
   esbuild: false
   unrs-resolver: false
