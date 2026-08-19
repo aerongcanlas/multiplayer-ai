@@ -6,7 +6,8 @@ function TextBox({ children, className, ...props }: React.ComponentProps<'p'>) {
     return (
         <p
             className={cn(className)}
-            {...props}>
+            {...props}
+        >
             {children}
         </p>
     );

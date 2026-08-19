@@ -1,8 +1,8 @@
-import * as React from "react";
+import * as React from 'react';
 
-import { cn } from "@/lib/utils";
+import { cn } from '@/lib/utils';
 
-import { Box } from "./Box";
+import { Box } from './Box';
 
 function BoxRow({
     children,
@@ -11,8 +11,9 @@ function BoxRow({
 }: React.ComponentProps<typeof Box>) {
     return (
         <Box
-            className={cn("flex flex-row", className)}
-            {...props}>
+            className={cn('flex flex-row', className)}
+            {...props}
+        >
             {children}
         </Box>
     );

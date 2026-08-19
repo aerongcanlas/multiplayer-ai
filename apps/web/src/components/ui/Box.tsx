@@ -30,7 +30,8 @@ function Box({
                 className,
             )}
             onClick={onClick}
-            {...props}>
+            {...props}
+        >
             {children}
         </div>
     );
