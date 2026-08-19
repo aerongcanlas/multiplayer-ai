@@ -2,41 +2,40 @@ import {
     ResizableHandle,
     ResizablePanel,
     ResizablePanelGroup,
-} from '@/components/ui';
-import AIActivityPanel from './_panels/AIActivityPanel';
-import GroupChatPanel from './_panels/GroupChatPanel';
-import PromptVotePanel from './_panels/PromptVotePanel';
-import RoomListPanel from './_panels/RoomListPanel';
+} from "@/components/ui";
+import AIActivityPanel from "./_panels/AIActivityPanel";
+import GroupChatPanel from "./_panels/GroupChatPanel";
+import PromptVotePanel from "./_panels/PromptVotePanel";
 
 function RoomPage() {
     return (
         <ResizablePanelGroup
-            orientation='horizontal'
-            className='min-h-screen w-full'
+            orientation="horizontal"
+            className="min-h-screen w-full"
         >
-            <ResizablePanel
+            {/* <ResizablePanel
                 defaultSize='10%'
                 minSize='10%'
                 maxSize='15%'
             >
                 <RoomListPanel />
-            </ResizablePanel>
-            <ResizableHandle />
+            </ResizablePanel> */}
+            {/* <ResizableHandle /> */}
             <ResizablePanel
-                defaultSize='27%'
-                minSize='15%'
+                defaultSize="27%"
+                minSize="35%"
             >
                 <AIActivityPanel />
             </ResizablePanel>
             <ResizableHandle />
             <ResizablePanel
-                defaultSize='55%'
-                minSize='30%'
+                defaultSize="55%"
+                minSize="30%"
             >
-                <ResizablePanelGroup orientation='vertical'>
+                <ResizablePanelGroup orientation="vertical">
                     <ResizablePanel
-                        defaultSize='70%'
-                        minSize='30%'
+                        defaultSize="70%"
+                        minSize="30%"
                     >
                         <GroupChatPanel />
                     </ResizablePanel>
@@ -44,8 +43,8 @@ function RoomPage() {
                     <ResizableHandle />
 
                     <ResizablePanel
-                        defaultSize='30%'
-                        minSize='15%'
+                        defaultSize="30%"
+                        minSize="15%"
                     >
                         <PromptVotePanel />
                     </ResizablePanel>
