@@ -11,5 +11,10 @@
         "tsx": "^4.23.12",
         "turbo": "^2.10.9",
         "typescript": "^5.9.3"
+    },
+    "dependencies": {
+        "@types/node": "^20.19.43",
+        "@vercel/sandbox": "^3.0.0",
+        "dotenv": "^17.4.2"
     }
 }
