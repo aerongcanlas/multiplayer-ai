@@ -1,6 +1,6 @@
 import { Box, BoxColumn, TextBox } from "@/components/ui";
-import Messages from "../_components/Messages";
-import type { Message } from "../_types/message";
+import type { Message } from "../../types/message";
+import Messages from "./Messages";
 
 function GroupChatPanel() {
     const messages: Array<Pick<Message, "id" | "userId" | "text">> = [

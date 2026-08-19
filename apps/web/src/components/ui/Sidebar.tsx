@@ -5,7 +5,7 @@ import { useRender } from "@base-ui/react/use-render";
 import { cva, type VariantProps } from "class-variance-authority";
 import * as React from "react";
 
-import { BoxRow, Button, Input, Separator } from "@/components/ui/";
+import { Button, Input, Separator } from "@/components/ui/";
 import {
     Sheet,
     SheetContent,
@@ -20,11 +20,8 @@ import {
     TooltipTrigger,
 } from "@/components/ui/Tooltip";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { cn } from "@/lib/utils";
 import { PanelLeftIcon } from "lucide-react";
-import Link from "next/link";
-import { LogoutButton } from "../logout-button";
 
 const SIDEBAR_COOKIE_NAME = "sidebar_state";
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
@@ -349,33 +346,13 @@ function SidebarInput({
 }
 
 function SidebarHeader({ className, ...props }: React.ComponentProps<"div">) {
-    const { user, isLoading } = useCurrentUser();
     return (
         <div
             data-slot="sidebar-header"
             data-sidebar="header"
             className={cn("flex flex-col gap-2 p-2", className)}
             {...props}
-        >
-            <Link
-                href="/"
-                className="text-xl font-bold"
-            >
-                Multiplayer.ai
-            </Link>
-            {isLoading || user == null ? (
-                <Button>
-                    <Link href="/auth/login">Sign In</Link>
-                </Button>
-            ) : (
-                <BoxRow>
-                    <Button>
-                        {user.user_metadata?.preferred_username || user.email}
-                    </Button>
-                    <LogoutButton />
-                </BoxRow>
-            )}
-        </div>
+        />
     );
 }
 

@@ -8,34 +8,11 @@ import {
     EmptyMedia,
     EmptyTitle,
 } from "@/components/ui/Empty";
-import { getCurrentUser } from "@/lib/supabase/getCurrentUser";
-import { createAdminClient } from "@/lib/supabase/server";
+import { getCurrentUser } from "@/features/auth/server/getCurrentUser";
+import RoomList from "@/features/rooms/components/RoomList";
+import { getJoinedRooms } from "@/features/rooms/queries/getJoinedRooms";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import RoomList from "./_components/RoomList";
-
-async function getJoinedRooms(userId: string) {
-    const supabase = createAdminClient();
-
-    const { data, error } = await supabase
-        .from("room")
-        .select("*, room_member (member_id)")
-        .order("created_at", { ascending: true });
-
-    if (error) {
-        return [];
-    }
-
-    return data
-        .filter((room) => room.room_member.some((u) => u.member_id === userId))
-        .map((room) => ({
-            id: room.id,
-            name: room.name,
-            slug: room.slug,
-            created_at: room.created_at,
-            memberCount: room.room_member.length,
-        }));
-}
 
 async function HomePage() {
     const user = await getCurrentUser();

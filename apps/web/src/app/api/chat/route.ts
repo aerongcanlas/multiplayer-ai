@@ -1,6 +1,6 @@
 import { openai } from '@ai-sdk/openai';
 import { google } from '@ai-sdk/google';
-import { createMockChatStream } from '@/lib/ai/mock-chat';
+import { createMockChatStream } from '@/features/ai/server/mockChat';
 import {
     convertToModelMessages,
     createUIMessageStreamResponse,

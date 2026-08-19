@@ -1,5 +1,5 @@
 import { BoxColumn } from '@/components/ui';
-import type { Message } from '../_types/message';
+import type { Message } from '../../types/message';
 import ChatMessageBubble from './ChatMessageBubble';
 
 interface Props {

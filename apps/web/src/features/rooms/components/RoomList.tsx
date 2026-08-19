@@ -1,12 +1,10 @@
 import { Box, BoxColumn, BoxRow, Button } from "@/components/ui";
-import type { Database } from "@/types/database.types";
+import type { JoinedRoom } from "@/features/rooms/types/room";
 import Link from "next/link";
 
 interface Props {
     title: string;
-    rooms: (Database["public"]["Tables"]["room"]["Row"] & {
-        memberCount: number;
-    })[];
+    rooms: JoinedRoom[];
 }
 
 function RoomList({ title, rooms }: Props) {

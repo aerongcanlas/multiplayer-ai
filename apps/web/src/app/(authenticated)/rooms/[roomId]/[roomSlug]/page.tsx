@@ -3,9 +3,9 @@ import {
     ResizablePanel,
     ResizablePanelGroup,
 } from "@/components/ui";
-import AIActivityPanel from "./_panels/AIActivityPanel";
-import GroupChatPanel from "./_panels/GroupChatPanel";
-import PromptVotePanel from "./_panels/PromptVotePanel";
+import AIActivityPanel from "@/features/rooms/components/workspace/AIActivityPanel";
+import GroupChatPanel from "@/features/rooms/components/workspace/GroupChatPanel";
+import PromptVotePanel from "@/features/rooms/components/workspace/PromptVotePanel";
 
 function RoomPage() {
     return (
@@ -13,14 +13,6 @@ function RoomPage() {
             orientation="horizontal"
             className="min-h-screen w-full"
         >
-            {/* <ResizablePanel
-                defaultSize='10%'
-                minSize='10%'
-                maxSize='15%'
-            >
-                <RoomListPanel />
-            </ResizablePanel> */}
-            {/* <ResizableHandle /> */}
             <ResizablePanel
                 defaultSize="27%"
                 minSize="35%"

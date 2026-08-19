@@ -1,9 +1,9 @@
 "use server";
 import z from "zod";
 
-import { getCurrentUser } from "@/lib/supabase/getCurrentUser";
+import { getCurrentUser } from "@/features/auth/server/getCurrentUser";
+import { createRoomSchema } from "@/features/rooms/schema";
 import { createAdminClient } from "@/lib/supabase/server";
-import { createRoomSchema } from "@/schemas/rooms";
 import slugify from "@sindresorhus/slugify";
 import { redirect } from "next/navigation";
 

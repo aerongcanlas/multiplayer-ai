@@ -3,12 +3,10 @@
 import { Box, BoxColumn, TextBox } from '@/components/ui';
 import { useChat } from '@ai-sdk/react';
 import { useEffect, useRef, useState } from 'react';
-import Messages from '../_components/Messages';
-import ModelSwitcher, {
-    type ChatProvider,
-} from '../_components/ModelSwitcher';
-import TextEntryBubble from '../_components/TextEntryBubble';
-import type { Message } from '../_types/message';
+import type { Message } from '../../types/message';
+import Messages from './Messages';
+import ModelSwitcher, { type ChatProvider } from './ModelSwitcher';
+import TextEntryBubble from './TextEntryBubble';
 
 const USER_ID = 'user';
 const ASSISTANT_ID = 'assistant';

@@ -1,5 +1,4 @@
 "use client";
-import { createRoom } from "@/actions/rooms";
 import { Box, Button, Card, Input, Spinner } from "@/components/ui";
 import {
     CardContent,
@@ -14,7 +13,8 @@ import {
     FieldLabel,
 } from "@/components/ui/Field";
 import { toast } from "@/components/ui/Toast";
-import { createRoomSchema } from "@/schemas/rooms";
+import { createRoom } from "@/features/rooms/actions/createRoom";
+import { createRoomSchema } from "@/features/rooms/schema";
 import { zodResolver } from "@hookform/resolvers/zod";
 import Link from "next/link";
 import { Controller, useForm } from "react-hook-form";
