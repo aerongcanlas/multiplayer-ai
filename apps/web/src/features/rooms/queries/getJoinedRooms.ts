@@ -1,7 +1,8 @@
 import type { JoinedRoom } from "@/features/rooms/types/room";
 import { createAdminClient } from "@/lib/supabase/server";
+import { cache } from "react";
 
-export async function getJoinedRooms(userId: string): Promise<JoinedRoom[]> {
+async function queryJoinedRooms(userId: string): Promise<JoinedRoom[]> {
     const supabase = createAdminClient();
 
     const { data, error } = await supabase
@@ -24,4 +25,10 @@ export async function getJoinedRooms(userId: string): Promise<JoinedRoom[]> {
             created_at: room.created_at,
             memberCount: room.room_member.length,
         }));
+}
+
+const getJoinedRoomsCached = cache(queryJoinedRooms);
+
+export function getJoinedRooms(userId: string): Promise<JoinedRoom[]> {
+    return getJoinedRoomsCached(userId);
 }
