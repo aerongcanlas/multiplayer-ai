@@ -1,6 +1,9 @@
 'use client';
 
-type ChatProvider = 'gemini' | 'openai';
+import {
+    isChatProvider,
+    type ChatProvider,
+} from '@multiplayer-ai/domain';
 
 interface Props {
     value: ChatProvider;
@@ -15,9 +18,11 @@ function ModelSwitcher({ value, onChange }: Props) {
                 aria-label='AI model'
                 className='rounded-md border border-white/15 bg-[#2A2A2A] px-2 py-1 text-sm'
                 value={value}
-                onChange={(event) =>
-                    onChange(event.target.value as ChatProvider)
-                }
+                onChange={(event) => {
+                    if (isChatProvider(event.target.value)) {
+                        onChange(event.target.value);
+                    }
+                }}
             >
                 <option value='gemini'>Gemini 3.6 Flash</option>
                 <option value='openai'>OpenAI GPT-5 Mini</option>
@@ -26,5 +31,4 @@ function ModelSwitcher({ value, onChange }: Props) {
     );
 }
 
-export type { ChatProvider };
 export default ModelSwitcher;

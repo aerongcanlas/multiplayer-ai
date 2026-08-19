@@ -1,4 +1,4 @@
-import { Database } from "@/types/database.types";
+import type { Database } from "@multiplayer-ai/db";
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 

@@ -3,8 +3,16 @@
   "name": "@multiplayer-ai/domain",
   "private": true,
   "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "scripts": {
-    "build": "tsc --outDir dist src/index.ts",
-    "typecheck": "tsc --noEmit src/index.ts"
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
   }
 }

@@ -2,10 +2,10 @@
 
 import { Box, BoxColumn, TextBox } from '@/components/ui';
 import { useChat } from '@ai-sdk/react';
+import type { ChatProvider, Message } from '@multiplayer-ai/domain';
 import { useEffect, useRef, useState } from 'react';
-import type { Message } from '../../types/message';
 import Messages from './Messages';
-import ModelSwitcher, { type ChatProvider } from './ModelSwitcher';
+import ModelSwitcher from './ModelSwitcher';
 import TextEntryBubble from './TextEntryBubble';
 
 const USER_ID = 'user';

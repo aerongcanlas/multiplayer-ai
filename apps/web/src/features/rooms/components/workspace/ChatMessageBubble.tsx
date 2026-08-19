@@ -1,6 +1,6 @@
 import { Box, TextBox } from '@/components/ui';
 import { cn } from '@/lib/utils';
-import type { Message } from '../../types/message';
+import type { Message } from '@multiplayer-ai/domain';
 
 interface Props {
     className?: string;

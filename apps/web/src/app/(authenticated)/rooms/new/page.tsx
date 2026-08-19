@@ -14,13 +14,15 @@ import {
 } from "@/components/ui/Field";
 import { toast } from "@/components/ui/Toast";
 import { createRoom } from "@/features/rooms/actions/createRoom";
-import { createRoomSchema } from "@/features/rooms/schema";
 import { zodResolver } from "@hookform/resolvers/zod";
+import {
+    createRoomSchema,
+    type CreateRoomInput,
+} from "@multiplayer-ai/domain";
 import Link from "next/link";
 import { Controller, useForm } from "react-hook-form";
-import z from "zod";
 
-type FormData = z.infer<typeof createRoomSchema>;
+type FormData = CreateRoomInput;
 
 function NewRoomPage() {
     const form = useForm<FormData>({

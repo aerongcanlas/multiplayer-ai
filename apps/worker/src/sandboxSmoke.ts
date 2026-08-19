@@ -1,5 +1,5 @@
 import { config } from 'dotenv';
-config({ path: '.env.local' });
+config({ path: new URL('../../../.env.local', import.meta.url) });
 
 import { Sandbox } from '@vercel/sandbox';
 

@@ -1,5 +1,5 @@
 import { BoxColumn } from '@/components/ui';
-import type { Message } from '../../types/message';
+import type { Message } from '@multiplayer-ai/domain';
 import ChatMessageBubble from './ChatMessageBubble';
 
 interface Props {

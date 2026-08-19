@@ -1,6 +1,6 @@
-import { openai } from '@ai-sdk/openai';
-import { google } from '@ai-sdk/google';
 import { createMockChatStream } from '@/features/ai/server/mockChat';
+import { isChatProvider } from '@multiplayer-ai/domain';
+import { createChatModel } from '@multiplayer-ai/providers';
 import {
     convertToModelMessages,
     createUIMessageStreamResponse,
@@ -8,9 +8,6 @@ import {
     toUIMessageStream,
     type UIMessage,
 } from 'ai';
-
-const DEFAULT_MODEL = 'gpt-5-mini';
-type ChatProvider = 'gemini' | 'openai';
 
 export async function POST(request: Request) {
     const {
@@ -36,25 +33,20 @@ export async function POST(request: Request) {
         );
     }
 
-    if (requestedProvider !== 'gemini' && requestedProvider !== 'openai') {
+    if (!isChatProvider(requestedProvider)) {
         return Response.json(
             { error: 'Unsupported chat provider' },
             { status: 400 },
         );
     }
 
-    const provider = requestedProvider as ChatProvider;
-
     const result = streamText({
-        model:
-            provider === 'gemini'
-                ? google('gemini-3.6-flash')
-                : openai(process.env.OPENAI_MODEL ?? DEFAULT_MODEL),
+        model: createChatModel(requestedProvider, process.env.OPENAI_MODEL),
         messages: await convertToModelMessages(messages),
     });
 
     return createUIMessageStreamResponse({
-        headers: { 'x-ai-mode': provider },
+        headers: { 'x-ai-mode': requestedProvider },
         stream: toUIMessageStream({ stream: result.stream }),
     });
 }

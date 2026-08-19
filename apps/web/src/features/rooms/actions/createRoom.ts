@@ -1,13 +1,15 @@
 "use server";
-import z from "zod";
 
 import { getCurrentUser } from "@/features/auth/server/getCurrentUser";
-import { createRoomSchema } from "@/features/rooms/schema";
 import { createAdminClient } from "@/lib/supabase/server";
 import slugify from "@sindresorhus/slugify";
+import {
+    createRoomSchema,
+    type CreateRoomInput,
+} from "@multiplayer-ai/domain";
 import { redirect } from "next/navigation";
 
-export async function createRoom(unsafeData: z.infer<typeof createRoomSchema>) {
+export async function createRoom(unsafeData: CreateRoomInput) {
     const { success, data } = createRoomSchema.safeParse(unsafeData);
 
     if (!success) {

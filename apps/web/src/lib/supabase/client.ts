@@ -1,4 +1,4 @@
-import { Database } from "@/types/database.types";
+import type { Database } from "@multiplayer-ai/db";
 import { createBrowserClient } from "@supabase/ssr";
 
 export function createClient() {

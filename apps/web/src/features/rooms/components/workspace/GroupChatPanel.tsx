@@ -1,5 +1,5 @@
 import { Box, BoxColumn, TextBox } from "@/components/ui";
-import type { Message } from "../../types/message";
+import type { Message } from "@multiplayer-ai/domain";
 import Messages from "./Messages";
 
 function GroupChatPanel() {
