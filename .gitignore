@@ -1,5 +1,6 @@
 # dependencies
 node_modules/
+.pnpm-store/
 .pnp
 .pnp.*
 .yarn/*
@@ -28,6 +29,7 @@ scripts/
 MEMORY.md
 memory.md
 .vercel/
+**/supabase/.temp/
 .DS_Store
 *.pem
 
@@ -40,9 +42,3 @@ yarn-error.log*
 # TypeScript
 *.tsbuildinfo
 next-env.d.ts
-
-# local pnpm cache
-/.pnpm-store/
-
-# Supabase CLI local state
-/apps/web/supabase/.temp/
