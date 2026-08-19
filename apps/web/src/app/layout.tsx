@@ -1,9 +1,3 @@
-import { AppSidebar } from "@/components/ui/AppSidebar";
-import {
-    SidebarInset,
-    SidebarProvider,
-    SidebarTrigger,
-} from "@/components/ui/Sidebar";
 import { Toaster } from "@/components/ui/Toast";
 import { TooltipProvider } from "@/components/ui/Tooltip";
 import { cn } from "@/lib/utils";
@@ -43,13 +37,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         >
             <body className="h-full flex flex-col">
                 <TooltipProvider>
-                    <SidebarProvider>
-                        <AppSidebar />
-                        <SidebarInset>
-                            <SidebarTrigger />
-                            {children}
-                        </SidebarInset>
-                    </SidebarProvider>
+                    {children}
                     <Toaster />
                 </TooltipProvider>
             </body>

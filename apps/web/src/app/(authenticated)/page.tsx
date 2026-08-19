@@ -60,16 +60,10 @@ async function HomePage() {
                         </EmptyHeader>
                         <EmptyContent>
                             <Button>
-                                <Link href="rooms/new">Create Room</Link>
+                                <Link href="/rooms/new">Create Room</Link>
                             </Button>
                         </EmptyContent>
                     </Empty>
-                    <Link
-                        href="/rooms/room-1"
-                        className="rounded-md bg-foreground px-5 py-2.5 font-medium text-background transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-                    >
-                        Enter Room
-                    </Link>
                 </BoxColumn>
             </main>
         );
@@ -82,7 +76,7 @@ async function HomePage() {
                 rooms={rooms}
             />
             <Button>
-                <Link href="rooms/new">Create Room</Link>
+                <Link href="/rooms/new">Create Room</Link>
             </Button>
         </BoxColumn>
     );

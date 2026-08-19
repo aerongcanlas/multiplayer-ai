@@ -87,7 +87,7 @@ function NewRoomPage() {
                                 </Box>
                             </Button>
                             <Button variant="outline">
-                                <Link href="rooms">Cancel</Link>
+                                <Link href="/">Cancel</Link>
                             </Button>
                         </Field>
                     </form>
