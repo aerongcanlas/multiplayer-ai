@@ -1,13 +1,14 @@
 "use client";
 
 import {
+    BoxRow,
+    Button,
     Sidebar,
     SidebarContent,
     SidebarFooter,
     SidebarGroup,
     SidebarHeader,
-} from "@/components/ui/Sidebar";
-import { BoxRow, Button } from "@/components/ui";
+} from "@/components/ui";
 import { LogoutButton } from "@/features/auth/components/LogoutButton";
 import { useCurrentUser } from "@/features/auth/hooks/useCurrentUser";
 import Link from "next/link";

@@ -1,11 +1,11 @@
+import AIActivityPanel from "@/components/AIActivityPanel";
+import GroupChatPanel from "@/components/GroupChatPanel";
+import PromptVotePanel from "@/components/PromptVotePanel";
 import {
     ResizableHandle,
     ResizablePanel,
     ResizablePanelGroup,
 } from "@/components/ui";
-import AIActivityPanel from "@/features/rooms/components/workspace/AIActivityPanel";
-import GroupChatPanel from "@/features/rooms/components/workspace/GroupChatPanel";
-import PromptVotePanel from "@/features/rooms/components/workspace/PromptVotePanel";
 
 function RoomPage() {
     return (
