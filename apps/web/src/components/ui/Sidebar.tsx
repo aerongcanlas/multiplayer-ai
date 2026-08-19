@@ -5,7 +5,7 @@ import { useRender } from "@base-ui/react/use-render";
 import { cva, type VariantProps } from "class-variance-authority";
 import * as React from "react";
 
-import { Button, Input, Separator } from "@/components/ui/";
+import { BoxRow, Button, Input, Separator } from "@/components/ui/";
 import {
     Sheet,
     SheetContent,
@@ -368,12 +368,12 @@ function SidebarHeader({ className, ...props }: React.ComponentProps<"div">) {
                     <Link href="/auth/login">Sign In</Link>
                 </Button>
             ) : (
-                <Button>
-                    <span>
+                <BoxRow>
+                    <Button>
                         {user.user_metadata?.preferred_username || user.email}
-                    </span>
+                    </Button>
                     <LogoutButton />
-                </Button>
+                </BoxRow>
             )}
         </div>
     );

@@ -4,6 +4,7 @@ import {
     SidebarProvider,
     SidebarTrigger,
 } from "@/components/ui/Sidebar";
+import { Toaster } from "@/components/ui/Toast";
 import { TooltipProvider } from "@/components/ui/Tooltip";
 import { cn } from "@/lib/utils";
 import type { Metadata } from "next";
@@ -49,6 +50,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
                             {children}
                         </SidebarInset>
                     </SidebarProvider>
+                    <Toaster />
                 </TooltipProvider>
             </body>
         </html>

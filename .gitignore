@@ -40,3 +40,9 @@ yarn-error.log*
 # TypeScript
 *.tsbuildinfo
 next-env.d.ts
+
+# local pnpm cache
+/.pnpm-store/
+
+# Supabase CLI local state
+/apps/web/supabase/.temp/
