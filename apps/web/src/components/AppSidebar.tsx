@@ -3,6 +3,7 @@
 import {
     BoxRow,
     Button,
+    Separator,
     Sidebar,
     SidebarContent,
     SidebarFooter,
@@ -12,8 +13,13 @@ import {
 import { LogoutButton } from "@/features/auth/components/LogoutButton";
 import { useCurrentUser } from "@/features/auth/hooks/useCurrentUser";
 import Link from "next/link";
+import type { ReactNode } from "react";
 
-export function AppSidebar() {
+interface Props {
+    roomList: ReactNode;
+}
+
+export function AppSidebar({ roomList }: Props) {
     const { user, isLoading } = useCurrentUser();
 
     return (
@@ -39,9 +45,9 @@ export function AppSidebar() {
                     </BoxRow>
                 )}
             </SidebarHeader>
+            <Separator />
             <SidebarContent>
-                <SidebarGroup />
-                <SidebarGroup />
+                <SidebarGroup>{roomList}</SidebarGroup>
             </SidebarContent>
             <SidebarFooter />
         </Sidebar>

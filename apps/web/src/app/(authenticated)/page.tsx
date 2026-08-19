@@ -51,6 +51,7 @@ async function HomePage() {
             <RoomList
                 title="Your Rooms"
                 rooms={rooms}
+                variant="full"
             />
             <Button>
                 <Link href="/rooms/new">Create Room</Link>
