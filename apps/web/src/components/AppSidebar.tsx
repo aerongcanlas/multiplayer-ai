@@ -7,7 +7,6 @@ import {
     Sidebar,
     SidebarContent,
     SidebarFooter,
-    SidebarGroup,
     SidebarHeader,
 } from "@/components/ui";
 import { LogoutButton } from "@/features/auth/components/LogoutButton";
@@ -46,8 +45,9 @@ export function AppSidebar({ roomList }: Props) {
                 )}
             </SidebarHeader>
             <Separator />
-            <SidebarContent>
-                <SidebarGroup>{roomList}</SidebarGroup>
+            <SidebarContent className="m-2">
+                <p className="text-lg font-bold">Rooms</p>
+                {roomList}
             </SidebarContent>
             <SidebarFooter />
         </Sidebar>

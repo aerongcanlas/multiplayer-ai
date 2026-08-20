@@ -53,7 +53,7 @@ async function HomePage() {
                 rooms={rooms}
                 variant="full"
             />
-            <Button>
+            <Button className="mx-2">
                 <Link href="/rooms/new">Create Room</Link>
             </Button>
         </BoxColumn>

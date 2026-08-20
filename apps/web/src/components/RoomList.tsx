@@ -1,6 +1,15 @@
-import { Box, BoxColumn, BoxRow, Button } from "@/components/ui";
+import {
+    Box,
+    BoxColumn,
+    Card,
+    CardAction,
+    CardDescription,
+    CardHeader,
+    CardTitle,
+} from "@/components/ui";
 import type { JoinedRoom } from "@/features/rooms/types/room";
 import Link from "next/link";
+import { buttonVariants } from "./ui/Button";
 
 interface Props {
     title: string;
@@ -20,33 +29,43 @@ function RoomList({ title, rooms, variant = "short" }: Props) {
                             className="py-1"
                         >
                             {variant === "full" && (
-                                <Box>
-                                    <Button>
+                                <Card>
+                                    <CardHeader>
+                                        <CardTitle>{room.name}</CardTitle>
+
+                                        <CardDescription>
+                                            Current members: {room.memberCount}
+                                            {" | "}
+                                            Created at:{" "}
+                                            {new Intl.DateTimeFormat("en-US", {
+                                                dateStyle: "medium",
+                                                timeStyle: "short",
+                                            }).format(
+                                                new Date(room.created_at),
+                                            )}{" "}
+                                        </CardDescription>
+
+                                        <CardAction className="self-center">
+                                            <Link
+                                                href={`/rooms/${room.id}/${room.slug}`}
+                                                className={buttonVariants()}
+                                            >
+                                                Join Room
+                                            </Link>
+                                        </CardAction>
+                                    </CardHeader>
+                                </Card>
+                            )}
+                            {variant === "short" && (
+                                <Card>
+                                    <CardHeader>
                                         <Link
                                             href={`/rooms/${room.id}/${room.slug}`}
                                         >
                                             {room.name}
                                         </Link>
-                                    </Button>
-                                    <BoxRow>
-                                        {new Intl.DateTimeFormat("en-US", {
-                                            dateStyle: "medium",
-                                            timeStyle: "short",
-                                        }).format(
-                                            new Date(room.created_at),
-                                        )}{" "}
-                                        Current members: {room.memberCount}
-                                    </BoxRow>
-                                </Box>
-                            )}
-                            {variant === "short" && (
-                                <Box>
-                                    <Link
-                                        href={`/rooms/${room.id}/${room.slug}`}
-                                    >
-                                        {room.name}
-                                    </Link>
-                                </Box>
+                                    </CardHeader>
+                                </Card>
                             )}
                         </BoxColumn>
                     );
