@@ -1,5 +1,12 @@
 import type { Database } from "@multiplayer-ai/db";
 
-export type JoinedRoom = Database["public"]["Tables"]["room"]["Row"] & {
-    memberCount: number;
+type RoomRow = Database["public"]["Tables"]["room"]["Row"];
+type RoomMemberRow = Database["public"]["Tables"]["room_member"]["Row"];
+
+export type JoinedRoom = Pick<
+    RoomRow,
+    "id" | "name" | "slug" | "created_at"
+> & {
+    member_count: number;
+    last_visited_at: RoomMemberRow["last_visited_at"];
 };
