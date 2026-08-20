@@ -35,7 +35,7 @@ export function AppSidebar({ roomList }: Props) {
                         <Link href="/auth/login">Sign In</Link>
                     </Button>
                 ) : (
-                    <BoxRow>
+                    <BoxRow className="gap-2 items-center justify-center">
                         <Button>
                             {user.user_metadata?.preferred_username ||
                                 user.email}
