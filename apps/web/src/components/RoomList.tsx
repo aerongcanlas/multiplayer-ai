@@ -7,8 +7,8 @@ import {
     CardHeader,
     CardTitle,
 } from "@/components/ui";
+import { JoinRoomLink } from "@/features/rooms/components/JoinRoomLink";
 import type { JoinedRoom } from "@/features/rooms/types/room";
-import Link from "next/link";
 import { buttonVariants } from "./ui/Button";
 
 interface Props {
@@ -54,12 +54,13 @@ function RoomList({ title, rooms, variant = "short" }: Props) {
                                         </CardDescription>
 
                                         <CardAction className="self-center">
-                                            <Link
-                                                href={`/rooms/${room.id}/${room.slug}`}
+                                            <JoinRoomLink
+                                                roomId={room.id}
+                                                roomSlug={room.slug}
                                                 className={buttonVariants()}
                                             >
                                                 Join Room
-                                            </Link>
+                                            </JoinRoomLink>
                                         </CardAction>
                                     </CardHeader>
                                 </Card>
@@ -67,11 +68,12 @@ function RoomList({ title, rooms, variant = "short" }: Props) {
                             {variant === "short" && (
                                 <Card>
                                     <CardHeader>
-                                        <Link
-                                            href={`/rooms/${room.id}/${room.slug}`}
+                                        <JoinRoomLink
+                                            roomId={room.id}
+                                            roomSlug={room.slug}
                                         >
                                             {room.name}
-                                        </Link>
+                                        </JoinRoomLink>
                                     </CardHeader>
                                 </Card>
                             )}
