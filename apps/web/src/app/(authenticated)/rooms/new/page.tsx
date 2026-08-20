@@ -15,10 +15,7 @@ import {
 import { toast } from "@/components/ui/Toast";
 import { createRoom } from "@/features/rooms/actions/createRoom";
 import { zodResolver } from "@hookform/resolvers/zod";
-import {
-    createRoomSchema,
-    type CreateRoomInput,
-} from "@multiplayer-ai/domain";
+import { createRoomSchema, type CreateRoomInput } from "@multiplayer-ai/domain";
 import Link from "next/link";
 import { Controller, useForm } from "react-hook-form";
 
@@ -63,6 +60,7 @@ function NewRoomPage() {
                                         <Input
                                             {...field}
                                             id={field.name}
+                                            maxLength={25}
                                             aria-invalid={fieldState.invalid}
                                         />
                                         <FieldError
