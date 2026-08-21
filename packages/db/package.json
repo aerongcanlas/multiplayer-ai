@@ -1,4 +1,3 @@
-
 {
   "name": "@multiplayer-ai/db",
   "private": true,
@@ -7,9 +6,12 @@
     ".": "./src/index.ts"
   },
   "scripts": {
+    "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
+    "@multiplayer-ai/eslint-config": "workspace:*",
+    "eslint": "^9",
     "typescript": "^5.9.3"
   }
 }

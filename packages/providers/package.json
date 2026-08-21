@@ -6,6 +6,7 @@
     ".": "./src/index.ts"
   },
   "scripts": {
+    "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
@@ -16,7 +17,9 @@
     "ai": "^7.0.66"
   },
   "devDependencies": {
+    "@multiplayer-ai/eslint-config": "workspace:*",
     "@types/node": "^20.19.43",
+    "eslint": "^9",
     "typescript": "^5.9.3"
   }
 }
