@@ -16,6 +16,7 @@
         "@hookform/resolvers": "^5.9.1",
         "@multiplayer-ai/db": "workspace:*",
         "@multiplayer-ai/domain": "workspace:*",
+        "@multiplayer-ai/orchestration": "workspace:*",
         "@multiplayer-ai/providers": "workspace:*",
         "@sindresorhus/slugify": "^3.0.0",
         "@supabase/ssr": "^0.12.4",

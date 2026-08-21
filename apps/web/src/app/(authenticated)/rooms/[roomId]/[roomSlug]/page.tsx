@@ -7,7 +7,13 @@ import {
     ResizablePanelGroup,
 } from "@/components/ui";
 
-function RoomPage() {
+interface Props {
+    params: Promise<{ roomId: string; roomSlug: string }>;
+}
+
+async function RoomPage({ params }: Props) {
+    const { roomId } = await params;
+
     return (
         <ResizablePanelGroup
             orientation="horizontal"
@@ -17,7 +23,7 @@ function RoomPage() {
                 defaultSize="27%"
                 minSize="35%"
             >
-                <AIActivityPanel />
+                <AIActivityPanel roomId={roomId} />
             </ResizablePanel>
             <ResizableHandle />
             <ResizablePanel

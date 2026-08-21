@@ -29,6 +29,9 @@ importers:
       '@multiplayer-ai/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@multiplayer-ai/orchestration':
+        specifier: workspace:*
+        version: link:../../packages/orchestration
       '@multiplayer-ai/providers':
         specifier: workspace:*
         version: link:../../packages/providers
@@ -140,6 +143,40 @@ importers:
         specifier: ^4.4.3
         version: 4.4.3
     devDependencies:
+      '@types/node':
+        specifier: ^20.19.43
+        version: 20.19.43
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  packages/orchestration:
+    dependencies:
+      '@multiplayer-ai/domain':
+        specifier: workspace:*
+        version: link:../domain
+      '@multiplayer-ai/providers':
+        specifier: workspace:*
+        version: link:../providers
+      ai:
+        specifier: ^7.0.66
+        version: 7.0.66(zod@4.4.3)
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
+    devDependencies:
+      '@ai-sdk/provider':
+        specifier: ^4.0.7
+        version: 4.0.7
+      '@ai-sdk/provider-utils':
+        specifier: 5.0.27
+        version: 5.0.27(zod@4.4.3)
+      '@types/node':
+        specifier: ^20.19.43
+        version: 20.19.43
+      tsx:
+        specifier: ^4.23.12
+        version: 4.23.12
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -152,10 +189,19 @@ importers:
       '@ai-sdk/openai':
         specifier: ^4.0.42
         version: 4.0.42(zod@4.4.3)
+      '@ai-sdk/provider-utils':
+        specifier: 5.0.27
+        version: 5.0.27(zod@4.4.3)
       '@multiplayer-ai/domain':
         specifier: workspace:*
         version: link:../domain
+      ai:
+        specifier: ^7.0.66
+        version: 7.0.66(zod@4.4.3)
     devDependencies:
+      '@types/node':
+        specifier: ^20.19.43
+        version: 20.19.43
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -2038,6 +2084,7 @@ packages:
   eslint@9.39.5:
     resolution: {integrity: sha512-DgZS62aPLXKlnxILS/AYCoRvHaZeXceIzlXPkkGGzJWSow1aEk0lbTlxUSlyjC8jcaKxAdOnTDz+o1JFSBsyjw==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
+    deprecated: This version is no longer supported. Please see https://eslint.org/version-support for other options.
     hasBin: true
     peerDependencies:
       jiti: '*'
