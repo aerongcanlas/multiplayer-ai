@@ -1,65 +1,45 @@
 "use client";
 
-import { Box, BoxColumn, TextBox } from "@/components/ui";
-import { useChat } from "@ai-sdk/react";
-import type { ChatProvider, Message } from "@multiplayer-ai/domain";
-import { useEffect, useRef, useState } from "react";
-import Messages from "./Messages";
-import ModelSwitcher from "./ModelSwitcher";
+import { BoxColumn, Button, TextBox } from "@/components/ui";
+import RunConversation from "@/features/runs/components/RunConversation";
+import RunModelSwitcher from "@/features/runs/components/RunModelSwitcher";
+import { useRoomRun } from "@/features/runs/hooks/useRoomRun";
 import TextEntryBubble from "./TextEntryBubble";
 
-const USER_ID = "user";
-const ASSISTANT_ID = "assistant";
+interface Props {
+    roomId: string;
+}
 
-function AIActivityPanel() {
-    const { messages: chatMessages, sendMessage, status } = useChat();
-    const [provider, setProvider] = useState<ChatProvider>("gemini");
-    const scrollRef = useRef<HTMLDivElement>(null);
-
-    const messages: Array<Pick<Message, "id" | "userId" | "text">> =
-        chatMessages.map((chatMessage) => ({
-            id: chatMessage.id,
-            userId: chatMessage.role === "user" ? USER_ID : ASSISTANT_ID,
-            text: chatMessage.parts
-                .map((part) => (part.type === "text" ? part.text : ""))
-                .join(""),
-        }));
-
-    const streamedLength = messages.reduce(
-        (total, message) => total + message.text.length,
-        0,
-    );
-
-    useEffect(() => {
-        const node = scrollRef.current;
-        if (!node) return;
-        node.scrollTop = node.scrollHeight;
-    }, [streamedLength]);
+function AIActivityPanel({ roomId }: Props) {
+    const { messages, startRun, stop, status, model, setModel } = useRoomRun(roomId);
+    const running = status === "submitted" || status === "streaming";
 
     return (
         <BoxColumn className="h-full min-h-0 p-2">
-            <div className="flex shrink-0 items-center justify-between">
+            <div className="flex shrink-0 items-center justify-between gap-2">
                 <TextBox>AIActivityPanel</TextBox>
-                <ModelSwitcher
-                    value={provider}
-                    onChange={setProvider}
-                />
+                <div className="flex items-center gap-2">
+                    {running && (
+                        <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => stop()}
+                        >
+                            Stop
+                        </Button>
+                    )}
+                    <RunModelSwitcher
+                        value={model}
+                        onChange={setModel}
+                    />
+                </div>
             </div>
-            <Box
-                ref={scrollRef}
-                className="min-h-0 flex-1 overflow-y-auto"
-            >
-                <Messages
-                    messages={messages}
-                    currentUserId={USER_ID}
-                />
-            </Box>
+            <RunConversation messages={messages} />
             <TextEntryBubble
                 className="m-2 mt-2 rounded-2xl shrink-0 h-20"
+                placeholder="What should the agent do?"
                 disabled={status !== "ready"}
-                onSubmit={(text) =>
-                    sendMessage({ text }, { body: { provider } })
-                }
+                onSubmit={(text) => startRun(text)}
             />
         </BoxColumn>
     );

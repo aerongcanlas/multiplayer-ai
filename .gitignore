@@ -26,6 +26,7 @@ coverage/
 /.lavish/
 docs/
 scripts/
+/.worktrees/
 MEMORY.md
 memory.md
 .vercel/

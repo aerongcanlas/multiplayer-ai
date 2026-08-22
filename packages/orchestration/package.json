@@ -1,5 +1,5 @@
 {
-  "name": "@multiplayer-ai/providers",
+  "name": "@multiplayer-ai/orchestration",
   "private": true,
   "type": "module",
   "exports": {
@@ -7,19 +7,22 @@
   },
   "scripts": {
     "lint": "eslint .",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "demo": "tsx src/testing/demo.ts"
   },
   "dependencies": {
-    "@ai-sdk/google": "^4.0.44",
-    "@ai-sdk/openai": "^4.0.42",
-    "@ai-sdk/provider-utils": "5.0.27",
     "@multiplayer-ai/domain": "workspace:*",
-    "ai": "^7.0.66"
+    "@multiplayer-ai/providers": "workspace:*",
+    "ai": "^7.0.66",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@ai-sdk/provider": "^4.0.7",
+    "@ai-sdk/provider-utils": "5.0.27",
     "@multiplayer-ai/eslint-config": "workspace:*",
     "@types/node": "^20.19.43",
     "eslint": "^9",
+    "tsx": "^4.23.12",
     "typescript": "^5.9.3"
   }
 }

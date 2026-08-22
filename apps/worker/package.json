@@ -1,20 +1,23 @@
 {
-    "name": "@multiplayer-ai/worker",
-    "private": true,
-    "type": "module",
-    "scripts": {
-        "dev": "tsx watch src/main.ts",
-        "build": "tsc -p tsconfig.json",
-        "sandbox:smoke": "tsx src/sandboxSmoke.ts",
-        "typecheck": "tsc -p tsconfig.json --noEmit"
-    },
-    "dependencies": {
-        "@vercel/sandbox": "^3.0.0",
-        "dotenv": "^17.4.2"
-    },
-    "devDependencies": {
-        "@types/node": "^20.19.43",
-        "tsx": "^4.23.12",
-        "typescript": "^5.9.3"
-    }
+  "name": "@multiplayer-ai/worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "build": "tsc -p tsconfig.json",
+    "sandbox:smoke": "tsx src/sandboxSmoke.ts",
+    "lint": "eslint .",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@vercel/sandbox": "^3.0.0",
+    "dotenv": "^17.4.2"
+  },
+  "devDependencies": {
+    "@multiplayer-ai/eslint-config": "workspace:*",
+    "@types/node": "^20.19.43",
+    "eslint": "^9",
+    "tsx": "^4.23.12",
+    "typescript": "^5.9.3"
+  }
 }

@@ -46,7 +46,7 @@ async function RoomPage({ params }: Props) {
                 defaultSize="27%"
                 minSize="35%"
             >
-                <AIActivityPanel />
+                <AIActivityPanel roomId={roomId} />
             </ResizablePanel>
 
             <ResizableHandle />
