@@ -3,6 +3,7 @@
 import { sendMessage } from "@/features/rooms/actions/sendMessage";
 import { roomPageMessageSchema } from "@/features/rooms/schemas/roomPageMessageSchema";
 import type {
+    RoomChatMessage,
     RoomPageMessage,
     SendMessageResult,
 } from "@/features/rooms/types/room";
@@ -13,19 +14,20 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 interface Props {
     roomId: string;
     initialMessages: RoomPageMessage[];
+    currentAuthor: RoomPageMessage["author"] | null;
 }
 
 const MESSAGE_EVENT = "message";
 
-export function useRoomChat({ roomId, initialMessages }: Props) {
+export function useRoomChat({ roomId, initialMessages, currentAuthor }: Props) {
     const supabase = useMemo(() => createClient(), []);
     const channelRef = useRef<RealtimeChannel | null>(null);
 
     const [messages, setMessages] =
-        useState<RoomPageMessage[]>(initialMessages);
+        useState<RoomChatMessage[]>(initialMessages);
     const [isConnected, setIsConnected] = useState(false);
 
-    const appendMessage = useCallback((message: RoomPageMessage) => {
+    const appendMessage = useCallback((message: RoomChatMessage) => {
         setMessages((current) => {
             if (current.some((item) => item.id === message.id)) {
                 return current;
@@ -68,16 +70,57 @@ export function useRoomChat({ roomId, initialMessages }: Props) {
 
     const send = useCallback(
         async (text: string): Promise<SendMessageResult> => {
+            if (currentAuthor === null) {
+                return {
+                    success: false,
+                    error: "Current user profile is missing",
+                };
+            }
+
+            const optimisticId = crypto.randomUUID();
+
+            const optimisticMessage: RoomChatMessage = {
+                id: optimisticId,
+                room_id: roomId,
+                author_id: currentAuthor.id,
+                text,
+                created_at: new Date().toISOString(),
+                author: currentAuthor,
+                deliveryStatus: "sending",
+            };
+
+            appendMessage(optimisticMessage);
+
             const result = await sendMessage({
                 room_id: roomId,
                 text,
             });
 
-            if (result.success === false) {
+            if (!result.success) {
+                setMessages((current) =>
+                    current.map((message) =>
+                        message.id === optimisticId
+                            ? { ...message, deliveryStatus: "failed" }
+                            : message,
+                    ),
+                );
+
                 return result;
             }
 
-            appendMessage(result.message);
+            // Replace temporary data with the canonical database row
+            setMessages((current) =>
+                [
+                    ...current.filter(
+                        (message) =>
+                            message.id !== optimisticId &&
+                            message.id !== result.message.id,
+                    ),
+                    result.message,
+                ].sort((left, right) =>
+                    left.created_at.localeCompare(right.created_at),
+                ),
+            );
 
             await channelRef.current?.send({
                 type: "broadcast",
@@ -87,7 +130,7 @@ export function useRoomChat({ roomId, initialMessages }: Props) {
 
             return result;
         },
-        [appendMessage, roomId],
+        [appendMessage, currentAuthor, roomId],
     );
 
     return {

@@ -1,11 +1,13 @@
 "use client";
 
 import { Box, BoxColumn } from "@/components/ui";
+import { useChatScroll } from "@/features/rooms/hooks/useChatScroll";
 import { useRoomChat } from "@/features/rooms/hooks/useRoomChat";
 import type {
     RoomPageMember,
     RoomPageMessage,
 } from "@/features/rooms/types/room";
+import { useEffect } from "react";
 import ChatMessageInput from "./ChatMessageInput";
 import Messages from "./Messages";
 
@@ -24,18 +26,30 @@ function GroupChatPanel({
     initialMessages,
     members,
 }: Props) {
+    const { containerRef, scrollToBottom } = useChatScroll();
+
+    const currentAuthor =
+        members.find((member) => member.member_id === currentUserId)
+            ?.user_profile ?? null;
+
     const { messages, send, isConnected } = useRoomChat({
         roomId,
         initialMessages,
+        currentAuthor,
     });
 
-    messages.concat([messages[0]]);
+    useEffect(() => {
+        scrollToBottom();
+    }, [messages.length, scrollToBottom]);
 
     return (
         <BoxColumn className="h-full min-h-0 p-2">
             <p>{roomName}</p>
 
-            <Box className="min-h-0 flex-1 overflow-y-auto">
+            <Box
+                ref={containerRef}
+                className="min-h-0 flex-1 overflow-y-auto"
+            >
                 <Messages
                     currentUserId={currentUserId}
                     messages={messages}
