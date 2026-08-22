@@ -46,6 +46,10 @@
     --radius-2xl: calc(var(--radius) * 1.8);
     --radius-3xl: calc(var(--radius) * 2.2);
     --radius-4xl: calc(var(--radius) * 2.6);
+    --color-message-own: var(--message-own);
+    --color-message-own-foreground: var(--message-own-foreground);
+    --color-message-other: var(--message-other);
+    --color-message-other-foreground: var(--message-other-foreground);
 }
 
 :root {
@@ -85,6 +89,11 @@
     --sidebar-ring: var(--ring);
     --background: oklch(0.209 0 0);
     --foreground: oklch(0.8234 0 0);
+    --message-own: #343a46;
+    --message-own-foreground: #f1f3f5;
+
+    --message-other: #292b30;
+    --message-other-foreground: #e4e7eb;
 }
 
 .dark {

@@ -99,3 +99,23 @@ export {
     TooltipProvider,
     TooltipTrigger,
 } from "./Tooltip";
+
+export {
+    Message,
+    MessageAvatar,
+    MessageContent,
+    MessageFooter,
+    MessageGroup,
+    MessageHeader,
+} from "./Message";
+
+export {
+    Avatar,
+    AvatarBadge,
+    AvatarFallback,
+    AvatarGroup,
+    AvatarGroupCount,
+    AvatarImage,
+} from "./Avatar";
+
+export { Bubble, BubbleContent, BubbleGroup, BubbleReactions } from "./Bubble";

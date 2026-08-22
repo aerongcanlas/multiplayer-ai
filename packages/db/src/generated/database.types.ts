@@ -16,21 +16,21 @@ export type Database = {
     Tables: {
       message: {
         Row: {
-          author_id: string | null
+          author_id: string
           created_at: string
           id: string
           room_id: string
           text: string
         }
         Insert: {
-          author_id?: string | null
+          author_id: string
           created_at?: string
           id?: string
           room_id: string
           text: string
         }
         Update: {
-          author_id?: string | null
+          author_id?: string
           created_at?: string
           id?: string
           room_id?: string

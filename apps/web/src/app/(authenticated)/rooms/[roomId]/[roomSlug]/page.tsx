@@ -6,8 +6,37 @@ import {
     ResizablePanel,
     ResizablePanelGroup,
 } from "@/components/ui";
+import { getCurrentUser } from "@/features/auth/server/getCurrentUser";
+import { getRoomPageData } from "@/features/rooms/queries/roomPageQueries";
+import { notFound, redirect } from "next/navigation";
 
-function RoomPage() {
+interface Props {
+    params: Promise<{
+        roomId: string;
+        roomSlug: string;
+    }>;
+}
+
+async function RoomPage({ params }: Props) {
+    const { roomId, roomSlug } = await params;
+    const user = await getCurrentUser();
+    if (user === null) {
+        redirect("/auth/login");
+    }
+
+    const roomPageData = await getRoomPageData(roomId, user.id);
+
+    if (roomPageData === null) {
+        notFound();
+    }
+
+    if (roomPageData.room.slug !== roomSlug) {
+        redirect(`/rooms/${roomPageData.room.id}/${roomPageData.room.slug}`);
+    }
+
+    const members = roomPageData.members;
+    const messages = roomPageData.messages;
+
     return (
         <ResizablePanelGroup
             orientation="horizontal"
@@ -19,7 +48,9 @@ function RoomPage() {
             >
                 <AIActivityPanel />
             </ResizablePanel>
+
             <ResizableHandle />
+
             <ResizablePanel
                 defaultSize="55%"
                 minSize="30%"
@@ -29,7 +60,14 @@ function RoomPage() {
                         defaultSize="70%"
                         minSize="30%"
                     >
-                        <GroupChatPanel />
+                        <GroupChatPanel
+                            key={roomId}
+                            roomId={roomId}
+                            roomName={roomPageData.room.name}
+                            currentUserId={user.id}
+                            initialMessages={messages}
+                            members={members}
+                        />
                     </ResizablePanel>
 
                     <ResizableHandle />
