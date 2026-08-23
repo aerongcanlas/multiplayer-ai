@@ -9,12 +9,14 @@ import type {
 } from "@/features/rooms/types/room";
 import { useEffect } from "react";
 import ChatMessageInput from "./ChatMessageInput";
+import InviteUserModal from "./InviteUserModal";
 import Messages from "./Messages";
 
 interface Props {
     roomId: string;
     roomName: string;
     currentUserId: string;
+    currentUserIsAdmin: boolean;
     initialMessages: RoomPageMessage[];
     members: RoomPageMember[];
 }
@@ -23,6 +25,7 @@ function GroupChatPanel({
     roomId,
     roomName,
     currentUserId,
+    currentUserIsAdmin,
     initialMessages,
     members,
 }: Props) {
@@ -44,7 +47,10 @@ function GroupChatPanel({
 
     return (
         <BoxColumn className="h-full min-h-0 p-2">
-            <p>{roomName}</p>
+            <Box className="flex items-center justify-between gap-2 px-1">
+                <p>{roomName}</p>
+                {currentUserIsAdmin && <InviteUserModal roomId={roomId} />}
+            </Box>
 
             <Box
                 ref={containerRef}

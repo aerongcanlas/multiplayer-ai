@@ -65,6 +65,9 @@ async function RoomPage({ params }: Props) {
                             roomId={roomId}
                             roomName={roomPageData.room.name}
                             currentUserId={user.id}
+                            currentUserIsAdmin={
+                                roomPageData.currentMembership.isAdmin
+                            }
                             initialMessages={messages}
                             members={members}
                         />
