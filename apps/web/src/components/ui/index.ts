@@ -76,6 +76,7 @@ export {
     SidebarTrigger,
     useSidebar,
 } from "./Sidebar";
+export { Markdown } from "./Markdown";
 export { Spinner } from "./Spinner";
 export { TextBox } from "./TextBox";
 export {

@@ -1,6 +1,11 @@
+"use client";
+
 import { Box, Spinner, TextBox } from "@/components/ui";
+import { cn } from "@/lib/utils";
 import type { RunTools } from "@/features/runs/types/runMessage";
 import type { ToolUIPart } from "ai";
+import { ChevronDownIcon } from "lucide-react";
+import { useState } from "react";
 
 interface Props {
     part: ToolUIPart<Pick<RunTools, "webSearch">>;
@@ -15,15 +20,28 @@ function hostname(url: string): string {
 }
 
 function SearchResultsCard({ part }: Props) {
+    const [open, setOpen] = useState(false);
     const query = part.input?.query;
     const results = part.state === "output-available" ? part.output.results : [];
 
     return (
         <Box className="m-2 rounded-xl border border-white/10 bg-[#1E1E1E] px-3 py-2.5 text-sm">
-            <TextBox className="text-white/80">
+            <button
+                type="button"
+                className="flex w-full items-center gap-1.5 text-white/80"
+                onClick={() => setOpen(!open)}
+            >
+                <ChevronDownIcon
+                    className={cn("size-3.5 shrink-0 transition-transform", !open && "-rotate-90")}
+                />
                 <span className="font-medium">webSearch</span>
-                {query && <span className="text-white/50"> — {query}</span>}
-            </TextBox>
+                {query && <span className="truncate text-white/50"> — {query}</span>}
+                {part.state === "output-available" && results.length > 0 && (
+                    <span className="ml-auto shrink-0 text-xs text-white/30">
+                        {results.length}
+                    </span>
+                )}
+            </button>
 
             {part.state === "output-error" && (
                 <TextBox className="mt-1.5 text-red-400/80">{part.errorText}</TextBox>
@@ -36,13 +54,13 @@ function SearchResultsCard({ part }: Props) {
                 </div>
             )}
 
-            {part.state === "output-available" && results.length === 0 && (
+            {open && part.state === "output-available" && results.length === 0 && (
                 <TextBox className="mt-1.5 text-white/40">
                     No results — search unavailable.
                 </TextBox>
             )}
 
-            {part.state === "output-available" && results.length > 0 && (
+            {open && part.state === "output-available" && results.length > 0 && (
                 <ul className="mt-1.5 space-y-1.5">
                     {results.map((result) => (
                         <li key={result.url}>
