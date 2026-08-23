@@ -42,3 +42,7 @@ export type SendMessageResult =
           message: RoomPageMessage;
       }
     | { success: false; error: string };
+
+export type RoomChatMessage = RoomPageMessage & {
+    deliveryStatus?: "sending" | "failed";
+};

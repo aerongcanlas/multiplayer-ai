@@ -7,13 +7,14 @@ import {
     BubbleContent,
     MessageAvatar,
     MessageContent,
+    MessageFooter,
 } from "@/components/ui";
-import type { RoomPageMessage } from "@/features/rooms/types/room";
+import type { RoomChatMessage } from "@/features/rooms/types/room";
 import { Message } from "./ui";
 
 interface Props {
     currentUserId: string;
-    messages: RoomPageMessage[];
+    messages: RoomChatMessage[];
 }
 
 function Messages({ messages, currentUserId }: Props) {
@@ -52,6 +53,27 @@ function Messages({ messages, currentUserId }: Props) {
                             >
                                 <BubbleContent>{message.text}</BubbleContent>
                             </Bubble>
+                            {message.deliveryStatus === "sending" && (
+                                <MessageFooter>
+                                    <span
+                                        role="status"
+                                        className="text-muted-foreground"
+                                    >
+                                        Sending...
+                                    </span>
+                                </MessageFooter>
+                            )}
+
+                            {message.deliveryStatus === "failed" && (
+                                <MessageFooter>
+                                    <span
+                                        role="alert"
+                                        className="text-destructive"
+                                    >
+                                        Failed to send
+                                    </span>
+                                </MessageFooter>
+                            )}
                         </MessageContent>
                     </Message>
                 ))}
