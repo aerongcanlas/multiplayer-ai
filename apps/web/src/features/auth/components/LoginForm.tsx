@@ -13,10 +13,11 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 
-export function LoginForm({
-    className,
-    ...props
-}: React.ComponentPropsWithoutRef<"div">) {
+interface LoginFormProps extends React.ComponentPropsWithoutRef<"div"> {
+    next?: string;
+}
+
+export function LoginForm({ className, next = "/", ...props }: LoginFormProps) {
     const [error, setError] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
 
@@ -30,7 +31,7 @@ export function LoginForm({
             const { error } = await supabase.auth.signInWithOAuth({
                 provider: "github",
                 options: {
-                    redirectTo: `${window.location.origin}/auth/oauth?next=/`,
+                    redirectTo: `${window.location.origin}/auth/oauth?next=${encodeURIComponent(next)}`,
                 },
             });
 
@@ -59,7 +60,10 @@ export function LoginForm({
                     <form onSubmit={handleSocialLogin}>
                         <div className="flex flex-col gap-6">
                             {error && (
-                                <p className="text-sm text-destructive-500">
+                                <p
+                                    role="alert"
+                                    className="text-sm text-destructive-500"
+                                >
                                     {error}
                                 </p>
                             )}

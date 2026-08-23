@@ -119,3 +119,15 @@ export {
 } from "./Avatar";
 
 export { Bubble, BubbleContent, BubbleGroup, BubbleReactions } from "./Bubble";
+export {
+    Dialog,
+    DialogClose,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogOverlay,
+    DialogPortal,
+    DialogTitle,
+    DialogTrigger,
+} from "./Dialog";

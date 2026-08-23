@@ -74,6 +74,67 @@ export type Database = {
         }
         Relationships: []
       }
+      room_invite: {
+        Row: {
+          accepted_at: string | null
+          accepted_by: string | null
+          created_at: string
+          created_by: string
+          expires_at: string
+          id: string
+          invited_email: string | null
+          revoked_at: string | null
+          room_id: string
+          token_hash: string
+        }
+        Insert: {
+          accepted_at?: string | null
+          accepted_by?: string | null
+          created_at?: string
+          created_by: string
+          expires_at: string
+          id?: string
+          invited_email?: string | null
+          revoked_at?: string | null
+          room_id: string
+          token_hash: string
+        }
+        Update: {
+          accepted_at?: string | null
+          accepted_by?: string | null
+          created_at?: string
+          created_by?: string
+          expires_at?: string
+          id?: string
+          invited_email?: string | null
+          revoked_at?: string | null
+          room_id?: string
+          token_hash?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "room_invite_accepted_by_fkey"
+            columns: ["accepted_by"]
+            isOneToOne: false
+            referencedRelation: "user_profile"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "room_invite_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profile"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "room_invite_room_id_fkey"
+            columns: ["room_id"]
+            isOneToOne: false
+            referencedRelation: "room"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       room_member: {
         Row: {
           created_at: string
@@ -139,7 +200,14 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      accept_room_invite: {
+        Args: { p_token_hash: string; p_user_id: string }
+        Returns: {
+          accepted_room_id: string
+          accepted_room_slug: string
+          status: string
+        }[]
+      }
     }
     Enums: {
       [_ in never]: never

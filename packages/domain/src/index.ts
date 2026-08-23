@@ -1,7 +1,15 @@
 export { createMessageSchema, isMessage } from "./message";
 export type { CreateMessageInput, Message } from "./message";
-export { createRoomSchema } from "./rooms";
-export type { CreateRoomInput } from "./rooms";
+export {
+    acceptRoomInviteSchema,
+    createRoomInviteSchema,
+    createRoomSchema,
+} from "./rooms";
+export type {
+    AcceptRoomInviteInput,
+    CreateRoomInput,
+    CreateRoomInviteInput,
+} from "./rooms";
 export {
     effortLevels,
     isModelKey,
