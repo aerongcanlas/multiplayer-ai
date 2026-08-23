@@ -47,7 +47,7 @@ function GroupChatPanel({
 
     return (
         <BoxColumn className="h-full min-h-0 p-2">
-            <Box className="flex items-center justify-between gap-2 px-1">
+            <Box className="flex items-center justify-between gap-2 px-1 m-2">
                 <p>{roomName}</p>
                 {currentUserIsAdmin && <InviteUserModal roomId={roomId} />}
             </Box>
