@@ -1,5 +1,5 @@
 # Multiplayer AI
-[multiplayer-ai-bay.vercel.app](multiplayer-ai-bay.vercel.app)
+[multiplayer-ai-bay.vercel.app](https://multiplayer-ai-bay.vercel.app)
 ## Quick Start
 
 ```powershell
