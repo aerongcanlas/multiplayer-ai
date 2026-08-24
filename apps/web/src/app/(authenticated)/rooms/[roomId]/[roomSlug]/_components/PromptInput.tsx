@@ -1,8 +1,8 @@
-'use client';
+"use client";
 
-import { Button, Input } from '@/components/ui';
-import { cn } from '@/lib/utils';
-import { type SubmitEvent, useState } from 'react';
+import { Button, Input } from "@/components/ui";
+import { cn } from "@/lib/utils";
+import { type SubmitEvent, useState } from "react";
 
 interface Props {
     className?: string;
@@ -11,13 +11,13 @@ interface Props {
     onSubmit: (text: string) => Promise<void> | void;
 }
 
-function TextEntryBubble({
+function PromptInput({
     onSubmit,
     className,
     disabled = false,
-    placeholder = 'Message the room',
+    placeholder = "Message the room",
 }: Props) {
-    const [text, setText] = useState('');
+    const [text, setText] = useState("");
 
     async function handleSubmit(event: SubmitEvent<HTMLFormElement>) {
         event.preventDefault();
@@ -25,7 +25,7 @@ function TextEntryBubble({
         const nextText = text.trim();
         if (disabled || nextText.length === 0) return;
 
-        setText('');
+        setText("");
 
         try {
             await onSubmit(nextText);
@@ -37,13 +37,13 @@ function TextEntryBubble({
     return (
         <form
             className={cn(
-                'flex w-full items-center gap-2 rounded-2xl bg-[#2A2A2A] p-2',
+                "flex w-full items-center gap-2 rounded-2xl bg-[#2A2A2A] p-2",
                 className,
             )}
             onSubmit={handleSubmit}
         >
             <Input
-                aria-label='Message'
+                aria-label="Message"
                 disabled={disabled}
                 maxLength={2_000}
                 placeholder={placeholder}
@@ -52,7 +52,7 @@ function TextEntryBubble({
             />
             <Button
                 disabled={disabled || text.trim().length === 0}
-                type='submit'
+                type="submit"
             >
                 Send
             </Button>
@@ -60,4 +60,4 @@ function TextEntryBubble({
     );
 }
 
-export default TextEntryBubble;
+export default PromptInput;

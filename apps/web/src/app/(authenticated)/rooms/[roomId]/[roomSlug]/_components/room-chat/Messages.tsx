@@ -5,12 +5,12 @@ import {
     BoxColumn,
     Bubble,
     BubbleContent,
+    Message,
     MessageAvatar,
     MessageContent,
     MessageFooter,
 } from "@/components/ui";
 import type { RoomChatMessage } from "@/features/rooms/types/room";
-import { Message } from "./ui";
 
 interface Props {
     currentUserId: string;

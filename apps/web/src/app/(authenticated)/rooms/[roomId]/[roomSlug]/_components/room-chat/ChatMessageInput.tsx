@@ -1,5 +1,6 @@
 "use client";
 
+import { Button, Input, toast } from "@/components/ui";
 import type { SendMessageResult } from "@/features/rooms/types/room";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
@@ -8,7 +9,6 @@ import {
 } from "@multiplayer-ai/domain";
 import { useRef } from "react";
 import { useForm } from "react-hook-form";
-import { Button, Input, toast } from "./ui";
 
 interface Props {
     disabled: boolean;

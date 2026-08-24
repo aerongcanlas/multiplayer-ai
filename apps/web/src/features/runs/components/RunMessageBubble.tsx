@@ -6,7 +6,7 @@ interface Props {
     className?: string;
     message: Pick<Message, "text">;
 }
-function ChatMessageBubble({ className, message }: Props) {
+function RunMessageBubble({ className, message }: Props) {
     return (
         <BoxRow
             className={cn(
@@ -18,4 +18,4 @@ function ChatMessageBubble({ className, message }: Props) {
         </BoxRow>
     );
 }
-export default ChatMessageBubble;
+export default RunMessageBubble;

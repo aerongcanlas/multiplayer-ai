@@ -7,9 +7,9 @@ import {
     CardHeader,
     CardTitle,
 } from "@/components/ui";
+import { buttonVariants } from "@/components/ui/Button";
 import { JoinRoomLink } from "@/features/rooms/components/JoinRoomLink";
 import type { JoinedRoom } from "@/features/rooms/types/room";
-import { buttonVariants } from "./ui/Button";
 
 interface Props {
     title: string;

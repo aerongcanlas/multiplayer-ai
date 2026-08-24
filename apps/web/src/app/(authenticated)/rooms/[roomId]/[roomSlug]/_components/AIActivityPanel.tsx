@@ -4,14 +4,15 @@ import { BoxColumn, Button, TextBox } from "@/components/ui";
 import RunConversation from "@/features/runs/components/RunConversation";
 import RunModelSwitcher from "@/features/runs/components/RunModelSwitcher";
 import { useRoomRun } from "@/features/runs/hooks/useRoomRun";
-import TextEntryBubble from "./TextEntryBubble";
+import PromptInput from "./PromptInput";
 
 interface Props {
     roomId: string;
 }
 
 function AIActivityPanel({ roomId }: Props) {
-    const { messages, startRun, stop, status, model, setModel } = useRoomRun(roomId);
+    const { messages, startRun, stop, status, model, setModel } =
+        useRoomRun(roomId);
     const running = status === "submitted" || status === "streaming";
 
     return (
@@ -35,7 +36,7 @@ function AIActivityPanel({ roomId }: Props) {
                 </div>
             </div>
             <RunConversation messages={messages} />
-            <TextEntryBubble
+            <PromptInput
                 className="m-2 mt-2 rounded-2xl shrink-0 h-20"
                 placeholder="What should the agent do?"
                 disabled={status !== "ready"}

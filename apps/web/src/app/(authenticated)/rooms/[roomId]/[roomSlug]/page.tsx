@@ -1,6 +1,3 @@
-import AIActivityPanel from "@/components/AIActivityPanel";
-import GroupChatPanel from "@/components/GroupChatPanel";
-import PromptVotePanel from "@/components/PromptVotePanel";
 import {
     ResizableHandle,
     ResizablePanel,
@@ -9,6 +6,9 @@ import {
 import { getCurrentUser } from "@/features/auth/server/getCurrentUser";
 import { getRoomPageData } from "@/features/rooms/queries/roomPageQueries";
 import { notFound, redirect } from "next/navigation";
+import AIActivityPanel from "./_components/AIActivityPanel";
+import GroupChatPanel from "./_components/GroupChatPanel";
+import PromptVotePanel from "./_components/PromptVotePanel";
 
 interface Props {
     params: Promise<{

@@ -8,9 +8,9 @@ import type {
     RoomPageMessage,
 } from "@/features/rooms/types/room";
 import { useEffect } from "react";
-import ChatMessageInput from "./ChatMessageInput";
-import InviteUserModal from "./InviteUserModal";
-import Messages from "./Messages";
+import ChatMessageInput from "./room-chat/ChatMessageInput";
+import InviteUserModal from "./room-chat/InviteUserModal";
+import Messages from "./room-chat/Messages";
 
 interface Props {
     roomId: string;

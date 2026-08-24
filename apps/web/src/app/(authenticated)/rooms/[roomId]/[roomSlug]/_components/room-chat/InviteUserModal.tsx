@@ -1,8 +1,5 @@
 "use client";
 
-import { createRoomInvite } from "@/features/rooms/actions/createRoomInvite";
-import { CheckIcon, CopyIcon, UserPlusIcon } from "lucide-react";
-import { useState, useTransition } from "react";
 import {
     Box,
     Button,
@@ -14,7 +11,10 @@ import {
     DialogTitle,
     DialogTrigger,
     Input,
-} from "./ui";
+} from "@/components/ui";
+import { createRoomInvite } from "@/features/rooms/actions/createRoomInvite";
+import { CheckIcon, CopyIcon, UserPlusIcon } from "lucide-react";
+import { useState, useTransition } from "react";
 
 interface Props {
     roomId: string;
