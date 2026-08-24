@@ -1,7 +1,7 @@
 "use client";
 
-import ChatMessageBubble from "@/components/ChatMessageBubble";
 import { Box, BoxColumn } from "@/components/ui";
+import RunMessageBubble from "@/features/runs/components/RunMessageBubble";
 import type { RunUIMessage } from "@/features/runs/types/runMessage";
 import { useEffect, useRef } from "react";
 import RunMessageParts from "./RunMessageParts";
@@ -39,12 +39,14 @@ function RunConversation({ messages }: Props) {
             <BoxColumn>
                 {messages.map((message) =>
                     message.role === "user" ? (
-                        <ChatMessageBubble
+                        <RunMessageBubble
                             key={message.id}
                             className="self-end"
                             message={{
                                 text: message.parts
-                                    .map((part) => (part.type === "text" ? part.text : ""))
+                                    .map((part) =>
+                                        part.type === "text" ? part.text : "",
+                                    )
                                     .join(""),
                             }}
                         />

@@ -1,4 +1,3 @@
-import RoomList from "@/components/RoomList";
 import { BoxColumn } from "@/components/ui";
 import { Button } from "@/components/ui/Button";
 import {
@@ -10,6 +9,7 @@ import {
     EmptyTitle,
 } from "@/components/ui/Empty";
 import { getCurrentUser } from "@/features/auth/server/getCurrentUser";
+import RoomList from "@/features/rooms/components/RoomList";
 import { getJoinedRooms } from "@/features/rooms/queries/getJoinedRooms";
 import Link from "next/link";
 import { redirect } from "next/navigation";

@@ -1,14 +1,14 @@
-import { AppSidebar } from "@/components/AppSidebar";
-import RoomList from "@/components/RoomList";
 import {
     SidebarInset,
     SidebarProvider,
     SidebarTrigger,
 } from "@/components/ui/Sidebar";
 import { getCurrentUser } from "@/features/auth/server/getCurrentUser";
+import RoomList from "@/features/rooms/components/RoomList";
 import { getJoinedRooms } from "@/features/rooms/queries/getJoinedRooms";
 import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
+import { AppSidebar } from "./_components/AppSidebar";
 
 type AuthenticatedLayoutProps = {
     children: ReactNode;
