@@ -1,4 +1,4 @@
-import { Box, Spinner, TextBox } from "@/components/ui";
+import { Box, Markdown, Spinner, TextBox } from "@/components/ui";
 import type { RunTools } from "@/features/runs/types/runMessage";
 import type { ToolUIPart } from "ai";
 
@@ -35,7 +35,7 @@ function DelegationCard({ part }: Props) {
 
             {part.state === "output-available" && (
                 <div className="mt-1.5 space-y-1.5">
-                    <TextBox className="text-white/70">{part.output.summary}</TextBox>
+                    <Markdown className="text-white/70">{part.output.summary}</Markdown>
                     {part.output.findings.length > 0 && (
                         <ul className="list-disc space-y-0.5 pl-4 text-white/50">
                             {part.output.findings.map((finding) => (
