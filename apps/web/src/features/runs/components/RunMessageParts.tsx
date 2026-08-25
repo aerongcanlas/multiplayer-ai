@@ -1,4 +1,4 @@
-import { TextBox } from "@/components/ui";
+import { Markdown, TextBox } from "@/components/ui";
 import type { RunUIMessage } from "@/features/runs/types/runMessage";
 import { isToolUIPart } from "ai";
 import DelegationCard from "./DelegationCard";
@@ -24,12 +24,13 @@ function RunMessageParts({ message }: Props) {
                 if (part.type === "text") {
                     if (!part.text) return null;
                     return (
-                        <TextBox
+                        <Markdown
                             key={key}
-                            className="m-2 whitespace-pre-wrap"
+                            className="m-2 text-white/80"
+                            isAnimating={part.state === "streaming"}
                         >
                             {part.text}
-                        </TextBox>
+                        </Markdown>
                     );
                 }
 

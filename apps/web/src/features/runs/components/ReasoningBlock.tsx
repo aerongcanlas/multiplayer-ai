@@ -1,6 +1,6 @@
 "use client";
 
-import { Box, TextBox } from "@/components/ui";
+import { Box, Markdown } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import type { ReasoningUIPart } from "ai";
 import { ChevronDownIcon } from "lucide-react";
@@ -13,7 +13,7 @@ interface Props {
 function ReasoningBlock({ part }: Props) {
     const [userToggled, setUserToggled] = useState<boolean | null>(null);
     const streaming = part.state === "streaming";
-    const open = userToggled ?? streaming;
+    const open = userToggled ?? false;
 
     if (!part.text) return null;
 
@@ -33,9 +33,9 @@ function ReasoningBlock({ part }: Props) {
                 <span>{streaming ? "Thinking…" : "Thought"}</span>
             </button>
             {open && (
-                <TextBox className="mt-1.5 whitespace-pre-wrap text-white/50">
+                <Markdown className="mt-1.5 text-xs text-white/50" isAnimating={streaming}>
                     {part.text}
-                </TextBox>
+                </Markdown>
             )}
         </Box>
     );
