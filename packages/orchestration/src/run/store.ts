@@ -1,13 +1,16 @@
-import type { RunRecord, RunStore } from "./ports";
+import { emptyThread, type RunStore, type ThreadRecord } from "./ports";
 
 export function createInMemoryRunStore(): RunStore {
-    const records = new Map<string, RunRecord>();
+    const threads = new Map<string, ThreadRecord>();
     return {
-        async load(runId) {
-            return records.get(runId);
+        async load(roomId) {
+            return threads.get(roomId) ?? emptyThread();
         },
-        async save(record) {
-            records.set(record.input.runId, record);
+        async save(roomId, record) {
+            threads.set(roomId, record);
+        },
+        async clear(roomId) {
+            threads.delete(roomId);
         },
     };
 }

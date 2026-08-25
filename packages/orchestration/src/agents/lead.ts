@@ -48,9 +48,15 @@ export function buildLead(
         },
         stopWhen: [
             isStepCount(deps.profile.leadMaxSteps),
-            withinTokenBudget(deps.profile.tokenBudget),
+            withinTokenBudget(deps.profile.outputTokenBudget),
         ],
-        prepareStep: ({ messages }) => ({ messages: pruneMessages({ messages }) }),
+        prepareStep: ({ messages }) => ({
+            messages: pruneMessages({
+                messages,
+                reasoning: "all",
+                toolCalls: "before-last-2-messages",
+            }),
+        }),
         providerOptions,
     });
 }

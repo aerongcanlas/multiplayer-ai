@@ -1,8 +1,11 @@
-export { startRun, resumeRun, cancelRun } from "./run/run";
+export { runTurn, cancelRun } from "./run/run";
 export type { RunDeps } from "./run/run";
 export { resolveProfile } from "./config/profile";
 export type { Profile } from "./config/profile";
 export { createInMemoryRunStore } from "./run/store";
 export { createScriptedRunModel } from "./testing/mockModel";
-export type { EventSink, RunInput, RunRecord, RunStore } from "./run/ports";
+export { buildReplay } from "./run/replay";
+export type { PruneStrength, ReplayResult } from "./run/replay";
+export { emptyThread } from "./run/ports";
+export type { EventSink, RunInput, RunStore, ThreadRecord } from "./run/ports";
 export type { ToolDeps } from "./tools";

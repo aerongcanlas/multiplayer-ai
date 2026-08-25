@@ -1,19 +1,38 @@
 "use client";
 
+import type { RunStatus } from "@multiplayer-ai/domain";
 import { BoxColumn, Button, TextBox } from "@/components/ui";
+import ContextWindowBar from "@/features/runs/components/ContextWindowBar";
 import RunConversation from "@/features/runs/components/RunConversation";
 import RunModelSwitcher from "@/features/runs/components/RunModelSwitcher";
 import { useRoomRun } from "@/features/runs/hooks/useRoomRun";
+import type { RunUIMessage } from "@/features/runs/types/runMessage";
+import { useState } from "react";
 import PromptInput from "./PromptInput";
 
 interface Props {
     roomId: string;
+    initialMessages?: Array<RunUIMessage>;
+    initialStatus?: RunStatus;
 }
 
-function AIActivityPanel({ roomId }: Props) {
-    const { messages, startRun, stop, status, model, setModel } =
-        useRoomRun(roomId);
+function AIActivityPanel({ roomId, initialMessages, initialStatus }: Props) {
+    const { messages, startRun, newThread, stop, status, model, setModel } =
+        useRoomRun({ roomId, initialMessages });
+    const [threadStatus, setThreadStatus] = useState<RunStatus>(
+        initialStatus ?? "finished",
+    );
     const running = status === "submitted" || status === "streaming";
+
+    function handleStartRun(text: string) {
+        setThreadStatus("finished");
+        return startRun(text);
+    }
+
+    async function handleNewThread() {
+        await newThread();
+        setThreadStatus("finished");
+    }
 
     return (
         <BoxColumn className="h-full min-h-0 p-2">
@@ -29,18 +48,33 @@ function AIActivityPanel({ roomId }: Props) {
                             Stop
                         </Button>
                     )}
+                    <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={handleNewThread}
+                        disabled={running}
+                    >
+                        New Thread
+                    </Button>
                     <RunModelSwitcher
                         value={model}
                         onChange={setModel}
                     />
                 </div>
             </div>
-            <RunConversation messages={messages} />
+            <RunConversation
+                messages={messages}
+                incomplete={threadStatus !== "finished"}
+            />
+            <ContextWindowBar
+                messages={messages}
+                model={model}
+            />
             <PromptInput
                 className="m-2 mt-2 rounded-2xl shrink-0 h-20"
                 placeholder="What should the agent do?"
                 disabled={status !== "ready"}
-                onSubmit={(text) => startRun(text)}
+                onSubmit={(text) => handleStartRun(text)}
             />
         </BoxColumn>
     );

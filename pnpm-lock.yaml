@@ -166,6 +166,9 @@ importers:
 
   packages/domain:
     dependencies:
+      ai:
+        specifier: ^7.0.66
+        version: 7.0.66(zod@4.4.3)
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -203,6 +206,9 @@ importers:
 
   packages/orchestration:
     dependencies:
+      '@ai-sdk/provider':
+        specifier: ^4.0.7
+        version: 4.0.7
       '@multiplayer-ai/domain':
         specifier: workspace:*
         version: link:../domain
@@ -216,9 +222,6 @@ importers:
         specifier: ^4.4.3
         version: 4.4.3
     devDependencies:
-      '@ai-sdk/provider':
-        specifier: ^4.0.7
-        version: 4.0.7
       '@ai-sdk/provider-utils':
         specifier: 5.0.27
         version: 5.0.27(zod@4.4.3)

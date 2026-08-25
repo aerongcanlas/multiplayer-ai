@@ -98,9 +98,18 @@ function RunMessageParts({ message }: Props) {
                     );
                 }
 
-                // run.delegated / run.delegate.done / run.delegate.failed / run.finished
-                // carry no extra UI — the native tool-delegate part and the report text
-                // already cover it.
+                if (part.type === "data-run.compacted") {
+                    return (
+                        <TextBox
+                            key={key}
+                            className="mx-2 text-xs text-white/40"
+                        >
+                            Context compacted — older detail was dropped to stay in
+                            the window.
+                        </TextBox>
+                    );
+                }
+
                 return null;
             })}
         </>

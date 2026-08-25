@@ -1,4 +1,4 @@
-import type { RunEvent } from "@multiplayer-ai/domain";
+import type { RunEvent, RunMessageMetadata } from "@multiplayer-ai/domain";
 import type { EventSink } from "@multiplayer-ai/orchestration";
 import type { InferUIMessageChunk, UIMessageStreamWriter } from "ai";
 import type { RunUIMessage } from "@/features/runs/types/runMessage";
@@ -21,6 +21,16 @@ export function createRunEventSink(
     },
     merge(stream) {
       writer.merge(stream as ReadableStream<InferUIMessageChunk<RunUIMessage>>);
+    },
+    setMessageMetadata(metadata: RunMessageMetadata) {
+      try {
+        writer.write({
+          type: "message-metadata",
+          messageMetadata: metadata,
+        } as InferUIMessageChunk<RunUIMessage>);
+      } catch {
+        // Stream may already be closed (e.g. client disconnected); safe to ignore.
+      }
     },
   };
 }

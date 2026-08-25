@@ -4,6 +4,7 @@ import {
     ResizablePanelGroup,
 } from "@/components/ui";
 import { getCurrentUser } from "@/features/auth/server/getCurrentUser";
+import { getRunStore } from "@/features/runs/server/runStore";
 import { getRoomPageData } from "@/features/rooms/queries/roomPageQueries";
 import { notFound, redirect } from "next/navigation";
 import AIActivityPanel from "./_components/AIActivityPanel";
@@ -36,6 +37,7 @@ async function RoomPage({ params }: Props) {
 
     const members = roomPageData.members;
     const messages = roomPageData.messages;
+    const thread = await getRunStore().load(roomId);
 
     return (
         <ResizablePanelGroup
@@ -46,7 +48,12 @@ async function RoomPage({ params }: Props) {
                 defaultSize="27%"
                 minSize="35%"
             >
-                <AIActivityPanel roomId={roomId} />
+                <AIActivityPanel
+                    key={roomId}
+                    roomId={roomId}
+                    initialMessages={thread.messages}
+                    initialStatus={thread.status}
+                />
             </ResizablePanel>
 
             <ResizableHandle />
