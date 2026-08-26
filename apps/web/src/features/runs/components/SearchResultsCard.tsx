@@ -2,7 +2,7 @@
 
 import { Box, Spinner, TextBox } from "@/components/ui";
 import { cn } from "@/lib/utils";
-import type { RunTools } from "@/features/runs/types/runMessage";
+import type { RunTools } from "@multiplayer-ai/domain";
 import type { ToolUIPart } from "ai";
 import { ChevronDownIcon } from "lucide-react";
 import { useState } from "react";

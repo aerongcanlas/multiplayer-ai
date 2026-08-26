@@ -1,5 +1,5 @@
 import { Box, Markdown, Spinner, TextBox } from "@/components/ui";
-import type { RunTools } from "@/features/runs/types/runMessage";
+import type { RunTools } from "@multiplayer-ai/domain";
 import type { ToolUIPart } from "ai";
 
 interface Props {

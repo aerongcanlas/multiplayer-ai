@@ -10,14 +10,25 @@ export type {
     CreateRoomInput,
     CreateRoomInviteInput,
 } from "./rooms";
-export type { RunMessageMetadata, RunTools, RunUIMessage } from "./runMessage";
+export type {
+    RunMessageAuthor,
+    RunMessageMetadata,
+    RunTools,
+    RunUIMessage,
+    RunUsageMetadata,
+} from "./runMessage";
 export {
     effortLevels,
     getContextWindow,
     getModelProvider,
     isModelKey,
     modelKeys,
+    parseRunThreadEvent,
+    refusalNotice,
+    RUN_THREAD_EVENT,
+    runRefusalSchema,
     runStatuses,
+    runThreadTopic,
     ScoutBrief,
     startRunRequestSchema,
     Verdict,
@@ -29,7 +40,9 @@ export type {
     PersonaId,
     RunDataTypes,
     RunEvent,
+    RunRefusal,
     RunStatus,
+    RunThreadEvent,
     SearchFn,
     SearchOptions,
     SearchResult,

@@ -12,10 +12,19 @@ export type RunTools = {
     };
 };
 
-/** Recorded on an assistant message once its call completes. Absent on user messages and on assistant messages from mock mode. */
-export type RunMessageMetadata = {
+export type RunMessageAuthor = {
+    id: string;
+    name: string;
+};
+
+export type RunUsageMetadata = {
     inputTokens: number;
     model: ModelKey;
+};
+
+export type RunMessageMetadata = {
+    author?: RunMessageAuthor;
+    usage?: RunUsageMetadata;
 };
 
 export type RunUIMessage = UIMessage<RunMessageMetadata, RunDataTypes, RunTools>;

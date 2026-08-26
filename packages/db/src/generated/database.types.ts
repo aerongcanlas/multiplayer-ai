@@ -7,13 +7,104 @@ export type Json =
   | Json[]
 
 export type Database = {
-  // Allows to automatically instantiate createClient with right options
-  // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.15"
+    PostgrestVersion: "14.17"
   }
   public: {
     Tables: {
+      ai_message: {
+        Row: {
+          author_id: string | null
+          created_at: string
+          id: string
+          metadata: Json | null
+          parts: Json
+          role: string
+          seq: number
+          thread_id: string
+        }
+        Insert: {
+          author_id?: string | null
+          created_at?: string
+          id: string
+          metadata?: Json | null
+          parts: Json
+          role: string
+          seq?: number
+          thread_id: string
+        }
+        Update: {
+          author_id?: string | null
+          created_at?: string
+          id?: string
+          metadata?: Json | null
+          parts?: Json
+          role?: string
+          seq?: number
+          thread_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_message_author_id_fkey"
+            columns: ["author_id"]
+            isOneToOne: false
+            referencedRelation: "user_profile"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_message_thread_id_fkey"
+            columns: ["thread_id"]
+            isOneToOne: false
+            referencedRelation: "ai_thread"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ai_thread: {
+        Row: {
+          created_at: string
+          id: string
+          retired_at: string | null
+          room_id: string
+          run_by: string | null
+          run_started_at: string | null
+          run_status: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          retired_at?: string | null
+          room_id: string
+          run_by?: string | null
+          run_started_at?: string | null
+          run_status?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          retired_at?: string | null
+          room_id?: string
+          run_by?: string | null
+          run_started_at?: string | null
+          run_status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_thread_room_id_fkey"
+            columns: ["room_id"]
+            isOneToOne: false
+            referencedRelation: "room"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_thread_run_by_fkey"
+            columns: ["run_by"]
+            isOneToOne: false
+            referencedRelation: "user_profile"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       message: {
         Row: {
           author_id: string

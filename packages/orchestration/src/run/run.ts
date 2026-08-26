@@ -9,6 +9,7 @@ import {
 } from "ai";
 import { buildLead, buildVerifier } from "../agents/lead";
 import { resolveProfile } from "../config/profile";
+import { attributeAuthors } from "./authorship";
 import { buildReplay } from "./replay";
 import type { EventSink, RunInput } from "./ports";
 import type { ToolDeps } from "../tools";
@@ -116,8 +117,10 @@ export async function runTurn(
       const finalStep = await result.finalStep;
       if (finalStep.usage.inputTokens !== undefined) {
         sink.setMessageMetadata?.({
-          inputTokens: finalStep.usage.inputTokens,
-          model: input.model,
+          usage: {
+            inputTokens: finalStep.usage.inputTokens,
+            model: input.model,
+          },
         } satisfies RunMessageMetadata);
       }
       return { responseMessages, text };
@@ -127,7 +130,8 @@ export async function runTurn(
   };
 
   try {
-    const initialReplay = await buildReplay(seedMessages, input.model);
+    const thread = attributeAuthors(seedMessages);
+    const initialReplay = await buildReplay(thread, input.model);
     await announceCompaction(initialReplay.compacted);
 
     let round;
@@ -135,7 +139,7 @@ export async function runTurn(
       round = await streamRound(initialReplay.modelMessages);
     } catch (error) {
       if (!isContextLengthError(error)) throw error;
-      const hardReplay = await buildReplay(seedMessages, input.model, "hard");
+      const hardReplay = await buildReplay(thread, input.model, "hard");
       await announceCompaction(hardReplay.compacted);
       round = await streamRound(hardReplay.modelMessages);
     }

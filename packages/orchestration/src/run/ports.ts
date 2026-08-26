@@ -3,6 +3,7 @@ import type {
     EffortLevel,
     ModelKey,
     RunEvent,
+    RunMessageAuthor,
     RunMessageMetadata,
     RunStatus,
     RunUIMessage,
@@ -19,25 +20,58 @@ export type RunInput = {
 export interface EventSink {
     emit(event: RunEvent): void | Promise<void>;
     merge?(stream: ReadableStream<UIMessageChunk>): void;
-    /** Attaches usage metadata to the assistant message currently being assembled. */
     setMessageMetadata?(metadata: RunMessageMetadata): void;
 }
 
-/** A room's durable AI panel conversation. Status reflects the outcome of the most recent run against it. */
-export type ThreadRecord = {
-    messages: Array<RunUIMessage>;
-    status: RunStatus;
+export type ThreadMessage = {
+    message: RunUIMessage;
+    seq: number;
 };
 
-const EMPTY_THREAD: ThreadRecord = { messages: [], status: "finished" };
+export type ThreadRecord = {
+    threadId: string;
+    messages: Array<RunUIMessage>;
+    status: RunStatus;
+    runBy: RunMessageAuthor | null;
+    lastSeq: number;
+};
+
+export type LockResult =
+    | { acquired: true; threadId: string; messages: Array<RunUIMessage> }
+    | { acquired: false; runBy: RunMessageAuthor | null };
+
+export type RetireResult =
+    | { retired: true; retiredThreadId: string; threadId: string }
+    | { retired: false; runBy: RunMessageAuthor | null };
+
+export type RunClaimOptions = {
+    /** When false the claim never loses — the caller's policy refuses nobody. */
+    exclusive?: boolean;
+};
+
+export const STALE_RUN_MS = 360_000;
 
 export interface RunStore {
-    /** Returns an empty, finished thread for a room that has never run — never undefined. */
-    load(roomId: string): Promise<ThreadRecord>;
-    save(roomId: string, record: ThreadRecord): Promise<void>;
-    clear(roomId: string): Promise<void>;
-}
-
-export function emptyThread(): ThreadRecord {
-    return EMPTY_THREAD;
+    loadFrom(
+        roomId: string,
+        actor: RunMessageAuthor,
+        fromSeq: number,
+    ): Promise<{
+        threadId: string;
+        status: RunStatus;
+        runBy: RunMessageAuthor | null;
+        messages: Array<ThreadMessage>;
+    }>;
+    /**
+     * One conditional update: succeeds only where no live run holds the thread. Pass
+     * `exclusive: false` to waive that predicate — see `features/runs/lock`.
+     */
+    acquireLock(
+        roomId: string,
+        actor: RunMessageAuthor,
+        options?: RunClaimOptions,
+    ): Promise<LockResult>;
+    upsertMessage(threadId: string, message: RunUIMessage): Promise<number>;
+    releaseLock(threadId: string, status: RunStatus): Promise<void>;
+    retire(roomId: string, actor: RunMessageAuthor): Promise<RetireResult>;
 }
