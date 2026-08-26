@@ -24,6 +24,8 @@ coverage/
 
 # local tools
 /.lavish/
+.playwright-cli
+/output
 docs/
 scripts/
 /.worktrees/
