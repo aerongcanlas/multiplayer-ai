@@ -4,8 +4,10 @@ import {
     ResizablePanelGroup,
 } from "@/components/ui";
 import { getCurrentUser } from "@/features/auth/server/getCurrentUser";
-import { getRunStore } from "@/features/runs/server/runStore";
+import { toRunActor } from "@/features/runs/server/runActor";
+import { runRuntime } from "@/features/runs/server/runRuntime";
 import { getRoomPageData } from "@/features/rooms/queries/roomPageQueries";
+import { loadThread } from "@multiplayer-ai/orchestration";
 import { notFound, redirect } from "next/navigation";
 import AIActivityPanel from "./_components/AIActivityPanel";
 import GroupChatPanel from "./_components/GroupChatPanel";
@@ -37,7 +39,8 @@ async function RoomPage({ params }: Props) {
 
     const members = roomPageData.members;
     const messages = roomPageData.messages;
-    const thread = await getRunStore().load(roomId);
+    const currentUser = toRunActor(user, roomPageData.currentMembership.profile);
+    const thread = await loadThread(runRuntime.store(), roomId, currentUser);
 
     return (
         <ResizablePanelGroup
@@ -51,8 +54,12 @@ async function RoomPage({ params }: Props) {
                 <AIActivityPanel
                     key={roomId}
                     roomId={roomId}
+                    currentUser={currentUser}
+                    initialThreadId={thread.threadId}
                     initialMessages={thread.messages}
                     initialStatus={thread.status}
+                    initialRunBy={thread.runBy}
+                    initialSeq={thread.lastSeq}
                 />
             </ResizablePanel>
 

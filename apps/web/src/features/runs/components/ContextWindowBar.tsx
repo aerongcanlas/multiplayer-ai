@@ -1,6 +1,9 @@
-import { getContextWindow, type ModelKey } from "@multiplayer-ai/domain";
+import type {
+    ModelKey,
+    RunUIMessage,
+} from "@multiplayer-ai/domain";
+import { getContextWindow } from "@multiplayer-ai/domain";
 import { TextBox } from "@/components/ui";
-import type { RunUIMessage } from "@/features/runs/types/runMessage";
 
 interface Props {
     messages: Array<RunUIMessage>;
@@ -9,23 +12,16 @@ interface Props {
 
 const COMPACTION_THRESHOLD_RATIO = 0.8;
 
-function findLastAssistantMetadata(messages: Array<RunUIMessage>) {
-    for (let i = messages.length - 1; i >= 0; i--) {
-        const message = messages[i];
-        if (message.role === "assistant" && message.metadata) {
-            return message.metadata;
-        }
-    }
-    return undefined;
-}
-
 function formatTokenCount(count: number): string {
     if (count >= 1000) return `${Math.round(count / 1000)}k`;
     return `${count}`;
 }
 
 function ContextWindowBar({ messages, model }: Props) {
-    const metadata = findLastAssistantMetadata(messages);
+    const metadata = messages.findLast(
+        (message) =>
+            message.role === "assistant" && message.metadata?.usage !== undefined,
+    )?.metadata?.usage;
     const windowSize = getContextWindow(model);
     const known = metadata !== undefined && metadata.model === model;
 

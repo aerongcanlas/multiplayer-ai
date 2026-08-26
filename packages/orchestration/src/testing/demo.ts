@@ -3,6 +3,7 @@ import { createUIMessageStream, type InferUIMessageChunk } from "ai";
 import { createScriptedRunModel } from "./mockModel";
 import type { EventSink } from "../run/ports";
 import { runTurn } from "../run/run";
+import { loadThread } from "../run/loadThread";
 import { createInMemoryRunStore } from "../run/store";
 
 const events: Array<RunEvent> = [];
@@ -15,8 +16,10 @@ const sink: EventSink = {
 };
 
 const roomId = "room-1";
+const actor = { id: crypto.randomUUID(), name: "Demo" };
 const store = createInMemoryRunStore();
-const thread = await store.load(roomId);
+const lock = await store.acquireLock(roomId, actor);
+if (!lock.acquired) throw new Error("expected an idle thread");
 const userMessage: RunUIMessage = {
   id: "msg-1",
   role: "user",
@@ -26,9 +29,10 @@ const userMessage: RunUIMessage = {
       text: "Recommend a client-side state library for the room UI.",
     },
   ],
+  metadata: { author: actor },
 };
-const seedMessages = [...thread.messages, userMessage];
-await store.save(roomId, { messages: seedMessages, status: "running" });
+const seedMessages = [...lock.messages, userMessage];
+await store.upsertMessage(lock.threadId, userMessage);
 
 let status: RunStatus = "running";
 const stream = createUIMessageStream<RunUIMessage>({
@@ -74,7 +78,10 @@ const stream = createUIMessageStream<RunUIMessage>({
   },
   originalMessages: seedMessages,
   onEnd: async ({ messages }) => {
-    await store.save(roomId, { messages, status });
+    for (const message of messages) {
+      await store.upsertMessage(lock.threadId, message);
+    }
+    await store.releaseLock(lock.threadId, status);
   },
 });
 
@@ -82,6 +89,6 @@ for await (const _chunk of stream) {
   // Drain the stream so execute() and onEnd() run to completion.
 }
 
-const record = await store.load(roomId);
+const record = await loadThread(store, roomId, actor);
 console.log(`\n${events.length} events emitted`);
 console.log("persisted messages:", record.messages.length);

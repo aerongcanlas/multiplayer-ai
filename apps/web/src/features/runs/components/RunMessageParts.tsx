@@ -1,5 +1,5 @@
 import { Markdown, TextBox } from "@/components/ui";
-import type { RunUIMessage } from "@/features/runs/types/runMessage";
+import type { RunUIMessage } from "@multiplayer-ai/domain";
 import { isToolUIPart } from "ai";
 import DelegationCard from "./DelegationCard";
 import ReasoningBlock from "./ReasoningBlock";

@@ -108,7 +108,6 @@ export function useRoomChat({ roomId, initialMessages, currentAuthor }: Props) {
                 return result;
             }
 
-            // Replace temporary data with the canonical database row
             setMessages((current) =>
                 [
                     ...current.filter(

@@ -92,6 +92,9 @@ export async function getRoomPageData(roomId: string, userId: string) {
         room: roomData.data.room,
         currentMembership: {
             isAdmin: roomData.data.is_admin,
+            profile:
+                membersResult.data.find((member) => member.member_id === userId)
+                    ?.user_profile ?? null,
         },
         members: membersResult.data,
         messages: [...messagesResult.data].reverse(),

@@ -120,5 +120,60 @@ export const startRunRequestSchema = z.object({
     goal: z.string().trim().min(1).max(4_000),
     model: z.enum(modelKeys),
     effort: z.enum(effortLevels).optional(),
+    userMessageId: z.uuid().optional(),
 });
 export type StartRunRequest = z.infer<typeof startRunRequestSchema>;
+
+/** Realtime topic for a room's AI thread. The second segment is what the membership policy reads. */
+export function runThreadTopic(roomId: string): string {
+    return `room:${roomId}:ai`;
+}
+
+export const RUN_THREAD_EVENT = "thread";
+
+const runMessageAuthorSchema = z.object({
+    id: z.uuid(),
+    name: z.string().min(1),
+});
+
+const runThreadEventSchema = z.discriminatedUnion("kind", [
+    z.object({
+        kind: z.literal("progress"),
+        threadId: z.uuid(),
+        status: z.enum(runStatuses),
+        runBy: runMessageAuthorSchema.nullable(),
+        seq: z.number().int().positive(),
+    }),
+    z.object({
+        kind: z.literal("status"),
+        threadId: z.uuid(),
+        status: z.enum(runStatuses),
+        runBy: runMessageAuthorSchema.nullable(),
+    }),
+    z.object({
+        kind: z.literal("retired"),
+        threadId: z.uuid(),
+        retiredThreadId: z.uuid(),
+    }),
+]);
+
+export type RunThreadEvent = z.infer<typeof runThreadEventSchema>;
+
+export function parseRunThreadEvent(payload: unknown): RunThreadEvent | null {
+    const result = runThreadEventSchema.safeParse(payload);
+    return result.success ? result.data : null;
+}
+
+export const runRefusalSchema = z.object({
+    error: z.string(),
+    runBy: runMessageAuthorSchema.nullable(),
+});
+export type RunRefusal = z.infer<typeof runRefusalSchema>;
+
+export function refusalNotice(payload: unknown, fallback: string): string {
+    const parsed = runRefusalSchema.safeParse(payload);
+    if (!parsed.success) return fallback;
+
+    const { error, runBy } = parsed.data;
+    return runBy === null ? error : `${runBy.name} is already running the agent.`;
+}

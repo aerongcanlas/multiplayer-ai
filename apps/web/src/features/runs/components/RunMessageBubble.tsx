@@ -1,21 +1,21 @@
-import { BoxRow, TextBox } from "@/components/ui";
+import { BoxColumn, BoxRow, TextBox } from "@/components/ui";
 import { cn } from "@/lib/utils";
-import type { Message } from "@multiplayer-ai/domain";
 
 interface Props {
     className?: string;
-    message: Pick<Message, "text">;
+    text: string;
+    author?: string;
 }
-function RunMessageBubble({ className, message }: Props) {
+function RunMessageBubble({ className, text, author }: Props) {
     return (
-        <BoxRow
-            className={cn(
-                "bg-[#242424] pt-2 pb-2.5 px-4 m-2 w-fit rounded-xl wrap-break-word",
-                className,
+        <BoxColumn className={cn("m-2 w-fit items-end gap-0.5", className)}>
+            {author !== undefined && (
+                <TextBox className="px-1 text-[10px] text-white/40">{author}</TextBox>
             )}
-        >
-            <TextBox>{message.text}</TextBox>
-        </BoxRow>
+            <BoxRow className="wrap-break-word rounded-xl bg-[#242424] px-4 pt-2 pb-2.5">
+                <TextBox>{text}</TextBox>
+            </BoxRow>
+        </BoxColumn>
     );
 }
 export default RunMessageBubble;

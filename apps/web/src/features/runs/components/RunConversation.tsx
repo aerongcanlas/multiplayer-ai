@@ -2,11 +2,17 @@
 
 import { Box, BoxColumn, TextBox } from "@/components/ui";
 import RunMessageBubble from "@/features/runs/components/RunMessageBubble";
-import type { RunUIMessage } from "@/features/runs/types/runMessage";
+import type { RunUIMessage } from "@multiplayer-ai/domain";
 import { useEffect, useRef } from "react";
 import RunMessageParts from "./RunMessageParts";
 
 const STICK_TO_BOTTOM_THRESHOLD_PX = 40;
+
+function messageText(message: RunUIMessage): string {
+    return message.parts
+        .map((part) => (part.type === "text" ? part.text : ""))
+        .join("");
+}
 
 interface Props {
     messages: Array<RunUIMessage>;
@@ -55,13 +61,8 @@ function RunConversation({ messages, incomplete }: Props) {
                         <RunMessageBubble
                             key={message.id}
                             className="self-end"
-                            message={{
-                                text: message.parts
-                                    .map((part) =>
-                                        part.type === "text" ? part.text : "",
-                                    )
-                                    .join(""),
-                            }}
+                            author={message.metadata?.author?.name}
+                            text={messageText(message)}
                         />
                     ) : (
                         <RunMessageParts
