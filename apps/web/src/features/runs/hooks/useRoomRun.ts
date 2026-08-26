@@ -20,6 +20,8 @@ import { createClient } from "@/lib/supabase/client";
 
 const transport = new DefaultChatTransport<RunUIMessage>({ api: "/api/runs" });
 
+const DISCONNECTED_POLL_MS = 5000;
+
 function safeJson(text: string): unknown {
     try {
         return JSON.parse(text);
@@ -189,6 +191,17 @@ export function useRoomRun({
         ownRunRef.current = streamingHere;
         if (!streamingHere) void sync();
     }, [streamingHere, sync]);
+
+    // Rows are the truth; the channel is only an accelerator. While the channel
+    // is down — dropped socket, or a subscription the server refuses — keep
+    // converging through the store so other members' turns arrive late rather
+    // than never.
+    useEffect(() => {
+        if (isConnected) return;
+        void sync();
+        const interval = setInterval(() => void sync(), DISCONNECTED_POLL_MS);
+        return () => clearInterval(interval);
+    }, [isConnected, sync]);
 
     useEffect(() => {
         const channel = supabase
