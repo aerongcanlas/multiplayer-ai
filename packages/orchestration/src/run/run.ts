@@ -1,5 +1,6 @@
-import type { RunStatus } from "@multiplayer-ai/domain";
+import type { RunMessageMetadata, RunUIMessage } from "@multiplayer-ai/domain";
 import { resolveModel, type ResolvedRunModel } from "@multiplayer-ai/providers";
+import { APICallError } from "@ai-sdk/provider";
 import {
   NoOutputGeneratedError,
   toUIMessageStream,
@@ -8,7 +9,8 @@ import {
 } from "ai";
 import { buildLead, buildVerifier } from "../agents/lead";
 import { resolveProfile } from "../config/profile";
-import type { EventSink, RunInput, RunStore } from "./ports";
+import { buildReplay } from "./replay";
+import type { EventSink, RunInput } from "./ports";
 import type { ToolDeps } from "../tools";
 
 const inFlight = new Map<string, AbortController>();
@@ -25,42 +27,30 @@ export type RunDeps = Omit<
   "runId" | "roomId" | "sink" | "profile"
 > & {
   sink: EventSink;
-  store: RunStore;
   modelOverride?: LanguageModel;
   abortSignal?: AbortSignal;
 };
 
-export async function startRun(
-  input: RunInput,
-  deps: RunDeps,
-): Promise<string> {
-  return execute(input, [{ role: "user", content: input.goal }], deps);
-}
-
-export async function resumeRun(runId: string, deps: RunDeps): Promise<string> {
-  const record = await deps.store.load(runId);
-  if (!record) throw new Error(`Unknown run: ${runId}`);
-  return execute(
-    record.input,
-    [
-      ...record.messages,
-      {
-        role: "user",
-        content:
-          "You were interrupted. Review the transcript above, work out what " +
-          "is already done, and continue from there. Do not redo completed work.",
-      },
-    ],
-    deps,
+function isContextLengthError(error: unknown): boolean {
+  if (!APICallError.isInstance(error)) return false;
+  if (error.statusCode !== 400) return false;
+  const message = error.message.toLowerCase();
+  return (
+    message.includes("context length") ||
+    message.includes("context_length") ||
+    message.includes("maximum context") ||
+    message.includes("token count") ||
+    message.includes("too many tokens") ||
+    message.includes("exceeds the maximum number of tokens")
   );
 }
 
-async function execute(
+export async function runTurn(
   input: RunInput,
-  messages: Array<ModelMessage>,
+  seedMessages: Array<RunUIMessage>,
   deps: RunDeps,
-): Promise<string> {
-  const { sink, store, modelOverride, abortSignal, ...toolDeps } = deps;
+): Promise<void> {
+  const { sink, modelOverride, abortSignal, ...toolDeps } = deps;
   const resolved: ResolvedRunModel = modelOverride
     ? { model: modelOverride }
     : resolveModel(input.model);
@@ -90,18 +80,22 @@ async function execute(
     model: input.model,
   });
 
-  const persist = (
-    next: Array<ModelMessage>,
-    status: RunStatus,
-  ): Promise<void> => store.save({ input, messages: next, status });
-
   const lead = buildLead(resolved.model, context, resolved.providerOptions);
+
+  let compactionAnnounced = false;
+  const announceCompaction = async (compacted: boolean) => {
+    if (compacted && !compactionAnnounced) {
+      compactionAnnounced = true;
+      await sink.emit({ kind: "run.compacted", runId: input.runId });
+    }
+  };
 
   const streamRound = async (roundMessages: Array<ModelMessage>) => {
     const result = await lead.stream({
       messages: roundMessages,
       abortSignal: controller.signal,
     });
+    let streamError: unknown;
     if (sink.merge) {
       sink.merge(
         toUIMessageStream({
@@ -109,20 +103,47 @@ async function execute(
           sendReasoning: true,
           sendStart: false,
           sendFinish: false,
+          onError: (error) => {
+            streamError = error;
+            return "Run stream error";
+          },
         }),
       );
     }
-    const responseMessages = await result.responseMessages;
-    const text = await result.text;
-    return { responseMessages, text };
+    try {
+      const responseMessages = await result.responseMessages;
+      const text = await result.text;
+      const finalStep = await result.finalStep;
+      if (finalStep.usage.inputTokens !== undefined) {
+        sink.setMessageMetadata?.({
+          inputTokens: finalStep.usage.inputTokens,
+          model: input.model,
+        } satisfies RunMessageMetadata);
+      }
+      return { responseMessages, text };
+    } catch (error) {
+      throw streamError ?? error;
+    }
   };
 
-  let transcript: Array<ModelMessage> = messages;
-
   try {
-    let round = await streamRound(messages);
-    transcript = [...messages, ...round.responseMessages];
-    await persist(transcript, "running");
+    const initialReplay = await buildReplay(seedMessages, input.model);
+    await announceCompaction(initialReplay.compacted);
+
+    let round;
+    try {
+      round = await streamRound(initialReplay.modelMessages);
+    } catch (error) {
+      if (!isContextLengthError(error)) throw error;
+      const hardReplay = await buildReplay(seedMessages, input.model, "hard");
+      await announceCompaction(hardReplay.compacted);
+      round = await streamRound(hardReplay.modelMessages);
+    }
+
+    let working: Array<ModelMessage> = [
+      ...initialReplay.modelMessages,
+      ...round.responseMessages,
+    ];
 
     if (profile.verificationPass) {
       const verifier = buildVerifier(resolved.model);
@@ -152,7 +173,7 @@ async function execute(
 
       if (!verdict.ok && verdict.issues.length > 0) {
         const followUp: Array<ModelMessage> = [
-          ...transcript,
+          ...working,
           {
             role: "user",
             content:
@@ -161,7 +182,7 @@ async function execute(
           },
         ];
         round = await streamRound(followUp);
-        transcript = [...followUp, ...round.responseMessages];
+        working = [...followUp, ...round.responseMessages];
       }
     }
 
@@ -173,13 +194,11 @@ async function execute(
       });
     }
 
-    await persist(transcript, "finished");
     await sink.emit({
       kind: "run.finished",
       runId: input.runId,
       text: round.text,
     });
-    return round.text;
   } catch (error) {
     const aborted = controller.signal.aborted;
     await sink.emit(
@@ -191,7 +210,6 @@ async function execute(
             error: error instanceof Error ? error.message : String(error),
           },
     );
-    await persist(transcript, aborted ? "cancelled" : "failed");
     throw error;
   } finally {
     inFlight.delete(input.runId);

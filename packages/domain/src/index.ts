@@ -10,8 +10,11 @@ export type {
     CreateRoomInput,
     CreateRoomInviteInput,
 } from "./rooms";
+export type { RunMessageMetadata, RunTools, RunUIMessage } from "./runMessage";
 export {
     effortLevels,
+    getContextWindow,
+    getModelProvider,
     isModelKey,
     modelKeys,
     runStatuses,
@@ -22,6 +25,7 @@ export {
 export type {
     EffortLevel,
     ModelKey,
+    ModelProvider,
     PersonaId,
     RunDataTypes,
     RunEvent,

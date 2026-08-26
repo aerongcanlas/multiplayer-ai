@@ -1,6 +1,6 @@
 "use client";
 
-import { Box, BoxColumn } from "@/components/ui";
+import { Box, BoxColumn, TextBox } from "@/components/ui";
 import RunMessageBubble from "@/features/runs/components/RunMessageBubble";
 import type { RunUIMessage } from "@/features/runs/types/runMessage";
 import { useEffect, useRef } from "react";
@@ -10,9 +10,10 @@ const STICK_TO_BOTTOM_THRESHOLD_PX = 40;
 
 interface Props {
     messages: Array<RunUIMessage>;
+    incomplete?: boolean;
 }
 
-function RunConversation({ messages }: Props) {
+function RunConversation({ messages, incomplete }: Props) {
     const scrollRef = useRef<HTMLDivElement>(null);
     const contentRef = useRef<HTMLDivElement>(null);
     const stuckToBottomRef = useRef(true);
@@ -68,6 +69,11 @@ function RunConversation({ messages }: Props) {
                             message={message}
                         />
                     ),
+                )}
+                {incomplete && messages.length > 0 && (
+                    <TextBox className="m-2 text-xs text-white/40">
+                        Cut off before finishing.
+                    </TextBox>
                 )}
             </BoxColumn>
         </Box>

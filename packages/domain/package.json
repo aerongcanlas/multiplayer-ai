@@ -10,6 +10,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "ai": "^7.0.66",
     "zod": "^4.4.3"
   },
   "devDependencies": {

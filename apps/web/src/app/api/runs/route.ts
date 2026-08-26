@@ -1,11 +1,12 @@
+import type { RunStatus } from "@multiplayer-ai/domain";
 import { startRunRequestSchema } from "@multiplayer-ai/domain";
 import {
     createScriptedRunModel,
-    resumeRun,
-    startRun,
+    runTurn,
     type RunDeps,
 } from "@multiplayer-ai/orchestration";
 import { createUIMessageStream, createUIMessageStreamResponse } from "ai";
+import { z } from "zod";
 import { search } from "@/features/runs/server/runAdapters";
 import { createRunEventSink } from "@/features/runs/server/runEventSink";
 import { getRunStore } from "@/features/runs/server/runStore";
@@ -20,24 +21,28 @@ export async function POST(request: Request) {
     if (!parsed.success) {
         return Response.json({ error: parsed.error.message }, { status: 400 });
     }
-    const { roomId, goal, model, effort, resumeOf } = parsed.data;
+    const { roomId, goal, model, effort } = parsed.data;
 
     const aiMode = process.env.AI_MODE?.trim().toLowerCase();
     const isMock = aiMode === "mock";
     const modelOverride = isMock ? createScriptedRunModel() : undefined;
 
     const store = getRunStore();
-    if (resumeOf && !(await store.load(resumeOf))) {
-        return Response.json(
-            {
-                error:
-                    "Unknown run (in-memory store; resume only works within the current process lifetime).",
-            },
-            { status: 404 },
-        );
-    }
+    const thread = await store.load(roomId);
 
-    const runId = resumeOf ?? crypto.randomUUID();
+    const userMessage: RunUIMessage = {
+        id: crypto.randomUUID(),
+        role: "user",
+        parts: [{ type: "text", text: goal }],
+    };
+    const seedMessages = [...thread.messages, userMessage];
+
+    // Persisted before the run starts so the question survives a run that fails,
+    // is cancelled, or a process crash outright — not just a normal thrown error.
+    await store.save(roomId, { messages: seedMessages, status: "running" });
+
+    const runId = crypto.randomUUID();
+    let status: RunStatus = "running";
 
     const stream = createUIMessageStream<RunUIMessage>({
         execute: async ({ writer }) => {
@@ -45,22 +50,23 @@ export async function POST(request: Request) {
             const deps: RunDeps = {
                 search,
                 sink: createRunEventSink(writer),
-                store,
                 abortSignal: request.signal,
                 modelOverride,
             };
             try {
-                if (resumeOf) {
-                    await resumeRun(resumeOf, deps);
-                } else {
-                    await startRun({ runId, roomId, goal, model, effort }, deps);
-                }
+                await runTurn({ runId, roomId, goal, model, effort }, seedMessages, deps);
+                status = "finished";
             } catch (error) {
+                status = request.signal.aborted ? "cancelled" : "failed";
                 if (!request.signal.aborted) {
                     console.error(`[run ${runId}]`, error);
                 }
             }
             writer.write({ type: "finish" });
+        },
+        originalMessages: seedMessages,
+        onEnd: async ({ messages }) => {
+            await store.save(roomId, { messages, status });
         },
         onError: () => "Run stream error",
     });
@@ -69,4 +75,15 @@ export async function POST(request: Request) {
         stream,
         headers: { "x-ai-mode": isMock ? "mock" : model },
     });
+}
+
+export async function DELETE(request: Request) {
+    const roomId = new URL(request.url).searchParams.get("roomId");
+    const parsed = z.uuid().safeParse(roomId);
+    if (!parsed.success) {
+        return Response.json({ error: "Invalid roomId" }, { status: 400 });
+    }
+
+    await getRunStore().clear(parsed.data);
+    return new Response(null, { status: 204 });
 }

@@ -16,6 +16,31 @@ export function isModelKey(value: unknown): value is ModelKey {
     );
 }
 
+export type ModelProvider = "openai" | "google";
+
+type ModelInfo = {
+    provider: ModelProvider;
+    contextWindow: number;
+};
+
+const MODEL_INFO: Record<ModelKey, ModelInfo> = {
+    "openai:gpt-5-mini": { provider: "openai", contextWindow: 400_000 },
+    "openai:gpt-5": { provider: "openai", contextWindow: 400_000 },
+    "google:gemini-3.6-flash": { provider: "google", contextWindow: 1_048_576 },
+    "google:gemini-3.5-flash-lite": {
+        provider: "google",
+        contextWindow: 1_048_576,
+    },
+};
+
+export function getContextWindow(key: ModelKey): number {
+    return MODEL_INFO[key].contextWindow;
+}
+
+export function getModelProvider(key: ModelKey): ModelProvider {
+    return MODEL_INFO[key].provider;
+}
+
 export const effortLevels = ["low", "med", "high"] as const;
 
 export type EffortLevel = (typeof effortLevels)[number];
@@ -52,6 +77,7 @@ export type RunEvent =
       }
     | { kind: "run.verify"; runId: string; ok: boolean; issues: Array<string> }
     | { kind: "run.no_action"; runId: string; reason: string }
+    | { kind: "run.compacted"; runId: string }
     | { kind: "run.finished"; runId: string; text: string }
     | { kind: "run.cancelled"; runId: string }
     | { kind: "run.failed"; runId: string; error: string };
@@ -60,7 +86,6 @@ export type RunDataTypes = {
     [K in RunEvent["kind"]]: Extract<RunEvent, { kind: K }>;
 };
 
-/** What a subagent is allowed to hand back. Capped so summarization is forced. */
 export const ScoutBrief = z.object({
     summary: z.string().max(1200),
     findings: z
@@ -95,6 +120,5 @@ export const startRunRequestSchema = z.object({
     goal: z.string().trim().min(1).max(4_000),
     model: z.enum(modelKeys),
     effort: z.enum(effortLevels).optional(),
-    resumeOf: z.uuid().optional(),
 });
 export type StartRunRequest = z.infer<typeof startRunRequestSchema>;
