@@ -1,13 +1,13 @@
 "use client";
 
-import { Box, BoxColumn } from "@/components/ui";
+import { Box, BoxColumn, Button } from "@/components/ui";
 import { useChatScroll } from "@/features/rooms/hooks/useChatScroll";
 import { useRoomChat } from "@/features/rooms/hooks/useRoomChat";
 import type {
     RoomPageMember,
     RoomPageMessage,
 } from "@/features/rooms/types/room";
-import { useEffect } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import ChatMessageInput from "./room-chat/ChatMessageInput";
 import InviteUserModal from "./room-chat/InviteUserModal";
 import Messages from "./room-chat/Messages";
@@ -29,6 +29,9 @@ function GroupChatPanel({
     initialMessages,
     members,
 }: Props) {
+    const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(
+        () => new Set(),
+    );
     const { containerRef, scrollToBottom } = useChatScroll();
 
     const currentAuthor =
@@ -45,6 +48,43 @@ function GroupChatPanel({
         scrollToBottom();
     }, [messages.length, scrollToBottom]);
 
+    const setMessageSelected = useCallback(
+        (messageId: string, selected: boolean) => {
+            setSelectedMessageIds((current) => {
+                const next = new Set(current);
+
+                if (selected) {
+                    next.add(messageId);
+                } else {
+                    next.delete(messageId);
+                }
+
+                return next;
+            });
+        },
+        [],
+    );
+
+    const selectedMessagePayload = useMemo(
+        () =>
+            messages.flatMap((message) =>
+                message.deliveryStatus === undefined &&
+                selectedMessageIds.has(message.id)
+                    ? [
+                          {
+                              messageId: message.id,
+                              content: message.text,
+                          },
+                      ]
+                    : [],
+            ),
+        [messages, selectedMessageIds],
+    );
+
+    const clearSelectedMessages = useCallback(() => {
+        setSelectedMessageIds(new Set());
+    }, []);
+
     return (
         <BoxColumn className="h-full min-h-0 p-2">
             <Box className="flex items-center justify-between gap-2 px-1 m-2">
@@ -59,8 +99,32 @@ function GroupChatPanel({
                 <Messages
                     currentUserId={currentUserId}
                     messages={messages}
+                    selectedMessageIds={selectedMessageIds}
+                    onMessageSelect={setMessageSelected}
                 />
             </Box>
+
+            {selectedMessagePayload.length > 0 && (
+                <Box className="flex shrink-0 items-center justify-between gap-2 px-2 py-1">
+                    <p
+                        aria-live="polite"
+                        className="text-xs text-muted-foreground"
+                    >
+                        {selectedMessagePayload.length}{" "}
+                        {selectedMessagePayload.length === 1
+                            ? "message selected"
+                            : "messages selected"}
+                    </p>
+                    <Button
+                        size="xs"
+                        type="button"
+                        variant="ghost"
+                        onClick={clearSelectedMessages}
+                    >
+                        Clear
+                    </Button>
+                </Box>
+            )}
 
             <ChatMessageInput
                 disabled={!isConnected}
