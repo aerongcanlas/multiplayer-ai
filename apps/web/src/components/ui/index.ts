@@ -41,16 +41,6 @@ export {
 } from "./Resizable";
 export { Separator } from "./Separator";
 export {
-    Sheet,
-    SheetClose,
-    SheetContent,
-    SheetDescription,
-    SheetFooter,
-    SheetHeader,
-    SheetTitle,
-    SheetTrigger,
-} from "./Sheet";
-export {
     Sidebar,
     SidebarContent,
     SidebarFooter,
@@ -73,7 +63,6 @@ export {
     SidebarProvider,
     SidebarRail,
     SidebarSeparator,
-    SidebarTrigger,
     useSidebar,
 } from "./Sidebar";
 export { Markdown } from "./Markdown";
