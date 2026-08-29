@@ -8,6 +8,7 @@ import {
     SidebarContent,
     SidebarFooter,
     SidebarHeader,
+    SidebarRail,
 } from "@/components/ui";
 import { LogoutButton } from "@/features/auth/components/LogoutButton";
 import { useCurrentUser } from "@/features/auth/hooks/useCurrentUser";
@@ -50,6 +51,7 @@ export function AppSidebar({ roomList }: Props) {
                 {roomList}
             </SidebarContent>
             <SidebarFooter />
+            <SidebarRail />
         </Sidebar>
     );
 }

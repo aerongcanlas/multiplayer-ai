@@ -1,8 +1,4 @@
-import {
-    SidebarInset,
-    SidebarProvider,
-    SidebarTrigger,
-} from "@/components/ui/Sidebar";
+import { SidebarInset, SidebarProvider } from "@/components/ui/Sidebar";
 import { getCurrentUser } from "@/features/auth/server/getCurrentUser";
 import RoomList from "@/features/rooms/components/RoomList";
 import { getJoinedRooms } from "@/features/rooms/queries/getJoinedRooms";
@@ -34,10 +30,7 @@ export default async function AuthenticatedLayout({
                     />
                 }
             />
-            <SidebarInset>
-                <SidebarTrigger />
-                {children}
-            </SidebarInset>
+            <SidebarInset>{children}</SidebarInset>
         </SidebarProvider>
     );
 }
