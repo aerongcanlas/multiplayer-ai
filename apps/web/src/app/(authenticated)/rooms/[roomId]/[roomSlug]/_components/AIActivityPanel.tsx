@@ -12,6 +12,7 @@ import RunModelSwitcher from "@/features/runs/components/RunModelSwitcher";
 import { useRoomRun } from "@/features/runs/hooks/useRoomRun";
 import { runLockEnabled } from "@/features/runs/lock/runLockConfig";
 import PromptInput from "./PromptInput";
+import { usePromptSuggestions } from "./PromptSuggestionProvider";
 
 interface Props {
     roomId: string;
@@ -32,6 +33,7 @@ function AIActivityPanel({
     initialRunBy,
     initialSeq,
 }: Props) {
+    const { draftPrompt, setDraftPrompt } = usePromptSuggestions();
     const {
         messages,
         startRun,
@@ -136,6 +138,8 @@ function AIActivityPanel({
                         : "What should the agent do?"
                 }
                 disabled={composerLocked || status !== "ready"}
+                value={draftPrompt}
+                onValueChange={setDraftPrompt}
                 onSubmit={(text) => startRun(text)}
             />
         </BoxColumn>

@@ -11,6 +11,7 @@ import { loadThread } from "@multiplayer-ai/orchestration";
 import { notFound, redirect } from "next/navigation";
 import AIActivityPanel from "./_components/AIActivityPanel";
 import GroupChatPanel from "./_components/GroupChatPanel";
+import { PromptSuggestionProvider } from "./_components/PromptSuggestionProvider";
 import PromptVotePanel from "./_components/PromptVotePanel";
 
 interface Props {
@@ -43,61 +44,63 @@ async function RoomPage({ params }: Props) {
     const thread = await loadThread(runRuntime.store(), roomId, currentUser);
 
     return (
-        <ResizablePanelGroup
-            orientation="horizontal"
-            className="min-h-screen w-full"
-        >
-            <ResizablePanel
-                defaultSize="27%"
-                minSize="35%"
+        <PromptSuggestionProvider>
+            <ResizablePanelGroup
+                orientation="horizontal"
+                className="min-h-screen w-full"
             >
-                <AIActivityPanel
-                    key={roomId}
-                    roomId={roomId}
-                    currentUser={currentUser}
-                    initialThreadId={thread.threadId}
-                    initialMessages={thread.messages}
-                    initialStatus={thread.status}
-                    initialRunBy={thread.runBy}
-                    initialSeq={thread.lastSeq}
-                />
-            </ResizablePanel>
+                <ResizablePanel
+                    defaultSize="27%"
+                    minSize="35%"
+                >
+                    <AIActivityPanel
+                        key={roomId}
+                        roomId={roomId}
+                        currentUser={currentUser}
+                        initialThreadId={thread.threadId}
+                        initialMessages={thread.messages}
+                        initialStatus={thread.status}
+                        initialRunBy={thread.runBy}
+                        initialSeq={thread.lastSeq}
+                    />
+                </ResizablePanel>
 
-            <ResizableHandle />
+                <ResizableHandle />
 
-            <ResizablePanel
-                defaultSize="55%"
-                minSize="30%"
-            >
-                <ResizablePanelGroup orientation="vertical">
-                    <ResizablePanel
-                        defaultSize="70%"
-                        minSize="30%"
-                    >
-                        <GroupChatPanel
-                            key={roomId}
-                            roomId={roomId}
-                            roomName={roomPageData.room.name}
-                            currentUserId={user.id}
-                            currentUserIsAdmin={
-                                roomPageData.currentMembership.isAdmin
-                            }
-                            initialMessages={messages}
-                            members={members}
-                        />
-                    </ResizablePanel>
+                <ResizablePanel
+                    defaultSize="55%"
+                    minSize="30%"
+                >
+                    <ResizablePanelGroup orientation="vertical">
+                        <ResizablePanel
+                            defaultSize="70%"
+                            minSize="30%"
+                        >
+                            <GroupChatPanel
+                                key={roomId}
+                                roomId={roomId}
+                                roomName={roomPageData.room.name}
+                                currentUserId={user.id}
+                                currentUserIsAdmin={
+                                    roomPageData.currentMembership.isAdmin
+                                }
+                                initialMessages={messages}
+                                members={members}
+                            />
+                        </ResizablePanel>
 
-                    <ResizableHandle />
+                        <ResizableHandle />
 
-                    <ResizablePanel
-                        defaultSize="30%"
-                        minSize="15%"
-                    >
-                        <PromptVotePanel />
-                    </ResizablePanel>
-                </ResizablePanelGroup>
-            </ResizablePanel>
-        </ResizablePanelGroup>
+                        <ResizablePanel
+                            defaultSize="30%"
+                            minSize="15%"
+                        >
+                            <PromptVotePanel />
+                        </ResizablePanel>
+                    </ResizablePanelGroup>
+                </ResizablePanel>
+            </ResizablePanelGroup>
+        </PromptSuggestionProvider>
     );
 }
 export default RoomPage;
