@@ -7,6 +7,7 @@ export { loadThread } from "./run/loadThread";
 export { attributeAuthors } from "./run/authorship";
 export { createScriptedRunModel } from "./testing/mockModel";
 export { buildReplay } from "./run/replay";
+export { buildContextAgent } from "./agents/context";
 export type { PruneStrength, ReplayResult } from "./run/replay";
 export { STALE_RUN_MS } from "./run/ports";
 export type {
