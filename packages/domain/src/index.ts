@@ -1,6 +1,16 @@
 export { createMessageSchema, isMessage } from "./message";
 export type { CreateMessageInput, Message } from "./message";
 export {
+    ContextSuggestion,
+    ContextSuggestionDraft,
+    contextSuggestionRequestSchema,
+    MAX_CONTEXT_MESSAGES,
+} from "./contextSuggestions";
+export type {
+    ContextSuggestionRequest,
+    ContextSuggestionResult,
+} from "./contextSuggestions";
+export {
     acceptRoomInviteSchema,
     createRoomInviteSchema,
     createRoomSchema,

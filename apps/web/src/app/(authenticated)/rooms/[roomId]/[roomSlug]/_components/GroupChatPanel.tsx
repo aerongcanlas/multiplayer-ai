@@ -3,6 +3,7 @@
 import { Box, BoxColumn, Button } from "@/components/ui";
 import { useChatScroll } from "@/features/rooms/hooks/useChatScroll";
 import { useRoomChat } from "@/features/rooms/hooks/useRoomChat";
+import { suggestPromptsFromMessages } from "@/features/rooms/actions/suggestPromptsFromMessages";
 import type {
     RoomPageMember,
     RoomPageMessage,
@@ -11,6 +12,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import ChatMessageInput from "./room-chat/ChatMessageInput";
 import InviteUserModal from "./room-chat/InviteUserModal";
 import Messages from "./room-chat/Messages";
+import { usePromptSuggestions } from "./PromptSuggestionProvider";
 
 interface Props {
     roomId: string;
@@ -33,6 +35,12 @@ function GroupChatPanel({
         () => new Set(),
     );
     const { containerRef, scrollToBottom } = useChatScroll();
+    const {
+        isGenerating,
+        beginGeneration,
+        completeGeneration,
+        failGeneration,
+    } = usePromptSuggestions();
 
     const currentAuthor =
         members.find((member) => member.member_id === currentUserId)
@@ -85,6 +93,38 @@ function GroupChatPanel({
         setSelectedMessageIds(new Set());
     }, []);
 
+    const generatePromptSuggestions = useCallback(async () => {
+        const messageIds = selectedMessagePayload.map(
+            (message) => message.messageId,
+        );
+        if (messageIds.length === 0 || isGenerating) return;
+
+        beginGeneration();
+
+        try {
+            const result = await suggestPromptsFromMessages({
+                roomId,
+                messageIds,
+            });
+
+            if (!result.success) {
+                failGeneration(result.error);
+                return;
+            }
+
+            completeGeneration(result.suggestion);
+        } catch {
+            failGeneration("Could not generate prompt suggestions");
+        }
+    }, [
+        selectedMessagePayload,
+        isGenerating,
+        beginGeneration,
+        roomId,
+        failGeneration,
+        completeGeneration,
+    ]);
+
     return (
         <BoxColumn className="h-full min-h-0 p-2">
             <Box className="flex items-center justify-between gap-2 px-1 m-2">
@@ -115,14 +155,24 @@ function GroupChatPanel({
                             ? "message selected"
                             : "messages selected"}
                     </p>
-                    <Button
-                        size="xs"
-                        type="button"
-                        variant="ghost"
-                        onClick={clearSelectedMessages}
-                    >
-                        Clear
-                    </Button>
+                    <div className="flex items-center gap-1">
+                        <Button
+                            disabled={isGenerating}
+                            size="xs"
+                            type="button"
+                            onClick={() => void generatePromptSuggestions()}
+                        >
+                            {isGenerating ? "Summarizing..." : "Suggest prompts"}
+                        </Button>
+                        <Button
+                            size="xs"
+                            type="button"
+                            variant="ghost"
+                            onClick={clearSelectedMessages}
+                        >
+                            Clear
+                        </Button>
+                    </div>
                 </Box>
             )}
 
