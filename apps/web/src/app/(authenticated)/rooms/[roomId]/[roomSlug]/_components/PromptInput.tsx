@@ -2,35 +2,37 @@
 
 import { Button, Input } from "@/components/ui";
 import { cn } from "@/lib/utils";
-import { type SubmitEvent, useState } from "react";
+import type { SubmitEvent } from "react";
 
 interface Props {
     className?: string;
     disabled?: boolean;
     placeholder?: string;
+    value: string;
+    onValueChange: (value: string) => void;
     onSubmit: (text: string) => Promise<void> | void;
 }
 
 function PromptInput({
     onSubmit,
+    onValueChange,
+    value,
     className,
     disabled = false,
     placeholder = "Message the room",
 }: Props) {
-    const [text, setText] = useState("");
-
     async function handleSubmit(event: SubmitEvent<HTMLFormElement>) {
         event.preventDefault();
 
-        const nextText = text.trim();
+        const nextText = value.trim();
         if (disabled || nextText.length === 0) return;
 
-        setText("");
+        onValueChange("");
 
         try {
             await onSubmit(nextText);
         } catch {
-            setText(nextText);
+            onValueChange(nextText);
         }
     }
 
@@ -47,11 +49,11 @@ function PromptInput({
                 disabled={disabled}
                 maxLength={2_000}
                 placeholder={placeholder}
-                value={text}
-                onChange={(event) => setText(event.target.value)}
+                value={value}
+                onChange={(event) => onValueChange(event.target.value)}
             />
             <Button
-                disabled={disabled || text.trim().length === 0}
+                disabled={disabled || value.trim().length === 0}
                 type="submit"
             >
                 Send
