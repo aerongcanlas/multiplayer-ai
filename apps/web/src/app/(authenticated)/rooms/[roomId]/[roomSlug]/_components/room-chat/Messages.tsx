@@ -33,80 +33,98 @@ function Messages({
             {messages &&
                 messages.length > 0 &&
                 messages.map((message) => (
-                    <Message
+                    <Box
                         key={message.id}
-                        align={
-                            message.author_id === currentUserId
-                                ? "end"
-                                : "start"
-                        }
-                        className="py-1"
+                        className={cn(
+                            "group/select flex w-full items-center gap-2",
+                            message.author_id === currentUserId &&
+                                "flex-row-reverse",
+                        )}
                     >
-                        <MessageAvatar>
-                            <Avatar>
-                                <AvatarImage
-                                    src={message.author.image_url ?? undefined}
-                                    alt="@shadcn"
-                                />
-                                <AvatarFallback>
-                                    {message.author.name[0]}
-                                </AvatarFallback>
-                            </Avatar>
-                        </MessageAvatar>
-                        <MessageContent>
-                            <Box
-                                className={cn(
-                                    "flex w-full items-center gap-2",
-                                    message.author_id === currentUserId &&
-                                        "flex-row-reverse",
-                                )}
-                            >
-                                <Bubble
-                                    variant={
-                                        message.author_id === currentUserId
-                                            ? "own"
-                                            : "other"
-                                    }
+                        <Message
+                            align={
+                                message.author_id === currentUserId
+                                    ? "end"
+                                    : "start"
+                            }
+                            className="py-1"
+                        >
+                            <MessageAvatar>
+                                <Avatar>
+                                    <AvatarImage
+                                        src={
+                                            message.author.image_url ??
+                                            undefined
+                                        }
+                                        alt="@shadcn"
+                                    />
+                                    <AvatarFallback>
+                                        {message.author.name[0]}
+                                    </AvatarFallback>
+                                </Avatar>
+                            </MessageAvatar>
+                            <MessageContent>
+                                <Box
+                                    className={cn(
+                                        "flex w-full items-center gap-2",
+                                        message.author_id === currentUserId &&
+                                            "flex-row-reverse",
+                                    )}
                                 >
-                                    <BubbleContent>
-                                        {message.text}
-                                    </BubbleContent>
-                                </Bubble>
-                                <Checkbox
-                                    aria-label={`Select message from ${message.author.name}`}
-                                    className="rounded-full cursor-pointer"
-                                    checked={selectedMessageIds.has(message.id)}
-                                    disabled={
-                                        message.deliveryStatus !== undefined
-                                    }
-                                    onCheckedChange={(checked) =>
-                                        onMessageSelect(message.id, checked)
-                                    }
-                                />
-                            </Box>
-                            {message.deliveryStatus === "sending" && (
-                                <MessageFooter>
-                                    <span
-                                        role="status"
-                                        className="text-muted-foreground"
+                                    <Bubble
+                                        variant={
+                                            message.author_id === currentUserId
+                                                ? "own"
+                                                : "other"
+                                        }
                                     >
-                                        Sending...
-                                    </span>
-                                </MessageFooter>
-                            )}
+                                        <BubbleContent>
+                                            {message.text}
+                                        </BubbleContent>
+                                    </Bubble>
+                                    <Checkbox
+                                        aria-label={`Select message from ${message.author.name}`}
+                                        className={cn(
+                                            "rounded-full cursor-pointer opacity-0 transition-opacity",
+                                            "group-hover/select:opacity-100",
+                                            "group-focus-within/select:opacity-100",
+                                            "data-checked:opacity-100",
+                                        )}
+                                        checked={selectedMessageIds.has(
+                                            message.id,
+                                        )}
+                                        disabled={
+                                            message.deliveryStatus !== undefined
+                                        }
+                                        onCheckedChange={(checked) =>
+                                            onMessageSelect(message.id, checked)
+                                        }
+                                    />
+                                </Box>
+                                {message.deliveryStatus === "sending" && (
+                                    <MessageFooter>
+                                        <span
+                                            role="status"
+                                            className="text-muted-foreground"
+                                        >
+                                            Sending...
+                                        </span>
+                                    </MessageFooter>
+                                )}
 
-                            {message.deliveryStatus === "failed" && (
-                                <MessageFooter>
-                                    <span
-                                        role="alert"
-                                        className="text-destructive"
-                                    >
-                                        Failed to send
-                                    </span>
-                                </MessageFooter>
-                            )}
-                        </MessageContent>
-                    </Message>
+                                {message.deliveryStatus === "failed" && (
+                                    <MessageFooter>
+                                        <span
+                                            role="alert"
+                                            className="text-destructive"
+                                        >
+                                            Failed to send
+                                        </span>
+                                    </MessageFooter>
+                                )}
+                            </MessageContent>
+                        </Message>
+                    </Box>
                 ))}
         </BoxColumn>
     );
