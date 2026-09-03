@@ -1,18 +1,18 @@
 "use client";
 
 import { Box, BoxColumn, Button } from "@/components/ui";
+import { suggestPromptsFromMessages } from "@/features/rooms/actions/suggestPromptsFromMessages";
 import { useChatScroll } from "@/features/rooms/hooks/useChatScroll";
 import { useRoomChat } from "@/features/rooms/hooks/useRoomChat";
-import { suggestPromptsFromMessages } from "@/features/rooms/actions/suggestPromptsFromMessages";
 import type {
     RoomPageMember,
     RoomPageMessage,
 } from "@/features/rooms/types/room";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { usePromptSuggestions } from "./PromptSuggestionProvider";
 import ChatMessageInput from "./room-chat/ChatMessageInput";
 import InviteUserModal from "./room-chat/InviteUserModal";
 import Messages from "./room-chat/Messages";
-import { usePromptSuggestions } from "./PromptSuggestionProvider";
 
 interface Props {
     roomId: string;
@@ -127,9 +127,15 @@ function GroupChatPanel({
 
     return (
         <BoxColumn className="h-full min-h-0 p-2">
-            <Box className="flex items-center justify-between gap-2 px-1 m-2">
-                <p>{roomName}</p>
-                {currentUserIsAdmin && <InviteUserModal roomId={roomId} />}
+            <Box className="m-2 grid grid-cols-[1fr_auto_1fr] items-center px-1">
+                <p className="col-start-2 row-start-1 text-lg font-semibold">
+                    {roomName}
+                </p>
+                {currentUserIsAdmin && (
+                    <div className="col-start-3 row-start-1 justify-self-end">
+                        <InviteUserModal roomId={roomId} />
+                    </div>
+                )}
             </Box>
 
             <Box
@@ -162,7 +168,9 @@ function GroupChatPanel({
                             type="button"
                             onClick={() => void generatePromptSuggestions()}
                         >
-                            {isGenerating ? "Summarizing..." : "Suggest prompts"}
+                            {isGenerating
+                                ? "Summarizing..."
+                                : "Suggest prompts"}
                         </Button>
                         <Button
                             size="xs"
