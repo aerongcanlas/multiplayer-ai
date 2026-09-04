@@ -1,16 +1,16 @@
 "use client";
 
-import type {
-    RunMessageAuthor,
-    RunStatus,
-    RunUIMessage,
-} from "@multiplayer-ai/domain";
 import { BoxColumn, BoxRow, Button, TextBox } from "@/components/ui";
 import ContextWindowBar from "@/features/runs/components/ContextWindowBar";
 import RunConversation from "@/features/runs/components/RunConversation";
 import RunModelSwitcher from "@/features/runs/components/RunModelSwitcher";
 import { useRoomRun } from "@/features/runs/hooks/useRoomRun";
 import { runLockEnabled } from "@/features/runs/lock/runLockConfig";
+import type {
+    RunMessageAuthor,
+    RunStatus,
+    RunUIMessage,
+} from "@multiplayer-ai/domain";
 import PromptInput from "./PromptInput";
 import { usePromptSuggestions } from "./PromptSuggestionProvider";
 
@@ -70,7 +70,7 @@ function AIActivityPanel({
     return (
         <BoxColumn className="h-full min-h-0 p-2">
             <div className="flex shrink-0 items-center justify-between gap-2">
-                <TextBox>AIActivityPanel</TextBox>
+                <TextBox>Agent Orchestrator Thread</TextBox>
                 <div className="flex items-center gap-2">
                     {streamingHere && (
                         <Button
@@ -102,7 +102,9 @@ function AIActivityPanel({
             )}
             {notice !== null && (
                 <BoxRow className="mx-2 mt-2 shrink-0 items-center justify-between gap-2 rounded-lg bg-red-500/10 px-2 py-1">
-                    <TextBox className="text-xs text-red-300/80">{notice}</TextBox>
+                    <TextBox className="text-xs text-red-300/80">
+                        {notice}
+                    </TextBox>
                     <Button
                         size="sm"
                         variant="ghost"
@@ -114,7 +116,9 @@ function AIActivityPanel({
             )}
             <RunConversation
                 messages={messages}
-                incomplete={threadStatus === "failed" || threadStatus === "cancelled"}
+                incomplete={
+                    threadStatus === "failed" || threadStatus === "cancelled"
+                }
             />
             <ContextWindowBar
                 messages={messages}

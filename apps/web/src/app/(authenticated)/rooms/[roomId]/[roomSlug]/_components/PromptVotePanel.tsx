@@ -3,15 +3,17 @@
 import { Box, BoxColumn, Button, Spinner } from "@/components/ui";
 import { usePromptSuggestions } from "./PromptSuggestionProvider";
 
-function PromptVotePanel() {
+function MissionControlPanel() {
     const { suggestion, isGenerating, error, draftPrompt, setDraftPrompt } =
         usePromptSuggestions();
 
     return (
         <BoxColumn className="h-full min-h-0 gap-2 p-2">
             <div className="flex shrink-0 items-center justify-between gap-2 px-1">
-                <p className="text-sm font-medium">Prompt suggestions</p>
-                {isGenerating && <Spinner aria-label="Generating suggestions" />}
+                <p className="text-sm font-medium">Mission Control</p>
+                {isGenerating && (
+                    <Spinner aria-label="Generating suggestions" />
+                )}
             </div>
 
             {isGenerating && (
@@ -82,4 +84,4 @@ function PromptVotePanel() {
         </BoxColumn>
     );
 }
-export default PromptVotePanel;
+export default MissionControlPanel;

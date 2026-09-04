@@ -11,23 +11,18 @@ import type {
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePromptSuggestions } from "./PromptSuggestionProvider";
 import ChatMessageInput from "./room-chat/ChatMessageInput";
-import InviteUserModal from "./room-chat/InviteUserModal";
 import Messages from "./room-chat/Messages";
 
 interface Props {
     roomId: string;
-    roomName: string;
     currentUserId: string;
-    currentUserIsAdmin: boolean;
     initialMessages: RoomPageMessage[];
     members: RoomPageMember[];
 }
 
 function GroupChatPanel({
     roomId,
-    roomName,
     currentUserId,
-    currentUserIsAdmin,
     initialMessages,
     members,
 }: Props) {
@@ -127,16 +122,9 @@ function GroupChatPanel({
 
     return (
         <BoxColumn className="h-full min-h-0 p-2">
-            <Box className="m-2 grid grid-cols-[1fr_auto_1fr] items-center px-1">
-                <p className="col-start-2 row-start-1 text-lg font-semibold">
-                    {roomName}
-                </p>
-                {currentUserIsAdmin && (
-                    <div className="col-start-3 row-start-1 justify-self-end">
-                        <InviteUserModal roomId={roomId} />
-                    </div>
-                )}
-            </Box>
+            <div className="flex shrink-0 items-center justify-between gap-2 px-1">
+                <h2 className="text-sm font-medium">Group Chat</h2>
+            </div>
 
             <Box
                 ref={containerRef}
