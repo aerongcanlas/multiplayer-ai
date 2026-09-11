@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { runStatuses } from "./runs";
 
 export const threadTitleSources = ["default", "auto", "manual"] as const;
 export type ThreadTitleSource = (typeof threadTitleSources)[number];
@@ -10,7 +11,7 @@ export const threadSummarySchema = z.object({
     retiredAt: z.string().nullable(),
     title: z.string().min(1).max(80),
     titleSource: z.enum(threadTitleSources),
-    runStatus: z.enum(["running", "finished", "failed", "cancelled"]),
+    runStatus: z.enum(runStatuses),
     currentRunId: z.uuid().nullable(),
 });
 export type ThreadSummary = z.infer<typeof threadSummarySchema>;

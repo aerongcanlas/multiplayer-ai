@@ -2,25 +2,17 @@ import type { Database, Json } from "@multiplayer-ai/db";
 import {
   decodeThreadCursor,
   encodeThreadCursor,
+  runStatuses,
+  threadTitleSources,
+  type RunMessageAuthor,
   type RunStatus,
   type RunUIMessage,
   type ThreadPage,
+  type ThreadSummary,
+  type ThreadTitleSource,
 } from "@multiplayer-ai/domain";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "@/lib/supabase/server";
-
-export type ThreadTitleSource = "default" | "auto" | "manual";
-
-export type ThreadSummary = {
-  id: string;
-  roomId: string;
-  createdAt: string;
-  retiredAt: string | null;
-  title: string;
-  titleSource: ThreadTitleSource;
-  runStatus: RunStatus;
-  currentRunId: string | null;
-};
 
 export type StoredThreadMessage = {
   id: string;
@@ -38,16 +30,19 @@ export type ThreadRecord = ThreadSummary & {
   messages: Array<StoredThreadMessage>;
 };
 
+export type ThreadRunRecord = ThreadRecord & {
+  runStartedAt: string | null;
+  runBy: RunMessageAuthor | null;
+};
+
 export type ClaimResult =
   | {
       outcome: "accepted";
-      thread: ThreadSummary;
       runId: string;
       acceptedMessageSeq: number;
     }
   | {
       outcome: "already_accepted";
-      thread: ThreadSummary;
       runId: string | null;
       acceptedMessageSeq: number;
     };
@@ -68,6 +63,8 @@ const THREAD_COLUMNS =
   "id, room_id, created_at, retired_at, title, title_source, run_status, current_run_id" as const;
 const MESSAGE_COLUMNS =
   "id, seq, thread_id, role, parts, metadata, author_id, created_at, run_id" as const;
+const RUN_THREAD_COLUMNS =
+  `${THREAD_COLUMNS}, run_started_at, runner:user_profile!ai_thread_run_by_fkey(id, name)` as const;
 
 type ThreadRow = Database["public"]["Tables"]["ai_thread"]["Row"];
 type ThreadSummaryRow = Pick<
@@ -84,20 +81,15 @@ type ThreadSummaryRow = Pick<
 type MessageRow = Database["public"]["Tables"]["ai_message"]["Row"];
 
 function asRunStatus(value: string): RunStatus {
-  if (
-    value === "running" ||
-    value === "finished" ||
-    value === "failed" ||
-    value === "cancelled"
-  ) {
-    return value;
+  if ((runStatuses as readonly string[]).includes(value)) {
+    return value as RunStatus;
   }
   throw new ThreadStoreError("invalid_state", `Unknown run status: ${value}`);
 }
 
 function asTitleSource(value: string): ThreadTitleSource {
-  if (value === "default" || value === "auto" || value === "manual") {
-    return value;
+  if ((threadTitleSources as readonly string[]).includes(value)) {
+    return value as ThreadTitleSource;
   }
   throw new ThreadStoreError("invalid_state", `Unknown title source: ${value}`);
 }
@@ -169,14 +161,6 @@ export function createThreadStore(client: Client = createAdminClient()) {
     return summary(data);
   }
 
-  async function list(
-    roomId: string,
-    actorId: string,
-    options: { archived?: boolean; limit?: number; cursor?: string } = {},
-  ): Promise<Array<ThreadSummary>> {
-    return (await listPage(roomId, actorId, options)).threads;
-  }
-
   async function listPage(
     roomId: string,
     actorId: string,
@@ -237,16 +221,49 @@ export function createThreadStore(client: Client = createAdminClient()) {
     return { ...thread, messages: data.map(message) };
   }
 
+  async function loadFrom(
+    roomId: string,
+    threadId: string,
+    actorId: string,
+    fromSeq: number,
+  ): Promise<ThreadRunRecord> {
+    await assertMember(roomId, actorId);
+    const [threadResult, messageResult] = await Promise.all([
+      client
+        .from("ai_thread")
+        .select(RUN_THREAD_COLUMNS)
+        .eq("id", threadId)
+        .eq("room_id", roomId)
+        .maybeSingle(),
+      client
+        .from("ai_message")
+        .select(MESSAGE_COLUMNS)
+        .eq("thread_id", threadId)
+        .gte("seq", fromSeq)
+        .order("seq", { ascending: true }),
+    ]);
+    if (threadResult.error !== null) throwSupabaseError(threadResult.error);
+    if (threadResult.data === null)
+      throw new ThreadStoreError("not_found", "Thread not found");
+    if (messageResult.error !== null) throwSupabaseError(messageResult.error);
+    return {
+      ...summary(threadResult.data),
+      runStartedAt: threadResult.data.run_started_at,
+      runBy: threadResult.data.runner,
+      messages: messageResult.data.map(message),
+    };
+  }
+
   async function create(
     roomId: string,
     actorId: string,
-    creationId?: string,
+    creationId: string,
   ): Promise<ThreadSummary> {
     const { data, error } = await client
       .rpc("create_ai_thread", {
         p_room_id: roomId,
         p_actor_id: actorId,
-        ...(creationId === undefined ? {} : { p_creation_id: creationId }),
+        p_creation_id: creationId,
       })
       .single();
     if (error !== null) throwSupabaseError(error);
@@ -283,20 +300,9 @@ export function createThreadStore(client: Client = createAdminClient()) {
       })
       .single();
     if (error !== null) throwSupabaseError(error);
-    const thread: ThreadSummary = {
-      id: data.thread_id,
-      roomId: input.roomId,
-      createdAt: "",
-      retiredAt: null,
-      title: data.title,
-      titleSource: asTitleSource(data.title_source),
-      runStatus: asRunStatus(data.run_status),
-      currentRunId: data.run_id,
-    };
     if (data.outcome === "already_accepted") {
       return {
         outcome: "already_accepted",
-        thread,
         runId: data.run_id,
         acceptedMessageSeq: data.accepted_message_seq,
       };
@@ -309,7 +315,6 @@ export function createThreadStore(client: Client = createAdminClient()) {
     }
     return {
       outcome: "accepted",
-      thread,
       runId: input.runId,
       acceptedMessageSeq: data.accepted_message_seq,
     };
@@ -424,9 +429,10 @@ export function createThreadStore(client: Client = createAdminClient()) {
   }
 
   return {
-    list,
     listPage,
+    getSummary,
     get,
+    loadFrom,
     create,
     claimRun,
     writeMessage,

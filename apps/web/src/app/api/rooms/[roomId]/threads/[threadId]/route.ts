@@ -11,7 +11,7 @@ type RouteContext = { params: Promise<{ roomId: string; threadId: string }> };
 
 type Dependencies = {
     getActor: typeof getRunActor;
-    getService: () => ThreadService;
+    getService: () => Pick<ThreadService, "get" | "update">;
 };
 
 export function createThreadDetailHandlers(

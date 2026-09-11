@@ -19,9 +19,15 @@ const summary: ThreadSummary = {
 
 function fakeStore(overrides: Partial<ThreadStore> = {}): ThreadStore {
     return {
-        list: async () => [summary],
         listPage: async () => ({ threads: [summary], nextCursor: null }),
+        getSummary: async () => summary,
         get: async () => ({ ...summary, messages: [] }),
+        loadFrom: async () => ({
+            ...summary,
+            runStartedAt: null,
+            runBy: null,
+            messages: [],
+        }),
         create: async () => summary,
         claimRun: async () => {
             throw new Error("unused");
@@ -52,7 +58,7 @@ test("creation retries are delegated with the same client creation id", async ()
     const service = createThreadService(
         fakeStore({
             create: async (_room, _actor, creationId) => {
-                if (creationId !== undefined) ids.push(creationId);
+                ids.push(creationId);
                 return summary;
             },
         }),
@@ -102,8 +108,10 @@ test("archive conflicts are typed busy responses", async () => {
 test("history reads are inclusive and do not create or switch threads", async () => {
     const service = createThreadService(
         fakeStore({
-            get: async () => ({
+            loadFrom: async () => ({
                 ...summary,
+                runStartedAt: null,
+                runBy: null,
                 messages: [
                     {
                         id: crypto.randomUUID(),

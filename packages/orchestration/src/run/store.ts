@@ -26,7 +26,10 @@ export function createInMemoryRunStore(): RunStore & {
     createThread(roomId: string): string;
 } {
     const threads = new Map<string, MemoryThread>();
-    const messageRuns = new Map<string, string>();
+    const messageOwners = new Map<
+        string,
+        { threadId: string; runId: string }
+    >();
     let nextSeq = 0;
 
     function openThread(roomId: string): MemoryThread {
@@ -100,12 +103,11 @@ export function createInMemoryRunStore(): RunStore & {
                 throw Object.assign(new Error("Thread is archived"), {
                     code: "P0001",
                 });
-            for (const candidate of threads.values()) {
-                if (candidate.messages.has(userMessage.id)) {
-                    if (candidate.id !== threadId)
-                        throw new Error("Message belongs to another thread");
-                    return { outcome: "already_accepted" };
-                }
+            const owner = messageOwners.get(userMessage.id);
+            if (owner !== undefined) {
+                if (owner.threadId !== threadId)
+                    throw new Error("Message belongs to another thread");
+                return { outcome: "already_accepted" };
             }
             if (thread.status === "running")
                 throw Object.assign(new Error("Run is busy"), {
@@ -119,7 +121,7 @@ export function createInMemoryRunStore(): RunStore & {
                 message: userMessage,
                 seq: ++nextSeq,
             });
-            messageRuns.set(userMessage.id, runId);
+            messageOwners.set(userMessage.id, { threadId, runId });
             return { outcome: "accepted" };
         },
 
@@ -133,19 +135,15 @@ export function createInMemoryRunStore(): RunStore & {
             const thread = expireDeadRun(findThread(roomId, threadId));
             if (thread.status !== "running" || thread.runId !== runId)
                 throw new Error("Run no longer owns thread");
-            for (const candidate of threads.values()) {
-                if (
-                    candidate.id !== threadId &&
-                    candidate.messages.has(message.id)
-                )
-                    throw new Error("Message belongs to another thread");
-            }
+            const owner = messageOwners.get(message.id);
+            if (owner !== undefined && owner.threadId !== threadId)
+                throw new Error("Message belongs to another thread");
             const existing = thread.messages.get(message.id);
-            if (existing && messageRuns.get(message.id) !== runId)
+            if (existing && owner?.runId !== runId)
                 throw new Error("Message belongs to another run");
             const seq = existing?.seq ?? ++nextSeq;
             thread.messages.set(message.id, { message, seq });
-            messageRuns.set(message.id, runId);
+            messageOwners.set(message.id, { threadId, runId });
             return seq;
         },
 

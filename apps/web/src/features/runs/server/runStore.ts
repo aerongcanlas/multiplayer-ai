@@ -16,47 +16,39 @@ export async function readUserProfile(
 }
 
 export function createSupabaseRunStore(): RunStore {
+    const client = createAdminClient();
+    const threads = createThreadStore(client);
     return {
         async loadFrom(roomId, actor, threadId, fromSeq) {
-            const client = createAdminClient();
-            const threads = createThreadStore(client);
-            const thread = await threads.get(roomId, threadId, actor.id);
-            const { data: state, error } = await client
-                .from("ai_thread")
-                .select(
-                    "run_started_at, runner:user_profile!ai_thread_run_by_fkey(id, name)",
-                )
-                .eq("id", threadId)
-                .eq("room_id", roomId)
-                .single();
-            if (error) throw error;
+            const thread = await threads.loadFrom(
+                roomId,
+                threadId,
+                actor.id,
+                fromSeq,
+            );
             const stale =
                 thread.runStatus === "running" &&
-                (state.run_started_at === null ||
-                    Date.parse(state.run_started_at) <
+                (thread.runStartedAt === null ||
+                    Date.parse(thread.runStartedAt) <
                         Date.now() - STALE_RUN_MS);
             const status = stale ? "failed" : thread.runStatus;
             return {
                 threadId,
                 status,
-                runBy: status === "running" ? state.runner : null,
-                messages: thread.messages
-                    .filter((entry) => entry.seq >= fromSeq)
-                    .map((entry) => ({
-                        seq: entry.seq,
-                        message: {
-                            id: entry.id,
-                            role: entry.role,
-                            parts: entry.parts,
-                            ...(entry.metadata
-                                ? { metadata: entry.metadata }
-                                : {}),
-                        } as RunUIMessage,
-                    })),
+                runBy: status === "running" ? thread.runBy : null,
+                messages: thread.messages.map((entry) => ({
+                    seq: entry.seq,
+                    message: {
+                        id: entry.id,
+                        role: entry.role,
+                        parts: entry.parts,
+                        ...(entry.metadata ? { metadata: entry.metadata } : {}),
+                    } as RunUIMessage,
+                })),
             };
         },
         async claimRun(roomId, threadId, actor, runId, message) {
-            const result = await createThreadStore().claimRun({
+            const result = await threads.claimRun({
                 roomId,
                 threadId,
                 actorId: actor.id,
@@ -68,7 +60,7 @@ export function createSupabaseRunStore(): RunStore {
             return { outcome: result.outcome };
         },
         async writeMessage(roomId, threadId, actor, runId, message) {
-            const result = await createThreadStore().writeMessage({
+            const result = await threads.writeMessage({
                 roomId,
                 threadId,
                 actorId: actor.id,
@@ -82,7 +74,7 @@ export function createSupabaseRunStore(): RunStore {
             return result.seq;
         },
         async finalizeRun(roomId, threadId, actor, runId, status) {
-            const result = await createThreadStore().finalizeRun({
+            const result = await threads.finalizeRun({
                 roomId,
                 threadId,
                 actorId: actor.id,
@@ -92,7 +84,7 @@ export function createSupabaseRunStore(): RunStore {
             return result.outcome === "finalized";
         },
         async retire(roomId, threadId, actor) {
-            await createThreadStore().archive(roomId, threadId, actor.id);
+            await threads.archive(roomId, threadId, actor.id);
             return { retired: true, retiredThreadId: threadId, threadId };
         },
     };

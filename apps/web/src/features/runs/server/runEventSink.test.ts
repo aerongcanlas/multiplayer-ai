@@ -59,12 +59,12 @@ test("settled waits for the delayed final snapshot", async () => {
     const delay = new Promise<void>((resolve) => {
         release = resolve;
     });
-    let persisted = false;
+    const persisted: string[] = [];
     const events = createRunEventSink(writer as never, {
         assistantMessageId: "assistant",
-        persist: async () => {
+        persist: async (message) => {
             await delay;
-            persisted = true;
+            persisted.push(JSON.stringify(message));
         },
     });
     events.sink.merge!(textStream());
@@ -76,5 +76,6 @@ test("settled waits for the delayed final snapshot", async () => {
     assert.equal(settled, false);
     release();
     await pending;
-    assert.equal(persisted, true);
+    assert.ok(persisted.length > 0);
+    assert.equal(new Set(persisted).size, persisted.length);
 });

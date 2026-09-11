@@ -11,7 +11,6 @@ import {
     createUIMessageStreamResponse,
 } from "ai";
 import { z } from "zod";
-import { claimRun } from "@/features/runs/lock";
 import { search } from "@/features/runs/server/runAdapters";
 import { createRunEventSink } from "@/features/runs/server/runEventSink";
 import { getRunActor } from "@/features/runs/server/runActor";
@@ -105,10 +104,9 @@ export async function startRun(
         metadata: { author: actor },
     };
 
-    let lock: Awaited<ReturnType<typeof claimRun>>;
+    let lock: Awaited<ReturnType<RunStore["claimRun"]>>;
     try {
-        lock = await claimRun(
-            store,
+        lock = await store.claimRun(
             roomId,
             threadId,
             actor,

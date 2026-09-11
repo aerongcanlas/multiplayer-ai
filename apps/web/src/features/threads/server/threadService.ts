@@ -82,16 +82,11 @@ export function createThreadService(store: ThreadStore = createThreadStore()) {
             );
         }
         try {
-            const page = store.listPage
-                ? await store.listPage(input.roomId, input.actorId, input)
-                : {
-                      threads: await store.list(
-                          input.roomId,
-                          input.actorId,
-                          input,
-                      ),
-                      nextCursor: null,
-                  };
+            const page = await store.listPage(
+                input.roomId,
+                input.actorId,
+                input,
+            );
             return {
                 threads: page.threads.map((thread) =>
                     threadSummarySchema.parse(thread),
@@ -128,13 +123,11 @@ export function createThreadService(store: ThreadStore = createThreadStore()) {
                 400,
             );
         }
-        const thread = await get(roomId, threadId, actorId);
-        return {
-            ...thread,
-            messages: thread.messages.filter(
-                (message) => message.seq >= fromSeq,
-            ),
-        };
+        try {
+            return await store.loadFrom(roomId, threadId, actorId, fromSeq);
+        } catch (error) {
+            throw mapError(error);
+        }
     }
 
     async function create(
@@ -163,9 +156,9 @@ export function createThreadService(store: ThreadStore = createThreadStore()) {
             else if (action.action === "archive")
                 await store.archive(roomId, threadId, actorId);
             else await store.restore(roomId, threadId, actorId);
-            return await store
-                .get(roomId, threadId, actorId)
-                .then((thread) => threadSummarySchema.parse(thread));
+            return threadSummarySchema.parse(
+                await store.getSummary(roomId, threadId, actorId),
+            );
         } catch (error) {
             throw mapError(error);
         }

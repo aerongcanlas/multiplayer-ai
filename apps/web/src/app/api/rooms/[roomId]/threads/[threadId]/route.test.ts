@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { ThreadService } from "@/features/threads/server/threadService";
 import { ThreadServiceError } from "@/features/threads/server/threadService";
 import { createThreadDetailHandlers } from "./route";
 
@@ -14,7 +13,10 @@ test("detail returns a uniform no-data 404 for inaccessible identities", async (
         get: async () => {
             throw new ThreadServiceError("not_found", "Thread not found", 404);
         },
-    } as unknown as ThreadService;
+        update: async () => {
+            throw new Error("unused");
+        },
+    };
     const handlers = createThreadDetailHandlers({
         getActor: async () => actor,
         getService: () => service,
@@ -32,6 +34,9 @@ test("detail returns a uniform no-data 404 for inaccessible identities", async (
 
 test("detail exposes typed archive conflicts", async () => {
     const service = {
+        get: async () => {
+            throw new Error("unused");
+        },
         update: async () => {
             throw new ThreadServiceError(
                 "busy",
@@ -39,7 +44,7 @@ test("detail exposes typed archive conflicts", async () => {
                 409,
             );
         },
-    } as unknown as ThreadService;
+    };
     const handlers = createThreadDetailHandlers({
         getActor: async () => actor,
         getService: () => service,

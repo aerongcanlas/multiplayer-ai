@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { ThreadService } from "@/features/threads/server/threadService";
 import { createThreadCollectionHandlers } from "./route";
 
 const roomId = crypto.randomUUID();
@@ -27,6 +26,7 @@ test("collection creation preserves the client id and returns 201", async () => 
     const creationId = crypto.randomUUID();
     let received: string | undefined;
     const service = {
+        list: async () => ({ threads: [], nextCursor: null }),
         create: async (_roomId: string, _actorId: string, id: string) => {
             received = id;
             return {
@@ -40,7 +40,7 @@ test("collection creation preserves the client id and returns 201", async () => 
                 currentRunId: null,
             };
         },
-    } as ThreadService;
+    };
     const handlers = createThreadCollectionHandlers({
         getActor: async () => actor,
         getService: () => service,

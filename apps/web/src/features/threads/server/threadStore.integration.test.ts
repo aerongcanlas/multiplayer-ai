@@ -165,6 +165,15 @@ test(
       1,
     );
     assert.equal(historyA.title, "Explain the plan");
+    const incremental = await store.loadFrom(
+      roomId,
+      threadA.id,
+      memberId,
+      retry.acceptedMessageSeq,
+    );
+    assert.equal(incremental.messages.length, 1);
+    assert.equal(incremental.messages[0]?.id, messageA);
+    assert.equal(incremental.runBy?.id, memberId);
 
     await assert.rejects(
       store.claimRun({

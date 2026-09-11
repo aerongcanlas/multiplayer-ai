@@ -33,6 +33,7 @@ export function createRunEventSink(
     let queue: Promise<void> = Promise.resolve();
     let failure: unknown;
     let terminal: RunEvent | undefined;
+    let snapshotDirty = false;
 
     function writeEvent(event: RunEvent) {
         const chunk = {
@@ -54,10 +55,11 @@ export function createRunEventSink(
     }
 
     async function persistCurrent(): Promise<void> {
-        if (snapshot === undefined) return;
+        if (snapshot === undefined || !snapshotDirty) return;
         lastPersistedAt = Date.now();
         try {
             await persistence.persist(snapshot);
+            snapshotDirty = false;
         } catch (error) {
             // Keep draining so the latest partial output can still be persisted.
             failure ??= error;
@@ -95,6 +97,7 @@ export function createRunEventSink(
 
                 for await (const next of reader) {
                     snapshot = next;
+                    snapshotDirty = true;
                     if (Date.now() - lastPersistedAt >= SNAPSHOT_INTERVAL_MS) {
                         await persistCurrent();
                     }
@@ -117,6 +120,7 @@ export function createRunEventSink(
                     ...snapshot,
                     metadata: { ...snapshot.metadata, ...metadata },
                 };
+                snapshotDirty = true;
                 await persistCurrent();
             });
         },
@@ -130,22 +134,28 @@ export function createRunEventSink(
         },
         finish(status) {
             if (!terminal) return;
-            const { runId } = terminal;
-            writeEvent(
-                status === "finished" && terminal.kind === "run.finished"
-                    ? terminal
-                    : status === "cancelled"
-                      ? { kind: "run.cancelled", runId }
-                      : {
-                            kind: "run.failed",
-                            runId,
-                            error:
-                                terminal.kind === "run.failed"
-                                    ? terminal.error
-                                    : "Run could not complete",
-                        },
-            );
+            writeEvent(terminalEventFor(status, terminal));
             terminal = undefined;
         },
+    };
+}
+
+function terminalEventFor(
+    status: Exclude<RunStatus, "running">,
+    terminal: RunEvent,
+): RunEvent {
+    if (status === "finished" && terminal.kind === "run.finished") {
+        return terminal;
+    }
+    if (status === "cancelled") {
+        return { kind: "run.cancelled", runId: terminal.runId };
+    }
+    return {
+        kind: "run.failed",
+        runId: terminal.runId,
+        error:
+            terminal.kind === "run.failed"
+                ? terminal.error
+                : "Run could not complete",
     };
 }
