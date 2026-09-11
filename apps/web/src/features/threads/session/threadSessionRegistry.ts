@@ -64,6 +64,7 @@ export class ThreadSessionRegistry {
     private readonly chatFactory: NonNullable<RegistryOptions["chatFactory"]>;
     private readonly onAlreadyAccepted?: RegistryOptions["onAlreadyAccepted"];
     private selection: { roomId: string; threadId: string } | null = null;
+    private readonly personalSelections = new Map<string, string>();
     private version = 0;
 
     constructor(
@@ -109,15 +110,18 @@ export class ThreadSessionRegistry {
     }
 
     select(roomId: string, threadId: string) {
+        const changed =
+            this.selection?.roomId !== roomId ||
+            this.selection.threadId !== threadId;
         this.selection = { roomId, threadId };
+        this.personalSelections.set(roomId, threadId);
         this.ensure(roomId, threadId);
         this.evictIdleTranscripts();
+        if (changed) this.emit();
     }
 
     selected(roomId: string) {
-        return this.selection?.roomId === roomId
-            ? this.selection.threadId
-            : undefined;
+        return this.personalSelections.get(roomId);
     }
 
     hydrate(
@@ -214,6 +218,20 @@ export class ThreadSessionRegistry {
         session.state.draftRevision += 1;
         this.emit();
         return session.state.draftRevision;
+    }
+
+    setDraftIfRevision(
+        roomId: string,
+        threadId: string,
+        revision: number,
+        draft: string,
+    ) {
+        const session = this.get(roomId, threadId);
+        if (session === undefined || session.state.draftRevision !== revision) {
+            return false;
+        }
+        this.setDraft(roomId, threadId, draft);
+        return true;
     }
 
     clearAcceptedDraft(roomId: string, threadId: string, revision: number) {
@@ -328,6 +346,7 @@ export class ThreadSessionRegistry {
             .map(({ chat }) => chat.stop().catch(() => undefined));
         this.sessions.clear();
         this.selection = null;
+        this.personalSelections.clear();
         this.userId = userId;
         this.emit();
         await Promise.all(stops);

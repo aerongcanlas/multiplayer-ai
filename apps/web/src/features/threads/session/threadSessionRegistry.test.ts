@@ -141,6 +141,26 @@ test("accepted revision clears without overwriting a newer retry edit", () => {
     );
 });
 
+test("a captured suggestion updates only its original unchanged draft", () => {
+    const registry = new ThreadSessionRegistry("alice", {
+        chatFactory: () => new FakeChat(),
+    });
+    const captured = registry.setDraft("room", "a", "draft A");
+    registry.setDraft("room", "b", "draft B");
+
+    assert.equal(
+        registry.setDraftIfRevision("room", "a", captured, "suggested A"),
+        true,
+    );
+    assert.equal(registry.get("room", "a")?.state.draft, "suggested A");
+    assert.equal(registry.get("room", "b")?.state.draft, "draft B");
+    assert.equal(
+        registry.setDraftIfRevision("room", "a", captured, "late overwrite"),
+        false,
+    );
+    assert.equal(registry.get("room", "a")?.state.draft, "suggested A");
+});
+
 test("local fresh sessions remain distinguishable until durable creation", () => {
     const registry = new ThreadSessionRegistry("alice", {
         chatFactory: () => new FakeChat(),

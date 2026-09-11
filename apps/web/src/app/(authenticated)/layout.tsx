@@ -1,6 +1,5 @@
 import { SidebarInset, SidebarProvider } from "@/components/ui/Sidebar";
 import { getCurrentUser } from "@/features/auth/server/getCurrentUser";
-import RoomList from "@/features/rooms/components/RoomList";
 import { getJoinedRooms } from "@/features/rooms/queries/getJoinedRooms";
 import { ThreadSessionProvider } from "@/features/threads/session/ThreadSessionProvider";
 import { redirect } from "next/navigation";
@@ -23,15 +22,7 @@ export default async function AuthenticatedLayout({
     return (
         <ThreadSessionProvider key={user.id} userId={user.id}>
             <SidebarProvider>
-                <AppSidebar
-                    roomList={
-                        <RoomList
-                            title="Your Rooms"
-                            rooms={rooms}
-                            variant="short"
-                        />
-                    }
-                />
+                <AppSidebar rooms={rooms} />
                 <SidebarInset>{children}</SidebarInset>
             </SidebarProvider>
         </ThreadSessionProvider>

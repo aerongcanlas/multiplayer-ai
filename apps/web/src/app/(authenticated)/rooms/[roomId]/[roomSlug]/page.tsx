@@ -1,10 +1,6 @@
-import {
-    Box,
-    ResizableHandle,
-    ResizablePanel,
-    ResizablePanelGroup,
-} from "@/components/ui";
+import { Box } from "@/components/ui";
 import { getCurrentUser } from "@/features/auth/server/getCurrentUser";
+import { RoomWorkspace } from "@/features/rooms/components/RoomWorkspace/RoomWorkspace";
 import { getRoomPageData } from "@/features/rooms/queries/roomPageQueries";
 import { toRunActor } from "@/features/runs/server/runActor";
 import { runRuntime } from "@/features/runs/server/runRuntime";
@@ -91,63 +87,43 @@ async function RoomPage({ params, searchParams }: Props) {
 
     return (
         <PromptSuggestionProvider>
-            <ResizablePanelGroup
-                orientation="vertical"
-                className="min-h-screen w-full"
-            >
-                <ResizablePanel defaultSize="60%" minSize="40%">
-                    <Box className="flex h-full min-h-0 flex-col">
-                        <Box className="grid shrink-0 grid-cols-[minmax(0,1fr)_minmax(0,auto)_minmax(0,1fr)] items-center gap-3 border-b px-4 py-2">
-                            <Box className="col-start-2 min-w-0 truncate text-lg font-semibold">
-                                {roomPageData.room.name}
+            <RoomWorkspace
+                header={
+                    <Box className="grid shrink-0 grid-cols-[minmax(0,1fr)_minmax(0,auto)_minmax(0,1fr)] items-center gap-3 border-b px-4 py-2 max-md:pl-14">
+                        <Box className="col-start-2 min-w-0 truncate text-lg font-semibold">
+                            {roomPageData.room.name}
+                        </Box>
+                        {roomPageData.currentMembership.isAdmin && (
+                            <Box className="col-start-3 justify-self-end">
+                                <InviteUserModal roomId={roomId} />
                             </Box>
-                            {roomPageData.currentMembership.isAdmin && (
-                                <Box className="col-start-3 justify-self-end">
-                                    <InviteUserModal roomId={roomId} />
-                                </Box>
-                            )}
-                        </Box>
-
-                        <Box className="min-h-0 flex-1">
-                            <ResizablePanelGroup>
-                                <ResizablePanel defaultSize="60%" minSize="30%">
-                                    <AIActivityPanel
-                                        key={roomId}
-                                        roomId={roomId}
-                                        currentUser={currentUser}
-                                        initialThreadId={thread.threadId}
-                                        initialMessages={thread.messages}
-                                        initialStatus={thread.status}
-                                        initialRunBy={thread.runBy}
-                                        initialSeq={thread.lastSeq}
-                                        initialThreadDurable={
-                                            selectedThreadId !== undefined
-                                        }
-                                    />
-                                </ResizablePanel>
-
-                                <ResizableHandle />
-
-                                <ResizablePanel minSize="30%">
-                                    <GroupChatPanel
-                                        key={roomId}
-                                        roomId={roomId}
-                                        currentUserId={user.id}
-                                        initialMessages={messages}
-                                        members={members}
-                                    />
-                                </ResizablePanel>
-                            </ResizablePanelGroup>
-                        </Box>
+                        )}
                     </Box>
-                </ResizablePanel>
-
-                <ResizableHandle />
-
-                <ResizablePanel defaultSize="40%" minSize="30%">
-                    <PromptVotePanel />
-                </ResizablePanel>
-            </ResizablePanelGroup>
+                }
+                aiPanel={
+                    <AIActivityPanel
+                        key={roomId}
+                        roomId={roomId}
+                        currentUser={currentUser}
+                        initialThreadId={thread.threadId}
+                        initialMessages={thread.messages}
+                        initialStatus={thread.status}
+                        initialRunBy={thread.runBy}
+                        initialSeq={thread.lastSeq}
+                        initialThreadDurable={selectedThreadId !== undefined}
+                    />
+                }
+                memberChatPanel={
+                    <GroupChatPanel
+                        key={roomId}
+                        roomId={roomId}
+                        currentUserId={user.id}
+                        initialMessages={messages}
+                        members={members}
+                    />
+                }
+                promptPanel={<PromptVotePanel />}
+            />
         </PromptSuggestionProvider>
     );
 }

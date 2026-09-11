@@ -11,6 +11,8 @@ type JoinRoomLinkProps = {
     roomSlug: string;
     children: ReactNode;
     className?: string;
+    threadId?: string;
+    onNavigate?: () => void;
 };
 
 export function JoinRoomLink({
@@ -18,14 +20,22 @@ export function JoinRoomLink({
     roomSlug,
     children,
     className,
+    threadId,
+    onNavigate,
 }: JoinRoomLinkProps) {
     const router = useRouter();
     const [isPending, startTransition] = useTransition();
-    const href = `/rooms/${roomId}/${roomSlug}`;
+    const href = `/rooms/${roomId}/${roomSlug}${threadId === undefined ? "" : `?thread=${encodeURIComponent(threadId)}`}`;
 
     function handleClick(event: MouseEvent<HTMLAnchorElement>) {
         // Preserve open-in-new-tab and similar browser behavior.
-        if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+        if (
+            event.button !== 0 ||
+            event.metaKey ||
+            event.ctrlKey ||
+            event.shiftKey ||
+            event.altKey
+        ) {
             return;
         }
 
@@ -47,6 +57,7 @@ export function JoinRoomLink({
             }
 
             router.push(href);
+            onNavigate?.();
         });
     }
 

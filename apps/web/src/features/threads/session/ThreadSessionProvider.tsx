@@ -32,6 +32,8 @@ const FALLBACK_REFRESH_MS = 5_000;
 type SessionContextValue = {
     registry: ThreadSessionRegistry;
     reconciler: ThreadReconciler;
+    /** Select a room thread without remounting the room's live panels. */
+    selectThread(roomId: string, threadId: string): void;
     observeRoom(roomId: string): () => void;
     subscribeRoomHints(roomId: string, listener: () => void): () => void;
 };
@@ -75,6 +77,9 @@ export function ThreadSessionProvider({
                 })
                 .subscribe((status) => {
                     if (status === "SUBSCRIBED") {
+                        roomHintListeners.current
+                            .get(roomId)
+                            ?.forEach((listener) => listener());
                         void runtime.reconciler.poll();
                     }
                 });
@@ -112,7 +117,15 @@ export function ThreadSessionProvider({
     );
 
     const value = useMemo<SessionContextValue>(
-        () => ({ ...runtime, observeRoom, subscribeRoomHints }),
+        () => ({
+            ...runtime,
+            selectThread: (roomId, threadId) => {
+                runtime.registry.select(roomId, threadId);
+                runtime.reconciler.select(roomId, threadId);
+            },
+            observeRoom,
+            subscribeRoomHints,
+        }),
         [observeRoom, runtime, subscribeRoomHints],
     );
 

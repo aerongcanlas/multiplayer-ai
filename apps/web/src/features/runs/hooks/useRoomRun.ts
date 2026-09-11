@@ -8,7 +8,8 @@ import type {
     RunUIMessage,
 } from "@multiplayer-ai/domain";
 import { refusalNotice } from "@multiplayer-ai/domain";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { selectionFromLocation } from "@/features/threads/components/RoomThreadNavigation/threadNavigationState";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import {
     useThreadSession,
     useThreadSessionContext,
@@ -52,7 +53,13 @@ export function useRoomRun({
             seq: initialSeq,
             durable: initialThreadDurable,
         });
-        return { initialThreadId, activeThreadId: initialThreadId };
+        const explicit =
+            typeof window === "undefined"
+                ? undefined
+                : selectionFromLocation(window.location.href, roomId);
+        const selected =
+            explicit ?? registry.selected(roomId) ?? initialThreadId;
+        return { initialThreadId, activeThreadId: selected };
     });
     if (selection.initialThreadId !== initialThreadId) {
         registry.hydrate(roomId, initialThreadId, {
@@ -64,6 +71,11 @@ export function useRoomRun({
         });
         setSelection({ initialThreadId, activeThreadId: initialThreadId });
     }
+    useSyncExternalStore(
+        registry.subscribe,
+        registry.snapshot,
+        registry.snapshot,
+    );
     const activeThreadId =
         selection.initialThreadId === initialThreadId
             ? selection.activeThreadId
@@ -71,7 +83,42 @@ export function useRoomRun({
     const session = useThreadSession(roomId, activeThreadId);
     const { messages, sendMessage, stop, status, error, clearError } =
         useChat<RunUIMessage>({ chat: session.chat as Chat<RunUIMessage> });
-    const pendingCreationIdRef = useRef<string | null>(null);
+
+    useEffect(() => {
+        const sync = () => {
+            if (window.location.pathname.split("/")[2] !== roomId) return;
+            const threadId =
+                selectionFromLocation(window.location.href, roomId) ??
+                window.history.state?.roomThreadSelection ??
+                initialThreadId;
+            registry.select(roomId, threadId);
+            setSelection({ initialThreadId, activeThreadId: threadId });
+        };
+        // Seed the entry so Back to a local fresh draft restores that exact session.
+        if (selectionFromLocation(window.location.href, roomId) === undefined) {
+            window.history.replaceState(
+                {
+                    ...window.history.state,
+                    roomThreadSelection: activeThreadId,
+                },
+                "",
+            );
+        }
+        window.addEventListener("popstate", sync);
+        const unsubscribe = registry.subscribe(() => {
+            const threadId = registry.selected(roomId);
+            if (threadId !== undefined)
+                setSelection((previous) =>
+                    previous.activeThreadId === threadId
+                        ? previous
+                        : { initialThreadId, activeThreadId: threadId },
+                );
+        });
+        return () => {
+            window.removeEventListener("popstate", sync);
+            unsubscribe();
+        };
+    }, [activeThreadId, initialThreadId, registry, roomId]);
 
     useEffect(() => {
         registry.select(roomId, activeThreadId);
@@ -116,6 +163,15 @@ export function useRoomRun({
                         requestThreadId,
                     );
                     registry.select(roomId, requestThreadId);
+                    const url = new URL(window.location.href);
+                    if (url.pathname.split("/")[2] === roomId) {
+                        url.searchParams.set("thread", requestThreadId);
+                        window.history.replaceState(
+                            window.history.state,
+                            "",
+                            url,
+                        );
+                    }
                     setSelection({
                         initialThreadId,
                         activeThreadId: requestThreadId,
@@ -170,48 +226,24 @@ export function useRoomRun({
         ],
     );
 
-    const newThread = useCallback(async () => {
+    const newThread = useCallback(() => {
         registry.setRequestError(roomId, activeThreadId, null);
-        let body: unknown;
-        const creationId = pendingCreationIdRef.current ?? crypto.randomUUID();
-        pendingCreationIdRef.current = creationId;
-        try {
-            const response = await fetch(`/api/rooms/${roomId}/threads`, {
-                method: "POST",
-                headers: { "content-type": "application/json" },
-                body: JSON.stringify({ creationId }),
-            });
-            body = await response.json();
-            if (!response.ok) {
-                registry.setRequestError(
-                    roomId,
-                    activeThreadId,
-                    refusalNotice(body, "Could not start a new thread."),
-                );
-                return;
-            }
-        } catch {
-            registry.setRequestError(
-                roomId,
-                activeThreadId,
-                "Could not start a new thread.",
-            );
-            return;
-        }
-        const { thread } = body as { thread?: { id?: unknown } };
-        if (typeof thread?.id !== "string") {
-            registry.setRequestError(
-                roomId,
-                activeThreadId,
-                "Could not start a new thread.",
-            );
-            return;
-        }
-        pendingCreationIdRef.current = null;
-        registry.hydrate(roomId, thread.id, { messages: [], durable: true });
-        registry.select(roomId, thread.id);
-        setSelection({ initialThreadId, activeThreadId: thread.id });
-    }, [activeThreadId, initialThreadId, registry, roomId]);
+        const localThreadId = crypto.randomUUID();
+        registry.hydrate(roomId, localThreadId, {
+            messages: [],
+            durable: false,
+        });
+        registry.select(roomId, localThreadId);
+        reconciler.clearSelection();
+        const url = new URL(window.location.href);
+        url.searchParams.delete("thread");
+        window.history.pushState(
+            { roomThreadSelection: localThreadId },
+            "",
+            url,
+        );
+        setSelection({ initialThreadId, activeThreadId: localThreadId });
+    }, [activeThreadId, initialThreadId, reconciler, registry, roomId]);
 
     const dismissNotice = useCallback(() => {
         registry.setRequestError(roomId, activeThreadId, null);
@@ -231,7 +263,14 @@ export function useRoomRun({
             ? null
             : refusalNotice(safeJson(error.message), error.message));
 
+    const retryHistory = useCallback(() => {
+        if (session.state.durable) {
+            void reconciler.refresh(roomId, activeThreadId);
+        }
+    }, [activeThreadId, reconciler, roomId, session.state.durable]);
+
     return {
+        activeThreadId,
         messages,
         startRun,
         newThread,
@@ -241,6 +280,11 @@ export function useRoomRun({
         runBy: session.state.runBy,
         threadRetired: session.state.retired,
         isConnected: session.state.syncError === null,
+        loadState: session.state.loadState,
+        historyError:
+            session.state.loadState === "loaded"
+                ? null
+                : session.state.syncError,
         notice,
         dismissNotice,
         model: session.state.model,
@@ -251,6 +295,7 @@ export function useRoomRun({
             registry.setDraft(roomId, activeThreadId, draft),
         clearAcceptedDraft: (revision: number) =>
             registry.clearAcceptedDraft(roomId, activeThreadId, revision),
+        retryHistory,
     };
 }
 
