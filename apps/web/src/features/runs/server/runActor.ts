@@ -16,8 +16,8 @@ export function toRunActor(
     return profile ?? { id: user.id, name: fallbackName(user) };
 }
 
-export async function getRunActor(): Promise<RunMessageAuthor | null> {
-    const user = await getCurrentUser();
+export async function getRunActor(request?: Request): Promise<RunMessageAuthor | null> {
+    const user = await getCurrentUser(request);
     if (user === null) return null;
     return toRunActor(user, await runRuntime.profile(user));
 }

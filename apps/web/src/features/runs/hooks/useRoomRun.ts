@@ -175,6 +175,7 @@ export function useRoomRun({
                     },
                 );
                 void reconciler.refresh(roomId, requestThreadId);
+                return requestThreadId;
             } catch (requestError) {
                 registry.setRequestError(
                     roomId,
@@ -268,8 +269,15 @@ export function useRoomRun({
         draftRevision: session.state.draftRevision,
         setDraft: (draft: string) =>
             registry.setDraft(roomId, activeThreadId, draft),
-        clearAcceptedDraft: (revision: number) =>
-            registry.clearAcceptedDraft(roomId, activeThreadId, revision),
+        clearAcceptedDraft: (targetKey: string, revision: number) => {
+            const prefix = `${roomId}:`;
+            if (!targetKey.startsWith(prefix)) return;
+            registry.clearAcceptedDraft(
+                roomId,
+                targetKey.slice(prefix.length),
+                revision,
+            );
+        },
         retryHistory,
     };
 }

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { ThreadServiceError } from "@/features/threads/server/threadService";
-import { createThreadDetailHandlers } from "./route";
+import { createThreadDetailHandlers } from "@/features/threads/server/threadDetailRoute";
 
 const roomId = crypto.randomUUID();
 const threadId = crypto.randomUUID();

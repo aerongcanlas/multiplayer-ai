@@ -20,7 +20,7 @@ export type AsyncDraft = {
     value: string;
 };
 
-export type SubmissionResult = { accepted?: boolean } | void;
+export type SubmissionResult = { accepted?: boolean; targetKey?: string } | void;
 
 export function createComposerDraft(
     targetKey: string,

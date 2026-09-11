@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { startRunRequestSchema } from "@multiplayer-ai/domain";
-import { runStoreFailure, startRun, withActor } from "./route";
+import {
+    runStoreFailure,
+    startRun,
+    withActor,
+} from "@/features/runs/server/runRoute";
 import { createInMemoryRunStore } from "@multiplayer-ai/orchestration";
 import { runRuntime } from "@/features/runs/server/runRuntime";
 

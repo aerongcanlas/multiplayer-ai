@@ -156,10 +156,18 @@ function AIActivityPanel({
                 model={model}
                 onValueChange={setDraft}
                 onModelChange={setModel}
-                onAccepted={clearAcceptedDraft}
+                onAccepted={(revision, result) =>
+                    clearAcceptedDraft(
+                        result?.targetKey ?? `${roomId}:${activeThreadId}`,
+                        revision,
+                    )
+                }
                 onSubmit={async (text) => {
-                    await startRun(text);
-                    return { accepted: true };
+                    const acceptedThreadId = await startRun(text);
+                    return {
+                        accepted: true,
+                        targetKey: `${roomId}:${acceptedThreadId}`,
+                    };
                 }}
                 controls={
                     streamingHere ? (

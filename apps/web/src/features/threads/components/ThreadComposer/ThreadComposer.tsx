@@ -27,7 +27,7 @@ export interface ThreadComposerProps {
         text: string,
         revision: number,
     ): Promise<SubmissionResult> | SubmissionResult;
-    onAccepted?(revision: number): void;
+    onAccepted?(revision: number, result: SubmissionResult): void;
     disabled?: boolean;
     busy?: boolean;
     placeholder?: string;
@@ -92,7 +92,7 @@ function ThreadComposer({
             const result = await onSubmit(submission.text, submission.revision);
             if (result?.accepted !== false) {
                 if (onAccepted !== undefined) {
-                    onAccepted(submission.revision);
+                    onAccepted(submission.revision, result);
                 } else {
                     const next = resolveSubmission(
                         draftRef.current,

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createThreadCollectionHandlers } from "./route";
+import { createThreadCollectionHandlers } from "@/features/threads/server/threadCollectionRoute";
 
 const roomId = crypto.randomUUID();
 const actor = { id: crypto.randomUUID(), name: "Member" };

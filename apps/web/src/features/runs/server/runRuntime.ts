@@ -23,6 +23,8 @@ type RunRuntime = {
 };
 
 const isMockMode = process.env.AI_MODE?.trim().toLowerCase() === "mock";
+const isMockProviderMode =
+    process.env.AI_MODE?.trim().toLowerCase() === "mock-provider";
 
 const globalForRunStore = globalThis as unknown as { __runStore?: RunStore };
 
@@ -42,4 +44,14 @@ const liveRuntime: RunRuntime = {
     broadcaster: (roomId) => createSupabaseBroadcaster(roomId),
 };
 
-export const runRuntime: RunRuntime = isMockMode ? mockRuntime : liveRuntime;
+const realStoreMockProviderRuntime: RunRuntime = {
+    ...liveRuntime,
+    describe: () => "mock-provider",
+    modelOverride: () => createScriptedRunModel(),
+};
+
+export const runRuntime: RunRuntime = isMockMode
+    ? mockRuntime
+    : isMockProviderMode
+      ? realStoreMockProviderRuntime
+      : liveRuntime;
