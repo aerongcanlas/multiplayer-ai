@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { startRunRequestSchema } from "@multiplayer-ai/domain";
-import { runStoreFailure, withActor } from "./route";
+import { runStoreFailure, startRun, withActor } from "./route";
+import { createInMemoryRunStore } from "@multiplayer-ai/orchestration";
+import { runRuntime } from "@/features/runs/server/runRuntime";
 
 test("legacy room-only run requests fail closed", () => {
     assert.equal(
@@ -11,6 +13,75 @@ test("legacy room-only run requests fail closed", () => {
             model: "openai:gpt-5-mini",
         }).success,
         false,
+    );
+});
+
+test("replay failure after claim finalizes the owned token failed", async (t) => {
+    const store = createInMemoryRunStore();
+    const roomId = crypto.randomUUID();
+    const threadId = store.createThread(roomId);
+    const actor = { id: crypto.randomUUID(), name: "Actor" };
+    const load = store.loadFrom;
+    t.mock.method(store, "loadFrom", async () => {
+        throw new Error("replay unavailable");
+    });
+    t.mock.method(runRuntime, "store", () => store);
+    t.mock.method(runRuntime, "broadcaster", () => ({
+        send: async () => {},
+        close: async () => {},
+    }));
+    t.mock.method(console, "error", () => {});
+    const response = await startRun(
+        new Request("http://localhost/api/runs", {
+            method: "POST",
+            body: JSON.stringify({
+                roomId,
+                threadId,
+                userMessageId: crypto.randomUUID(),
+                prompt: "hello",
+                model: "openai:gpt-5-mini",
+            }),
+        }),
+        actor,
+    );
+    assert.equal(response.status, 500);
+    assert.equal((await load(roomId, actor, threadId, 0)).status, "failed");
+});
+
+test("accepted prompt retry launches no provider and remains once in selected replay", async (t) => {
+    const store = createInMemoryRunStore();
+    const roomId = crypto.randomUUID();
+    const threadId = store.createThread(roomId);
+    const actor = { id: crypto.randomUUID(), name: "Actor" };
+    const userMessageId = crypto.randomUUID();
+    await store.claimRun(roomId, threadId, actor, crypto.randomUUID(), {
+        id: userMessageId,
+        role: "user",
+        parts: [{ type: "text", text: "hello" }],
+    });
+    t.mock.method(runRuntime, "store", () => store);
+    const provider = t.mock.method(runRuntime, "modelOverride", () => {
+        throw new Error("must not launch");
+    });
+    const response = await startRun(
+        new Request("http://localhost/api/runs", {
+            method: "POST",
+            body: JSON.stringify({
+                roomId,
+                threadId,
+                userMessageId,
+                prompt: "hello",
+                model: "openai:gpt-5-mini",
+            }),
+        }),
+        actor,
+    );
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).outcome, "already_accepted");
+    assert.equal(provider.mock.callCount(), 0);
+    assert.equal(
+        (await store.loadFrom(roomId, actor, threadId, 0)).messages.length,
+        1,
     );
 });
 

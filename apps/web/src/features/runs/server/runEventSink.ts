@@ -1,7 +1,8 @@
 import type {
-        RunEvent,
-        RunMessageMetadata,
-        RunUIMessage,
+    RunEvent,
+    RunMessageMetadata,
+    RunStatus,
+    RunUIMessage,
 } from "@multiplayer-ai/domain";
 import type { EventSink } from "@multiplayer-ai/orchestration";
 import {
@@ -20,6 +21,7 @@ export type SnapshotPersistence = {
 export type RunEventSink = {
     sink: EventSink;
     settled(): Promise<void>;
+    finish(status: Exclude<RunStatus, "running">): void;
 };
 
 export function createRunEventSink(
@@ -29,35 +31,54 @@ export function createRunEventSink(
     let snapshot: RunUIMessage | undefined;
     let lastPersistedAt = 0;
     let queue: Promise<void> = Promise.resolve();
+    let failure: unknown;
+    let terminal: RunEvent | undefined;
+
+    function writeEvent(event: RunEvent) {
+        const chunk = {
+            type: `data-${event.kind}`,
+            data: event,
+            ...(event.kind === "run.tool" ? { transient: true } : {}),
+        } as InferUIMessageChunk<RunUIMessage>;
+        try {
+            writer.write(chunk);
+        } catch {
+            /* Client may have disconnected. */
+        }
+    }
 
     function enqueue(task: () => Promise<void>): void {
         queue = queue.then(task).catch((error) => {
-            console.error("[run snapshot]", error);
+            failure ??= error;
         });
     }
 
     async function persistCurrent(): Promise<void> {
         if (snapshot === undefined) return;
         lastPersistedAt = Date.now();
-        await persistence.persist(snapshot);
+        try {
+            await persistence.persist(snapshot);
+        } catch (error) {
+            // Keep draining so the latest partial output can still be persisted.
+            failure ??= error;
+        }
     }
 
     const sink: EventSink = {
         emit(event: RunEvent) {
-            const chunk = {
-                type: `data-${event.kind}`,
-                data: event,
-                ...(event.kind === "run.tool" ? { transient: true } : {}),
-            } as InferUIMessageChunk<RunUIMessage>;
-            try {
-                writer.write(chunk);
-            } catch {
-                // Stream may already be closed (e.g. client disconnected); safe to ignore.
-            }
+            if (
+                event.kind === "run.finished" ||
+                event.kind === "run.failed" ||
+                event.kind === "run.cancelled"
+            )
+                terminal = event;
+            else writeEvent(event);
         },
         merge(stream) {
             const [toClient, toSnapshots] = stream.tee();
-            writer.merge(toClient as ReadableStream<InferUIMessageChunk<RunUIMessage>>);
+            writer.merge(
+                toClient as ReadableStream<InferUIMessageChunk<RunUIMessage>>,
+            );
 
             enqueue(async () => {
                 const reader = readUIMessageStream<RunUIMessage>({
@@ -92,11 +113,39 @@ export function createRunEventSink(
             }
             enqueue(async () => {
                 if (snapshot === undefined) return;
-                snapshot = { ...snapshot, metadata: { ...snapshot.metadata, ...metadata } };
+                snapshot = {
+                    ...snapshot,
+                    metadata: { ...snapshot.metadata, ...metadata },
+                };
                 await persistCurrent();
             });
         },
     };
 
-    return { sink, settled: () => queue };
+    return {
+        sink,
+        settled: async () => {
+            await queue;
+            if (failure !== undefined) throw failure;
+        },
+        finish(status) {
+            if (!terminal) return;
+            const { runId } = terminal;
+            writeEvent(
+                status === "finished" && terminal.kind === "run.finished"
+                    ? terminal
+                    : status === "cancelled"
+                      ? { kind: "run.cancelled", runId }
+                      : {
+                            kind: "run.failed",
+                            runId,
+                            error:
+                                terminal.kind === "run.failed"
+                                    ? terminal.error
+                                    : "Run could not complete",
+                        },
+            );
+            terminal = undefined;
+        },
+    };
 }

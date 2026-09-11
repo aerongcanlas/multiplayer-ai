@@ -14,7 +14,6 @@ export type {
     EventSink,
     LockResult,
     RetireResult,
-    RunClaimOptions,
     RunInput,
     RunStore,
     ThreadMessage,

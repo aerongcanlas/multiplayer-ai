@@ -18,6 +18,7 @@ type MemoryThread = {
     status: RunStatus;
     runBy: RunMessageAuthor | null;
     runStartedAt: number | null;
+    runId: string | null;
     messages: Map<string, ThreadMessage>;
 };
 
@@ -25,6 +26,7 @@ export function createInMemoryRunStore(): RunStore & {
     createThread(roomId: string): string;
 } {
     const threads = new Map<string, MemoryThread>();
+    const messageRuns = new Map<string, string>();
     let nextSeq = 0;
 
     function openThread(roomId: string): MemoryThread {
@@ -35,6 +37,7 @@ export function createInMemoryRunStore(): RunStore & {
             status: "finished",
             runBy: null,
             runStartedAt: null,
+            runId: null,
             messages: new Map(),
         };
         threads.set(thread.id, thread);
@@ -59,6 +62,7 @@ export function createInMemoryRunStore(): RunStore & {
             thread.status = "failed";
             thread.runBy = null;
             thread.runStartedAt = null;
+            thread.runId = null;
         }
         return thread;
     }
@@ -84,43 +88,76 @@ export function createInMemoryRunStore(): RunStore & {
             };
         },
 
-        async acquireLock(
+        async claimRun(
             roomId,
             threadId,
             actor,
-            options,
+            runId,
+            userMessage,
         ): Promise<LockResult> {
             const thread = expireDeadRun(findThread(roomId, threadId));
-            if (options?.exclusive !== false && thread.status === "running") {
-                return { acquired: false, runBy: thread.runBy };
+            if (thread.retired)
+                throw Object.assign(new Error("Thread is archived"), {
+                    code: "P0001",
+                });
+            for (const candidate of threads.values()) {
+                if (candidate.messages.has(userMessage.id)) {
+                    if (candidate.id !== threadId)
+                        throw new Error("Message belongs to another thread");
+                    return { outcome: "already_accepted" };
+                }
             }
+            if (thread.status === "running")
+                throw Object.assign(new Error("Run is busy"), {
+                    code: "55P03",
+                });
             thread.status = "running";
+            thread.runId = runId;
             thread.runBy = actor;
             thread.runStartedAt = Date.now();
-            return {
-                acquired: true,
-                threadId: thread.id,
-                messages: ordered(thread).map((entry) => entry.message),
-            };
+            thread.messages.set(userMessage.id, {
+                message: userMessage,
+                seq: ++nextSeq,
+            });
+            messageRuns.set(userMessage.id, runId);
+            return { outcome: "accepted" };
         },
 
-        async upsertMessage(threadId, message: RunUIMessage) {
-            const thread = threads.get(threadId);
-            if (thread === undefined) {
-                throw new Error(`Unknown thread ${threadId}`);
+        async writeMessage(
+            roomId,
+            threadId,
+            _actor,
+            runId,
+            message: RunUIMessage,
+        ) {
+            const thread = expireDeadRun(findThread(roomId, threadId));
+            if (thread.status !== "running" || thread.runId !== runId)
+                throw new Error("Run no longer owns thread");
+            for (const candidate of threads.values()) {
+                if (
+                    candidate.id !== threadId &&
+                    candidate.messages.has(message.id)
+                )
+                    throw new Error("Message belongs to another thread");
             }
             const existing = thread.messages.get(message.id);
+            if (existing && messageRuns.get(message.id) !== runId)
+                throw new Error("Message belongs to another run");
             const seq = existing?.seq ?? ++nextSeq;
             thread.messages.set(message.id, { message, seq });
+            messageRuns.set(message.id, runId);
             return seq;
         },
 
-        async releaseLock(threadId, status) {
-            const thread = threads.get(threadId);
-            if (thread === undefined) return;
+        async finalizeRun(roomId, threadId, _actor, runId, status) {
+            const thread = expireDeadRun(findThread(roomId, threadId));
+            if (thread.status !== "running" || thread.runId !== runId)
+                return false;
             thread.status = status;
             thread.runBy = null;
             thread.runStartedAt = null;
+            thread.runId = null;
+            return true;
         },
 
         async retire(roomId, threadId): Promise<RetireResult> {
