@@ -2,6 +2,7 @@ import { SidebarInset, SidebarProvider } from "@/components/ui/Sidebar";
 import { getCurrentUser } from "@/features/auth/server/getCurrentUser";
 import RoomList from "@/features/rooms/components/RoomList";
 import { getJoinedRooms } from "@/features/rooms/queries/getJoinedRooms";
+import { ThreadSessionProvider } from "@/features/threads/session/ThreadSessionProvider";
 import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
 import { AppSidebar } from "./_components/AppSidebar";
@@ -20,17 +21,19 @@ export default async function AuthenticatedLayout({
     const rooms = await getJoinedRooms(user.id);
 
     return (
-        <SidebarProvider>
-            <AppSidebar
-                roomList={
-                    <RoomList
-                        title="Your Rooms"
-                        rooms={rooms}
-                        variant="short"
-                    />
-                }
-            />
-            <SidebarInset>{children}</SidebarInset>
-        </SidebarProvider>
+        <ThreadSessionProvider key={user.id} userId={user.id}>
+            <SidebarProvider>
+                <AppSidebar
+                    roomList={
+                        <RoomList
+                            title="Your Rooms"
+                            rooms={rooms}
+                            variant="short"
+                        />
+                    }
+                />
+                <SidebarInset>{children}</SidebarInset>
+            </SidebarProvider>
+        </ThreadSessionProvider>
     );
 }

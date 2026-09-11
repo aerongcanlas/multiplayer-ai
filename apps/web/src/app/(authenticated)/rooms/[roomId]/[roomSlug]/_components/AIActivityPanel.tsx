@@ -22,6 +22,7 @@ interface Props {
     initialStatus?: RunStatus;
     initialRunBy?: RunMessageAuthor | null;
     initialSeq?: number;
+    initialThreadDurable?: boolean;
 }
 
 function AIActivityPanel({
@@ -32,6 +33,7 @@ function AIActivityPanel({
     initialStatus,
     initialRunBy,
     initialSeq,
+    initialThreadDurable,
 }: Props) {
     const { draftPrompt, setDraftPrompt } = usePromptSuggestions();
     const {
@@ -56,6 +58,7 @@ function AIActivityPanel({
         initialStatus,
         initialRunBy,
         initialSeq,
+        initialThreadDurable,
     });
 
     const streamingHere = status === "submitted" || status === "streaming";
@@ -89,10 +92,7 @@ function AIActivityPanel({
                     >
                         New Thread
                     </Button>
-                    <RunModelSwitcher
-                        value={model}
-                        onChange={setModel}
-                    />
+                    <RunModelSwitcher value={model} onChange={setModel} />
                 </div>
             </div>
             {threadRetired && (
@@ -105,11 +105,7 @@ function AIActivityPanel({
                     <TextBox className="text-xs text-red-300/80">
                         {notice}
                     </TextBox>
-                    <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={dismissNotice}
-                    >
+                    <Button size="sm" variant="ghost" onClick={dismissNotice}>
                         Dismiss
                     </Button>
                 </BoxRow>
@@ -120,10 +116,7 @@ function AIActivityPanel({
                     threadStatus === "failed" || threadStatus === "cancelled"
                 }
             />
-            <ContextWindowBar
-                messages={messages}
-                model={model}
-            />
+            <ContextWindowBar messages={messages} model={model} />
             {threadStatus === "running" && otherRunner !== null && (
                 <TextBox className="mx-2 mt-1 text-[10px] text-white/40">
                     {otherRunner.name} is running the agent.

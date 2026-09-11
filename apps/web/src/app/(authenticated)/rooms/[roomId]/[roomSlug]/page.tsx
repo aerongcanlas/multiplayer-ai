@@ -120,6 +120,9 @@ async function RoomPage({ params, searchParams }: Props) {
                                         initialStatus={thread.status}
                                         initialRunBy={thread.runBy}
                                         initialSeq={thread.lastSeq}
+                                        initialThreadDurable={
+                                            selectedThreadId !== undefined
+                                        }
                                     />
                                 </ResizablePanel>
 
