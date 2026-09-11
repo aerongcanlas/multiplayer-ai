@@ -7,7 +7,8 @@
   },
   "scripts": {
     "lint": "eslint .",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test:threads": "node --import ../orchestration/node_modules/tsx/dist/loader.mjs --test src/threads.test.ts"
   },
   "dependencies": {
     "ai": "^7.0.66",

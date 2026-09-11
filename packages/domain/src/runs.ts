@@ -117,10 +117,11 @@ export type SearchFn = (
 
 export const startRunRequestSchema = z.object({
     roomId: z.uuid(),
-    goal: z.string().trim().min(1).max(4_000),
+    threadId: z.uuid(),
+    prompt: z.string().trim().min(1).max(4_000),
     model: z.enum(modelKeys),
     effort: z.enum(effortLevels).optional(),
-    userMessageId: z.uuid().optional(),
+    userMessageId: z.uuid(),
 });
 export type StartRunRequest = z.infer<typeof startRunRequestSchema>;
 
@@ -175,5 +176,7 @@ export function refusalNotice(payload: unknown, fallback: string): string {
     if (!parsed.success) return fallback;
 
     const { error, runBy } = parsed.data;
-    return runBy === null ? error : `${runBy.name} is already running the agent.`;
+    return runBy === null
+        ? error
+        : `${runBy.name} is already running the agent.`;
 }

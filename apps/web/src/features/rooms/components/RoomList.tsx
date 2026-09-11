@@ -9,26 +9,32 @@ import {
 } from "@/components/ui";
 import { buttonVariants } from "@/components/ui/Button";
 import { JoinRoomLink } from "@/features/rooms/components/JoinRoomLink";
+import RoomThreadNavigation from "@/features/threads/components/RoomThreadNavigation/RoomThreadNavigation";
 import type { JoinedRoom } from "@/features/rooms/types/room";
 
 interface Props {
     title: string;
     rooms: JoinedRoom[];
     variant: "short" | "full";
+    onNavigate?: () => void;
 }
 
-function RoomList({ title, rooms, variant = "short" }: Props) {
+function RoomList({ title, rooms, variant = "short", onNavigate }: Props) {
     return (
         <Box className="m-2">
             {variant === "full" && <p>{title}</p>}
-            <BoxColumn>
-                {rooms.map((room) => {
-                    return (
-                        <BoxColumn
-                            key={room.id}
-                            className="py-1"
-                        >
-                            {variant === "full" && (
+            {variant === "short" && (
+                <RoomThreadNavigation
+                    key={rooms.map(({ id }) => id).join(":")}
+                    rooms={rooms}
+                    onNavigate={onNavigate}
+                />
+            )}
+            {variant === "full" && (
+                <BoxColumn>
+                    {rooms.map((room) => {
+                        return (
+                            <BoxColumn key={room.id} className="py-1">
                                 <Card>
                                     <CardHeader>
                                         <CardTitle>{room.name}</CardTitle>
@@ -64,23 +70,11 @@ function RoomList({ title, rooms, variant = "short" }: Props) {
                                         </CardAction>
                                     </CardHeader>
                                 </Card>
-                            )}
-                            {variant === "short" && (
-                                <Card>
-                                    <CardHeader>
-                                        <JoinRoomLink
-                                            roomId={room.id}
-                                            roomSlug={room.slug}
-                                        >
-                                            {room.name}
-                                        </JoinRoomLink>
-                                    </CardHeader>
-                                </Card>
-                            )}
-                        </BoxColumn>
-                    );
-                })}
-            </BoxColumn>
+                            </BoxColumn>
+                        );
+                    })}
+                </BoxColumn>
+            )}
         </Box>
     );
 }

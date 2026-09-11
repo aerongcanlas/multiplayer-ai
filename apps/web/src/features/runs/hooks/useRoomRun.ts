@@ -1,26 +1,22 @@
 "use client";
 
-import { useChat } from "@ai-sdk/react";
+import { Chat, useChat } from "@ai-sdk/react";
 import type {
     ModelKey,
     RunMessageAuthor,
     RunStatus,
-    RunThreadEvent,
     RunUIMessage,
 } from "@multiplayer-ai/domain";
+import { refusalNotice } from "@multiplayer-ai/domain";
 import {
-    RUN_THREAD_EVENT,
-    parseRunThreadEvent,
-    refusalNotice,
-    runThreadTopic,
-} from "@multiplayer-ai/domain";
-import { DefaultChatTransport } from "ai";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createClient } from "@/lib/supabase/client";
-
-const transport = new DefaultChatTransport<RunUIMessage>({ api: "/api/runs" });
-
-const DISCONNECTED_POLL_MS = 5000;
+    selectionFromLocation,
+    shouldAdoptPromotedThread,
+} from "@/features/threads/components/RoomThreadNavigation/threadNavigationState";
+import { useCallback, useEffect, useState } from "react";
+import {
+    useThreadSession,
+    useThreadSessionContext,
+} from "@/features/threads/session/ThreadSessionProvider";
 
 function safeJson(text: string): unknown {
     try {
@@ -30,21 +26,6 @@ function safeJson(text: string): unknown {
     }
 }
 
-type ThreadSnapshot = {
-    threadId: string;
-    status: RunStatus;
-    runBy: RunMessageAuthor | null;
-    messages: Array<{ seq: number; message: RunUIMessage }>;
-};
-
-type ThreadView = {
-    threadId: string;
-    lastSeq: number;
-    status: RunStatus;
-    runBy: RunMessageAuthor | null;
-    retired: boolean;
-};
-
 interface Options {
     roomId: string;
     currentUser: RunMessageAuthor;
@@ -53,6 +34,8 @@ interface Options {
     initialStatus?: RunStatus;
     initialRunBy?: RunMessageAuthor | null;
     initialSeq?: number;
+    initialThreadDurable?: boolean;
+    initialThreadRetired?: boolean;
 }
 
 export function useRoomRun({
@@ -63,221 +46,271 @@ export function useRoomRun({
     initialStatus = "finished",
     initialRunBy = null,
     initialSeq = 0,
+    initialThreadDurable = true,
+    initialThreadRetired = false,
 }: Options) {
-    const supabase = useMemo(() => createClient(), []);
-    const [model, setModel] = useState<ModelKey>("google:gemini-3.6-flash");
-    const { messages, sendMessage, setMessages, stop, status, error, clearError } =
-        useChat<RunUIMessage>({
-            id: roomId,
+    const { registry, reconciler, observeRoom } = useThreadSessionContext();
+    const [activeThreadId, setActiveThreadId] = useState(() => {
+        registry.hydrate(roomId, initialThreadId, {
             messages: initialMessages,
-            transport,
+            status: initialStatus,
+            runBy: initialRunBy,
+            seq: initialSeq,
+            durable: initialThreadDurable,
+            retired: initialThreadRetired,
         });
-
-    const [view, setView] = useState<ThreadView>({
-        threadId: initialThreadId,
-        lastSeq: initialSeq,
-        status: initialStatus,
-        runBy: initialRunBy,
-        retired: false,
+        const explicit =
+            typeof window === "undefined"
+                ? undefined
+                : selectionFromLocation(window.location.href, roomId);
+        const selected =
+            explicit ?? registry.selected(roomId) ?? initialThreadId;
+        return selected;
     });
-    const [isConnected, setIsConnected] = useState(false);
-    const [refusal, setRefusal] = useState<string | null>(null);
-    const viewRef = useRef(view);
-    const ownRunRef = useRef(false);
-    const readingRef = useRef(false);
-    const staleRef = useRef(false);
-    const setMessagesRef = useRef(setMessages);
+    const session = useThreadSession(roomId, activeThreadId);
+    const { messages, sendMessage, stop, status, error, clearError } =
+        useChat<RunUIMessage>({ chat: session.chat as Chat<RunUIMessage> });
+
     useEffect(() => {
-        setMessagesRef.current = setMessages;
-    });
-
-    const updateView = useCallback((next: ThreadView) => {
-        viewRef.current = next;
-        setView(next);
-    }, []);
-
-    const adoptThread = useCallback(
-        (threadId: string, retired: boolean) => {
-            updateView({
-                threadId,
-                lastSeq: 0,
-                status: "finished",
-                runBy: null,
-                retired,
-            });
-            setMessagesRef.current([]);
-        },
-        [updateView],
-    );
-
-    const applyMessages = useCallback((incoming: Array<RunUIMessage>) => {
-        if (incoming.length === 0) return;
-        setMessagesRef.current((current) => {
-            const next = [...current];
-            for (const message of incoming) {
-                const index = next.findIndex((item) => item.id === message.id);
-                if (index === -1) next.push(message);
-                else next[index] = message;
-            }
-            return next;
+        const sync = () => {
+            if (window.location.pathname.split("/")[2] !== roomId) return;
+            const threadId =
+                selectionFromLocation(window.location.href, roomId) ??
+                window.history.state?.roomThreadSelection ??
+                initialThreadId;
+            registry.select(roomId, threadId);
+            setActiveThreadId(threadId);
+        };
+        // Seed the entry so Back to a local fresh draft restores that exact session.
+        if (selectionFromLocation(window.location.href, roomId) === undefined) {
+            window.history.replaceState(
+                {
+                    ...window.history.state,
+                    roomThreadSelection: activeThreadId,
+                },
+                "",
+            );
+        }
+        window.addEventListener("popstate", sync);
+        const unsubscribe = registry.subscribeSelection(() => {
+            const threadId = registry.selected(roomId);
+            if (threadId !== undefined)
+                setActiveThreadId((previous) =>
+                    previous === threadId ? previous : threadId,
+                );
         });
-    }, []);
+        return () => {
+            window.removeEventListener("popstate", sync);
+            unsubscribe();
+        };
+    }, [activeThreadId, initialThreadId, registry, roomId]);
 
-    const readThread = useCallback(async () => {
-        const response = await fetch(
-            `/api/runs?roomId=${roomId}&from=${viewRef.current.lastSeq}`,
-        );
-        if (!response.ok) return;
-        const snapshot = (await response.json()) as ThreadSnapshot;
+    useEffect(() => {
+        registry.select(roomId, activeThreadId);
+        if (session.state.durable) reconciler.select(roomId, activeThreadId);
+        else reconciler.clearSelection();
+    }, [activeThreadId, reconciler, registry, roomId, session.state.durable]);
 
-        if (snapshot.threadId !== viewRef.current.threadId) {
-            adoptThread(snapshot.threadId, true);
-            staleRef.current = true;
-            return;
-        }
-
-        applyMessages(snapshot.messages.map((entry) => entry.message));
-        updateView({
-            ...viewRef.current,
-            status: snapshot.status,
-            runBy: snapshot.runBy,
-            lastSeq: Math.max(
-                viewRef.current.lastSeq,
-                snapshot.messages.at(-1)?.seq ?? 0,
-            ),
-        });
-    }, [adoptThread, applyMessages, roomId, updateView]);
-
-    const sync = useCallback(async () => {
-        if (ownRunRef.current || readingRef.current) {
-            staleRef.current = true;
-            return;
-        }
-        readingRef.current = true;
-        try {
-            do {
-                staleRef.current = false;
-                await readThread();
-            } while (staleRef.current);
-        } catch {
-            // Offline or mid-navigation; the next announcement or resubscribe reads again.
-        } finally {
-            readingRef.current = false;
-        }
-    }, [readThread]);
-
-    const applyEvent = useCallback(
-        (event: RunThreadEvent) => {
-            const current = viewRef.current;
-
-            if (event.kind === "retired") {
-                if (event.retiredThreadId !== current.threadId) return;
-                adoptThread(event.threadId, true);
-                return;
-            }
-
-            if (event.threadId !== current.threadId) return;
-
-            updateView({ ...current, status: event.status, runBy: event.runBy });
-            if (event.kind === "progress" && event.seq >= current.lastSeq) {
-                void sync();
-            }
-        },
-        [adoptThread, sync, updateView],
-    );
+    useEffect(() => observeRoom(roomId), [observeRoom, roomId]);
 
     const streamingHere = status === "submitted" || status === "streaming";
     useEffect(() => {
-        ownRunRef.current = streamingHere;
-        if (!streamingHere) void sync();
-    }, [streamingHere, sync]);
+        if (!session.state.durable) return;
+        reconciler.setRunning(roomId, activeThreadId, streamingHere);
+        if (!streamingHere) void reconciler.refresh(roomId, activeThreadId);
+    }, [
+        activeThreadId,
+        reconciler,
+        roomId,
+        session.state.durable,
+        streamingHere,
+    ]);
 
-    useEffect(() => {
-        if (isConnected) return;
-        void sync();
-        const interval = setInterval(() => void sync(), DISCONNECTED_POLL_MS);
-        return () => clearInterval(interval);
-    }, [isConnected, sync]);
-
-    useEffect(() => {
-        const channel = supabase
-            .channel(runThreadTopic(roomId), { config: { private: true } })
-            .on("broadcast", { event: RUN_THREAD_EVENT }, ({ payload }) => {
-                const event = parseRunThreadEvent(payload);
-                if (event !== null) applyEvent(event);
-            })
-            .subscribe((subscribeStatus) => {
-                setIsConnected(subscribeStatus === "SUBSCRIBED");
-                if (subscribeStatus === "SUBSCRIBED") void sync();
-            });
-
-        return () => {
-            setIsConnected(false);
-            void supabase.removeChannel(channel);
-        };
-    }, [applyEvent, roomId, supabase, sync]);
-
-    function startRun(goal: string) {
-        setRefusal(null);
-        updateView({ ...viewRef.current, retired: false });
-        const userMessageId = crypto.randomUUID();
-        return sendMessage(
-            {
-                id: userMessageId,
-                role: "user",
-                parts: [{ type: "text", text: goal }],
-                metadata: { author: currentUser },
-            },
-            { body: { roomId, goal, model, userMessageId } },
-        );
-    }
-
-    const newThread = useCallback(async () => {
-        setRefusal(null);
-        let body: unknown;
-        try {
-            const response = await fetch(`/api/runs?roomId=${roomId}`, {
-                method: "DELETE",
-            });
-            body = await response.json();
-            if (!response.ok) {
-                setRefusal(refusalNotice(body, "Could not start a new thread."));
-                return;
+    const startRun = useCallback(
+        async (goal: string) => {
+            registry.setRequestError(roomId, activeThreadId, null);
+            const userMessageId = registry.prepareSubmission(
+                roomId,
+                activeThreadId,
+                goal,
+            );
+            let requestThreadId = activeThreadId;
+            try {
+                let targetSendMessage = sendMessage;
+                if (!session.state.durable) {
+                    const initiatingThreadId = activeThreadId;
+                    requestThreadId = await createDurableThread(
+                        roomId,
+                        initiatingThreadId,
+                    );
+                    const stillSelected = shouldAdoptPromotedThread(
+                        registry.selected(roomId),
+                        initiatingThreadId,
+                    );
+                    registry.promoteLocal(
+                        roomId,
+                        initiatingThreadId,
+                        requestThreadId,
+                    );
+                    if (stillSelected) {
+                        registry.select(roomId, requestThreadId);
+                        const url = new URL(window.location.href);
+                        if (url.pathname.split("/")[2] === roomId) {
+                            url.searchParams.set("thread", requestThreadId);
+                            window.history.replaceState(
+                                window.history.state,
+                                "",
+                                url,
+                            );
+                        }
+                        setActiveThreadId(requestThreadId);
+                    }
+                    targetSendMessage = (
+                        registry.ensure(roomId, requestThreadId)
+                            .chat as Chat<RunUIMessage>
+                    ).sendMessage;
+                }
+                await targetSendMessage(
+                    {
+                        id: userMessageId,
+                        role: "user",
+                        parts: [{ type: "text", text: goal }],
+                        metadata: { author: currentUser },
+                    },
+                    {
+                        body: {
+                            roomId,
+                            threadId: requestThreadId,
+                            prompt: goal,
+                            model: session.state.model,
+                            userMessageId,
+                        },
+                    },
+                );
+                void reconciler.refresh(roomId, requestThreadId);
+                return requestThreadId;
+            } catch (requestError) {
+                registry.setRequestError(
+                    roomId,
+                    requestThreadId,
+                    requestError instanceof Error
+                        ? refusalNotice(
+                              safeJson(requestError.message),
+                              requestError.message,
+                          )
+                        : "Could not start the run.",
+                );
+                throw requestError;
             }
-        } catch {
-            setRefusal("Could not start a new thread.");
-            return;
-        }
-        const { threadId } = body as { threadId?: unknown };
-        if (typeof threadId !== "string") {
-            setRefusal("Could not start a new thread.");
-            return;
-        }
-        adoptThread(threadId, false);
-    }, [adoptThread, roomId]);
+        },
+        [
+            activeThreadId,
+            currentUser,
+            reconciler,
+            registry,
+            roomId,
+            sendMessage,
+            session.state.durable,
+            session.state.model,
+        ],
+    );
 
-    const notice =
-        refusal ??
-        (error === undefined ? null : refusalNotice(safeJson(error.message), error.message));
+    const newThread = useCallback(() => {
+        registry.setRequestError(roomId, activeThreadId, null);
+        const localThreadId = crypto.randomUUID();
+        registry.hydrate(roomId, localThreadId, {
+            messages: [],
+            durable: false,
+        });
+        registry.select(roomId, localThreadId);
+        reconciler.clearSelection();
+        const url = new URL(window.location.href);
+        url.searchParams.delete("thread");
+        window.history.pushState(
+            { roomThreadSelection: localThreadId },
+            "",
+            url,
+        );
+        setActiveThreadId(localThreadId);
+    }, [activeThreadId, reconciler, registry, roomId]);
 
     const dismissNotice = useCallback(() => {
-        setRefusal(null);
+        registry.setRequestError(roomId, activeThreadId, null);
+        registry.setSyncError(roomId, activeThreadId, null);
         clearError();
-    }, [clearError]);
+    }, [activeThreadId, clearError, registry, roomId]);
+
+    const setModel = useCallback(
+        (model: ModelKey) => registry.setModel(roomId, activeThreadId, model),
+        [activeThreadId, registry, roomId],
+    );
+
+    const notice =
+        session.state.requestError ??
+        session.state.syncError ??
+        (error === undefined
+            ? null
+            : refusalNotice(safeJson(error.message), error.message));
+
+    const retryHistory = useCallback(() => {
+        if (session.state.durable) {
+            void reconciler.refresh(roomId, activeThreadId);
+        }
+    }, [activeThreadId, reconciler, roomId, session.state.durable]);
 
     return {
+        activeThreadId,
         messages,
         startRun,
         newThread,
         stop,
         status,
-        threadStatus: view.status,
-        runBy: view.runBy,
-        threadRetired: view.retired,
-        isConnected,
+        threadStatus: session.state.status,
+        runBy: session.state.runBy,
+        threadRetired: session.state.retired,
+        isConnected: session.state.syncError === null,
+        loadState: session.state.loadState,
+        historyError:
+            session.state.loadState === "loaded"
+                ? null
+                : session.state.syncError,
         notice,
         dismissNotice,
-        model,
+        model: session.state.model,
         setModel,
+        draft: session.state.draft,
+        draftRevision: session.state.draftRevision,
+        setDraft: (draft: string) =>
+            registry.setDraft(roomId, activeThreadId, draft),
+        clearAcceptedDraft: (targetKey: string, revision: number) => {
+            const prefix = `${roomId}:`;
+            if (!targetKey.startsWith(prefix)) return;
+            registry.clearAcceptedDraft(
+                roomId,
+                targetKey.slice(prefix.length),
+                revision,
+            );
+        },
+        retryHistory,
     };
+}
+
+async function createDurableThread(roomId: string, creationId: string) {
+    const response = await fetch(`/api/rooms/${roomId}/threads`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ creationId }),
+    });
+    const body = (await response.json()) as {
+        thread?: { id?: unknown };
+        error?: unknown;
+    };
+    if (!response.ok || typeof body.thread?.id !== "string") {
+        throw new Error(
+            typeof body.error === "string"
+                ? body.error
+                : "Could not create the thread.",
+        );
+    }
+    return body.thread.id;
 }

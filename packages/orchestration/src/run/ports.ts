@@ -12,6 +12,7 @@ import type {
 export type RunInput = {
     runId: string;
     roomId: string;
+    threadId: string;
     goal: string;
     model: ModelKey;
     effort?: EffortLevel;
@@ -33,21 +34,15 @@ export type ThreadRecord = {
     messages: Array<RunUIMessage>;
     status: RunStatus;
     runBy: RunMessageAuthor | null;
+    retired: boolean;
     lastSeq: number;
 };
 
-export type LockResult =
-    | { acquired: true; threadId: string; messages: Array<RunUIMessage> }
-    | { acquired: false; runBy: RunMessageAuthor | null };
+export type LockResult = { outcome: "accepted" | "already_accepted" };
 
 export type RetireResult =
     | { retired: true; retiredThreadId: string; threadId: string }
     | { retired: false; runBy: RunMessageAuthor | null };
-
-export type RunClaimOptions = {
-    /** When false the claim never loses — the caller's policy refuses nobody. */
-    exclusive?: boolean;
-};
 
 export const STALE_RUN_MS = 360_000;
 
@@ -55,23 +50,39 @@ export interface RunStore {
     loadFrom(
         roomId: string,
         actor: RunMessageAuthor,
+        threadId: string,
         fromSeq: number,
     ): Promise<{
         threadId: string;
         status: RunStatus;
         runBy: RunMessageAuthor | null;
+        retired: boolean;
         messages: Array<ThreadMessage>;
     }>;
-    /**
-     * One conditional update: succeeds only where no live run holds the thread. Pass
-     * `exclusive: false` to waive that predicate — see `features/runs/lock`.
-     */
-    acquireLock(
+    claimRun(
         roomId: string,
+        threadId: string,
         actor: RunMessageAuthor,
-        options?: RunClaimOptions,
+        runId: string,
+        userMessage: RunUIMessage,
     ): Promise<LockResult>;
-    upsertMessage(threadId: string, message: RunUIMessage): Promise<number>;
-    releaseLock(threadId: string, status: RunStatus): Promise<void>;
-    retire(roomId: string, actor: RunMessageAuthor): Promise<RetireResult>;
+    writeMessage(
+        roomId: string,
+        threadId: string,
+        actor: RunMessageAuthor,
+        runId: string,
+        message: RunUIMessage,
+    ): Promise<number>;
+    finalizeRun(
+        roomId: string,
+        threadId: string,
+        actor: RunMessageAuthor,
+        runId: string,
+        status: Exclude<RunStatus, "running">,
+    ): Promise<boolean>;
+    retire(
+        roomId: string,
+        threadId: string,
+        actor: RunMessageAuthor,
+    ): Promise<RetireResult>;
 }

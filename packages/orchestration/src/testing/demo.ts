@@ -18,8 +18,8 @@ const sink: EventSink = {
 const roomId = "room-1";
 const actor = { id: crypto.randomUUID(), name: "Demo" };
 const store = createInMemoryRunStore();
-const lock = await store.acquireLock(roomId, actor);
-if (!lock.acquired) throw new Error("expected an idle thread");
+const threadId = store.createThread(roomId);
+const runId = crypto.randomUUID();
 const userMessage: RunUIMessage = {
   id: "msg-1",
   role: "user",
@@ -31,10 +31,12 @@ const userMessage: RunUIMessage = {
   ],
   metadata: { author: actor },
 };
-const seedMessages = [...lock.messages, userMessage];
-await store.upsertMessage(lock.threadId, userMessage);
+await store.claimRun(roomId, threadId, actor, runId, userMessage);
+const seedMessages = (
+  await store.loadFrom(roomId, actor, threadId, 0)
+).messages.map((entry) => entry.message);
 
-let status: RunStatus = "running";
+let status: Exclude<RunStatus, "running"> = "failed";
 const stream = createUIMessageStream<RunUIMessage>({
   execute: async ({ writer }) => {
     const runSink: EventSink = {
@@ -52,8 +54,9 @@ const stream = createUIMessageStream<RunUIMessage>({
     try {
       await runTurn(
         {
-          runId: "run-1",
+          runId,
           roomId,
+          threadId,
           goal: "Recommend a client-side state library for the room UI.",
           model: "openai:gpt-5-mini",
         },
@@ -79,9 +82,9 @@ const stream = createUIMessageStream<RunUIMessage>({
   originalMessages: seedMessages,
   onEnd: async ({ messages }) => {
     for (const message of messages) {
-      await store.upsertMessage(lock.threadId, message);
+      await store.writeMessage(roomId, threadId, actor, runId, message);
     }
-    await store.releaseLock(lock.threadId, status);
+    await store.finalizeRun(roomId, threadId, actor, runId, status);
   },
 });
 
@@ -89,6 +92,6 @@ for await (const _chunk of stream) {
   // Drain the stream so execute() and onEnd() run to completion.
 }
 
-const record = await loadThread(store, roomId, actor);
+const record = await loadThread(store, roomId, threadId, actor);
 console.log(`\n${events.length} events emitted`);
 console.log("persisted messages:", record.messages.length);

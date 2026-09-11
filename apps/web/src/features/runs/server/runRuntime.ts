@@ -1,17 +1,18 @@
 import type { ModelKey, RunMessageAuthor } from "@multiplayer-ai/domain";
 import {
-    createInMemoryRunStore,
     createScriptedRunModel,
     type RunStore,
 } from "@multiplayer-ai/orchestration";
 import type { LanguageModel } from "ai";
 import type { User } from "@supabase/supabase-js";
 import {
-    NO_BROADCAST,
     createSupabaseBroadcaster,
     type RunBroadcaster,
 } from "@/features/runs/server/runBroadcast";
-import { createSupabaseRunStore, readUserProfile } from "@/features/runs/server/runStore";
+import {
+    createSupabaseRunStore,
+    readUserProfile,
+} from "@/features/runs/server/runStore";
 
 type RunRuntime = {
     /** What the response header reports served the run. */
@@ -23,16 +24,8 @@ type RunRuntime = {
 };
 
 const isMockMode = process.env.AI_MODE?.trim().toLowerCase() === "mock";
-
-const globalForRunStore = globalThis as unknown as { __runStore?: RunStore };
-
-const mockRuntime: RunRuntime = {
-    describe: () => "mock",
-    modelOverride: () => createScriptedRunModel(),
-    profile: async () => null,
-    store: () => (globalForRunStore.__runStore ??= createInMemoryRunStore()),
-    broadcaster: () => NO_BROADCAST,
-};
+const isMockProviderMode =
+    process.env.AI_MODE?.trim().toLowerCase() === "mock-provider";
 
 const liveRuntime: RunRuntime = {
     describe: (model) => model,
@@ -42,4 +35,13 @@ const liveRuntime: RunRuntime = {
     broadcaster: (roomId) => createSupabaseBroadcaster(roomId),
 };
 
-export const runRuntime: RunRuntime = isMockMode ? mockRuntime : liveRuntime;
+const realStoreMockProviderRuntime: RunRuntime = {
+    ...liveRuntime,
+    describe: () => (isMockMode ? "mock" : "mock-provider"),
+    modelOverride: () => createScriptedRunModel(),
+};
+
+export const runRuntime: RunRuntime =
+    isMockMode || isMockProviderMode
+        ? realStoreMockProviderRuntime
+        : liveRuntime;
