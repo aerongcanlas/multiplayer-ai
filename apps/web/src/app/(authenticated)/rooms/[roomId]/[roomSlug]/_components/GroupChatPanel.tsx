@@ -94,7 +94,8 @@ function GroupChatPanel({
         );
         if (messageIds.length === 0 || isGenerating) return;
 
-        beginGeneration();
+        const requestId = beginGeneration(roomId);
+        if (requestId === null) return;
 
         try {
             const result = await suggestPromptsFromMessages({
@@ -103,13 +104,13 @@ function GroupChatPanel({
             });
 
             if (!result.success) {
-                failGeneration(result.error);
+                failGeneration(requestId, result.error);
                 return;
             }
 
-            completeGeneration(result.suggestion);
+            completeGeneration(requestId, result.suggestion);
         } catch {
-            failGeneration("Could not generate prompt suggestions");
+            failGeneration(requestId, "Could not generate prompt suggestions");
         }
     }, [
         selectedMessagePayload,
@@ -126,10 +127,7 @@ function GroupChatPanel({
                 <h2 className="text-sm font-medium">Group Chat</h2>
             </div>
 
-            <Box
-                ref={containerRef}
-                className="min-h-0 flex-1 overflow-y-auto"
-            >
+            <Box ref={containerRef} className="min-h-0 flex-1 overflow-y-auto">
                 <Messages
                     currentUserId={currentUserId}
                     messages={messages}
@@ -172,10 +170,7 @@ function GroupChatPanel({
                 </Box>
             )}
 
-            <ChatMessageInput
-                disabled={!isConnected}
-                onSend={send}
-            />
+            <ChatMessageInput disabled={!isConnected} onSend={send} />
         </BoxColumn>
     );
 }

@@ -1,18 +1,17 @@
 "use client";
 
-import { BoxColumn, BoxRow, Button, TextBox } from "@/components/ui";
+import { BoxColumn, BoxRow, Button, Spinner, TextBox } from "@/components/ui";
 import ContextWindowBar from "@/features/runs/components/ContextWindowBar";
 import RunConversation from "@/features/runs/components/RunConversation";
-import RunModelSwitcher from "@/features/runs/components/RunModelSwitcher";
 import { useRoomRun } from "@/features/runs/hooks/useRoomRun";
 import { runLockEnabled } from "@/features/runs/lock/runLockConfig";
+import ThreadComposer from "@/features/threads/components/ThreadComposer/ThreadComposer";
+import ThreadWelcome from "@/features/threads/components/ThreadWelcome/ThreadWelcome";
 import type {
     RunMessageAuthor,
     RunStatus,
     RunUIMessage,
 } from "@multiplayer-ai/domain";
-import PromptInput from "./PromptInput";
-import { usePromptSuggestions } from "./PromptSuggestionProvider";
 
 interface Props {
     roomId: string;
@@ -35,8 +34,8 @@ function AIActivityPanel({
     initialSeq,
     initialThreadDurable,
 }: Props) {
-    const { draftPrompt, setDraftPrompt } = usePromptSuggestions();
     const {
+        activeThreadId,
         messages,
         startRun,
         newThread,
@@ -50,6 +49,13 @@ function AIActivityPanel({
         dismissNotice,
         model,
         setModel,
+        draft,
+        draftRevision,
+        setDraft,
+        clearAcceptedDraft,
+        loadState,
+        historyError,
+        retryHistory,
     } = useRoomRun({
         roomId,
         currentUser,
@@ -64,8 +70,6 @@ function AIActivityPanel({
     const streamingHere = status === "submitted" || status === "streaming";
     const otherRunner =
         runBy !== null && runBy.id !== currentUser.id ? runBy : null;
-    // New Thread is refused mid-run in both modes, so it tracks the run, not the policy.
-    const runInFlight = streamingHere || threadStatus === "running";
     // The composer only yields to another member's run while the lock is on.
     const composerLocked =
         streamingHere || (runLockEnabled && threadStatus === "running");
@@ -75,24 +79,13 @@ function AIActivityPanel({
             <div className="flex shrink-0 items-center justify-between gap-2">
                 <TextBox>Agent Orchestrator Thread</TextBox>
                 <div className="flex items-center gap-2">
-                    {streamingHere && (
-                        <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => stop()}
-                        >
-                            Stop
-                        </Button>
-                    )}
                     <Button
                         size="sm"
                         variant="outline"
                         onClick={() => void newThread()}
-                        disabled={runInFlight}
                     >
                         New Thread
                     </Button>
-                    <RunModelSwitcher value={model} onChange={setModel} />
                 </div>
             </div>
             {threadRetired && (
@@ -100,7 +93,7 @@ function AIActivityPanel({
                     This thread was retired. Its history is kept.
                 </TextBox>
             )}
-            {notice !== null && (
+            {notice !== null && messages.length > 0 && (
                 <BoxRow className="mx-2 mt-2 shrink-0 items-center justify-between gap-2 rounded-lg bg-red-500/10 px-2 py-1">
                     <TextBox className="text-xs text-red-300/80">
                         {notice}
@@ -110,12 +103,28 @@ function AIActivityPanel({
                     </Button>
                 </BoxRow>
             )}
-            <RunConversation
-                messages={messages}
-                incomplete={
-                    threadStatus === "failed" || threadStatus === "cancelled"
-                }
-            />
+            {messages.length > 0 ? (
+                <RunConversation
+                    messages={messages}
+                    incomplete={
+                        threadStatus === "failed" ||
+                        threadStatus === "cancelled"
+                    }
+                />
+            ) : loadState === "loaded" ? (
+                <ThreadWelcome />
+            ) : loadState === "loading" && historyError === null ? (
+                <div className="flex min-h-0 flex-1 items-center justify-center">
+                    <Spinner aria-label="Loading thread history" />
+                </div>
+            ) : (
+                <div
+                    className="flex min-h-0 flex-1 items-center justify-center px-6 text-center text-sm text-destructive"
+                    role="alert"
+                >
+                    Thread history could not be loaded. Use Retry below.
+                </div>
+            )}
             <ContextWindowBar messages={messages} model={model} />
             {threadStatus === "running" && otherRunner !== null && (
                 <TextBox className="mx-2 mt-1 text-[10px] text-white/40">
@@ -127,17 +136,49 @@ function AIActivityPanel({
                     Reconnecting — other members&apos; turns may be delayed.
                 </TextBox>
             )}
-            <PromptInput
-                className="m-2 mt-2 h-20 shrink-0 rounded-2xl"
+            <ThreadComposer
+                className="m-2 mt-2 shrink-0"
+                targetKey={`${roomId}:${activeThreadId}`}
+                revision={draftRevision}
                 placeholder={
                     composerLocked && otherRunner !== null
                         ? `${otherRunner.name} is running the agent`
                         : "What should the agent do?"
                 }
-                disabled={composerLocked || status !== "ready"}
-                value={draftPrompt}
-                onValueChange={setDraftPrompt}
-                onSubmit={(text) => startRun(text)}
+                disabled={
+                    composerLocked ||
+                    status !== "ready" ||
+                    threadRetired ||
+                    loadState !== "loaded"
+                }
+                busy={composerLocked}
+                value={draft}
+                model={model}
+                onValueChange={setDraft}
+                onModelChange={setModel}
+                onAccepted={clearAcceptedDraft}
+                onSubmit={async (text) => {
+                    await startRun(text);
+                    return { accepted: true };
+                }}
+                controls={
+                    streamingHere ? (
+                        <Button
+                            size="sm"
+                            type="button"
+                            variant="outline"
+                            onClick={() => stop()}
+                        >
+                            Stop
+                        </Button>
+                    ) : undefined
+                }
+                error={messages.length === 0 ? notice : undefined}
+                onRetry={
+                    messages.length === 0 && historyError !== null
+                        ? retryHistory
+                        : undefined
+                }
             />
         </BoxColumn>
     );

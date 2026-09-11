@@ -4,7 +4,7 @@ import { Box, BoxColumn, Button, Spinner } from "@/components/ui";
 import { usePromptSuggestions } from "./PromptSuggestionProvider";
 
 function MissionControlPanel() {
-    const { suggestion, isGenerating, error, draftPrompt, setDraftPrompt } =
+    const { suggestion, isGenerating, error, draftPrompt, applyPrompt } =
         usePromptSuggestions();
 
     return (
@@ -70,7 +70,7 @@ function MissionControlPanel() {
                                             ? "secondary"
                                             : "outline"
                                     }
-                                    onClick={() => setDraftPrompt(prompt)}
+                                    onClick={() => applyPrompt(prompt)}
                                 >
                                     {draftPrompt === prompt
                                         ? "In composer"
