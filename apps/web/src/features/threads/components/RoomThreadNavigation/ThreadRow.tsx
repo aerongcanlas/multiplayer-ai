@@ -6,6 +6,8 @@ import type {
 } from "@multiplayer-ai/domain";
 import {
     Archive,
+    CircleAlert,
+    CircleStop,
     Check,
     LoaderCircle,
     Pencil,
@@ -17,6 +19,9 @@ import {
     Button,
     SidebarMenuSubButton,
     SidebarMenuSubItem,
+    Tooltip,
+    TooltipContent,
+    TooltipTrigger,
 } from "@/components/ui";
 
 type ThreadRowProps = {
@@ -38,6 +43,16 @@ export function ThreadRow({
     const [error, setError] = useState<string | null>(null);
     const running = summary.runStatus === "running";
     const archived = summary.retiredAt !== null;
+    const stateLabel = running
+        ? "Running"
+        : summary.runStatus === "failed"
+          ? "Failed"
+          : summary.runStatus === "cancelled"
+            ? "Stopped"
+            : "Completed";
+    const description = `${summary.title} — ${archived ? "Archived, " : ""}${stateLabel}${running && !archived ? ". Stop or wait for the run to finish before archiving." : ""}`;
+    const actionClassName =
+        "rounded-[6px] hover:bg-sidebar-foreground/5 hover:text-sidebar-foreground aria-expanded:bg-transparent dark:hover:bg-sidebar-foreground/5 [@media(pointer:coarse)]:size-11";
 
     async function update(action: UpdateThreadRequest) {
         setBusy(true);
@@ -70,7 +85,7 @@ export function ThreadRow({
         <SidebarMenuSubItem>
             {editing ? (
                 <form
-                    className="flex items-center gap-1 px-1 py-1"
+                    className="flex min-h-8 min-w-0 items-center gap-1 px-2 py-1 [@media(pointer:coarse)]:min-h-11"
                     onSubmit={(event) => {
                         event.preventDefault();
                         void update({ action: "rename", title });
@@ -89,6 +104,7 @@ export function ThreadRow({
                     />
                     <Button
                         size="icon-xs"
+                        className={actionClassName}
                         variant="ghost"
                         type="submit"
                         disabled={busy || title.trim().length === 0}
@@ -98,6 +114,7 @@ export function ThreadRow({
                     </Button>
                     <Button
                         size="icon-xs"
+                        className={actionClassName}
                         variant="ghost"
                         type="button"
                         onClick={() => setEditing(false)}
@@ -107,36 +124,67 @@ export function ThreadRow({
                     </Button>
                 </form>
             ) : (
-                <SidebarMenuSubButton
-                    render={<button type="button" onClick={onSelect} />}
-                    isActive={selected}
-                    aria-current={selected ? "page" : undefined}
-                    aria-label={`Open thread ${summary.title}`}
+                <div
+                    className={`flex h-8 min-w-0 items-center rounded-[6px] pr-2 hover:bg-sidebar-foreground/5 has-focus-visible:bg-sidebar-foreground/5 [@media(pointer:coarse)]:h-11 ${selected ? "bg-sidebar-foreground/10" : ""}`}
                 >
-                    {running && (
-                        <LoaderCircle
-                            className="animate-spin"
-                            aria-hidden="true"
-                        />
-                    )}
-                    {!running && archived && <Archive aria-hidden="true" />}
-                    <span>{summary.title}</span>
-                    <span className="ml-auto text-[10px] text-muted-foreground">
-                        {running
-                            ? "Running"
-                            : summary.runStatus === "failed"
-                              ? "Failed"
-                              : summary.runStatus === "cancelled"
-                                ? "Stopped"
-                                : "Completed"}
-                    </span>
-                </SidebarMenuSubButton>
-            )}
-            <div className="absolute top-0.5 right-0 flex items-center gap-0.5 bg-sidebar opacity-0 transition-opacity group-focus-within/menu-sub-item:opacity-100 group-hover/menu-sub-item:opacity-100">
-                {!editing && (
-                    <>
+                    <Tooltip>
+                        <TooltipTrigger
+                            render={
+                                <SidebarMenuSubButton
+                                    className="h-8 flex-1 translate-x-0 gap-1.5 rounded-[6px] px-2 text-left hover:bg-transparent active:bg-transparent data-active:bg-transparent hover:text-sidebar-foreground active:text-sidebar-foreground data-active:text-sidebar-foreground [@media(pointer:coarse)]:h-11"
+                                    render={
+                                        <button
+                                            type="button"
+                                            onClick={onSelect}
+                                        />
+                                    }
+                                    isActive={selected}
+                                    aria-current={selected ? "page" : undefined}
+                                    aria-label={`Open thread ${description}`}
+                                />
+                            }
+                        >
+                            <span className="min-w-0 flex-1 truncate text-left">
+                                {summary.title}
+                            </span>
+                            {(running ||
+                                archived ||
+                                summary.runStatus === "failed" ||
+                                summary.runStatus === "cancelled") && (
+                                <span
+                                    className="flex shrink-0 items-center gap-1 text-muted-foreground"
+                                    aria-hidden="true"
+                                >
+                                    {running && (
+                                        <LoaderCircle className="size-3.5 motion-safe:animate-spin" />
+                                    )}
+                                    {!running &&
+                                        summary.runStatus === "failed" && (
+                                            <CircleAlert className="size-3.5" />
+                                        )}
+                                    {!running &&
+                                        summary.runStatus === "cancelled" && (
+                                            <CircleStop className="size-3.5" />
+                                        )}
+                                    {archived && (
+                                        <Archive className="size-3.5" />
+                                    )}
+                                </span>
+                            )}
+                        </TooltipTrigger>
+                        <TooltipContent
+                            className="[overflow-wrap:anywhere]"
+                            side="bottom"
+                            align="start"
+                            sideOffset={8}
+                        >
+                            {description}
+                        </TooltipContent>
+                    </Tooltip>
+                    <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-focus-within/menu-sub-item:opacity-100 group-hover/menu-sub-item:opacity-100 motion-reduce:transition-none [@media(hover:none)]:opacity-100 [@media(pointer:coarse)]:opacity-100">
                         <Button
                             size="icon-xs"
+                            className={actionClassName}
                             variant="ghost"
                             type="button"
                             onClick={() => {
@@ -149,6 +197,7 @@ export function ThreadRow({
                         </Button>
                         <Button
                             size="icon-xs"
+                            className={actionClassName}
                             variant="ghost"
                             type="button"
                             disabled={busy || (running && !archived)}
@@ -170,9 +219,9 @@ export function ThreadRow({
                         >
                             {archived ? <RotateCcw /> : <Archive />}
                         </Button>
-                    </>
-                )}
-            </div>
+                    </div>
+                </div>
+            )}
             {error !== null && (
                 <p
                     role="alert"

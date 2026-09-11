@@ -19,6 +19,9 @@ import {
     SidebarMenuButton,
     SidebarMenuItem,
     SidebarMenuSub,
+    Tooltip,
+    TooltipContent,
+    TooltipTrigger,
 } from "@/components/ui";
 import {
     JoinRoomLink,
@@ -404,7 +407,10 @@ export function RoomThreadNavigation({ rooms, onNavigate }: Props) {
     }
 
     return (
-        <SidebarMenu aria-label="Rooms and threads">
+        <SidebarMenu
+            aria-label="Rooms and threads"
+            className="rounded-[6px] bg-sidebar text-sidebar-foreground"
+        >
             {rooms.map((room) => {
                 const state = getState(room.id);
                 const selectedId =
@@ -414,9 +420,10 @@ export function RoomThreadNavigation({ rooms, onNavigate }: Props) {
                 const rows = visibleThreadSummaries(state);
                 return (
                     <SidebarMenuItem key={room.id}>
-                        <div className="flex items-center gap-1">
+                        <div className="flex h-8 min-w-0 items-center gap-0 rounded-[6px] px-2 [@media(pointer:coarse)]:h-11">
                             <Button
                                 size="icon-xs"
+                                className="rounded-[6px] hover:bg-sidebar-foreground/5 hover:text-sidebar-foreground aria-expanded:bg-transparent dark:hover:bg-sidebar-foreground/5 [@media(pointer:coarse)]:size-11"
                                 variant="ghost"
                                 type="button"
                                 aria-label={`${state.expanded ? "Collapse" : "Expand"} ${room.name}`}
@@ -429,20 +436,41 @@ export function RoomThreadNavigation({ rooms, onNavigate }: Props) {
                                     <ChevronRight />
                                 )}
                             </Button>
-                            <SidebarMenuButton
-                                render={
-                                    <JoinRoomLink
-                                        roomId={room.id}
-                                        roomSlug={room.slug}
-                                        onNavigate={onNavigate}
-                                    >
-                                        {room.name}
-                                    </JoinRoomLink>
-                                }
-                                isActive={currentRoomId === room.id}
-                            />
+                            <Tooltip>
+                                {/* JoinRoomLink owns its anchor events; let focus bubble
+                                    through a non-interactive tooltip anchor. */}
+                                <TooltipTrigger
+                                    render={<span />}
+                                    className="min-w-0 flex-1"
+                                >
+                                    <SidebarMenuButton
+                                        className="h-8 min-w-0 rounded-[6px] px-2 hover:bg-sidebar-foreground/5 active:bg-sidebar-foreground/10 data-active:bg-sidebar-foreground/10 hover:text-sidebar-foreground active:text-sidebar-foreground data-active:text-sidebar-foreground [@media(pointer:coarse)]:h-11"
+                                        render={
+                                            <JoinRoomLink
+                                                roomId={room.id}
+                                                roomSlug={room.slug}
+                                                onNavigate={onNavigate}
+                                            >
+                                                <span className="block min-w-0 truncate text-left">
+                                                    {room.name}
+                                                </span>
+                                            </JoinRoomLink>
+                                        }
+                                        isActive={currentRoomId === room.id}
+                                    />
+                                </TooltipTrigger>
+                                <TooltipContent
+                                    className="[overflow-wrap:anywhere]"
+                                    side="bottom"
+                                    align="start"
+                                    sideOffset={8}
+                                >
+                                    {room.name}
+                                </TooltipContent>
+                            </Tooltip>
                             <Button
                                 size="icon-xs"
+                                className="rounded-[6px] hover:bg-sidebar-foreground/5 hover:text-sidebar-foreground aria-expanded:bg-transparent dark:hover:bg-sidebar-foreground/5 [@media(pointer:coarse)]:size-11"
                                 variant="ghost"
                                 type="button"
                                 aria-label={`New thread in ${room.name}`}
@@ -452,7 +480,7 @@ export function RoomThreadNavigation({ rooms, onNavigate }: Props) {
                             </Button>
                         </div>
                         {state.expanded && (
-                            <SidebarMenuSub>
+                            <SidebarMenuSub className="mr-2 ml-8 translate-x-0 gap-0 border-0 px-0 py-1">
                                 {state.status === "loading" &&
                                     rows.length === 0 && (
                                         <li
@@ -585,16 +613,7 @@ export function RoomThreadNavigation({ rooms, onNavigate }: Props) {
                                     )}
                                 <li className="flex items-center gap-1 px-2 py-1">
                                     <button
-                                        className="text-xs text-muted-foreground hover:text-foreground"
-                                        type="button"
-                                        onClick={() =>
-                                            void createThread(room.id)
-                                        }
-                                    >
-                                        + New Thread
-                                    </button>
-                                    <button
-                                        className="ml-auto text-[10px] text-muted-foreground underline"
+                                        className="min-h-8 text-xs text-muted-foreground underline [@media(pointer:coarse)]:min-h-11"
                                         type="button"
                                         disabled={state.status === "loading"}
                                         onClick={() => {
@@ -613,7 +632,7 @@ export function RoomThreadNavigation({ rooms, onNavigate }: Props) {
                                 {state.nextCursor !== null && (
                                     <li className="px-2 py-1">
                                         <button
-                                            className="text-xs underline"
+                                            className="min-h-8 text-xs underline [@media(pointer:coarse)]:min-h-11"
                                             type="button"
                                             onClick={() =>
                                                 void loadRoom(
