@@ -8,6 +8,8 @@
         "start": "next start",
         "lint": "eslint .",
         "typecheck": "next typegen && tsc -p tsconfig.json --noEmit",
+        "test:threads": "node --import ../../packages/orchestration/node_modules/tsx/dist/loader.mjs --test 'src/app/api/rooms/[roomId]/threads/route.test.ts' 'src/app/api/rooms/[roomId]/threads/[threadId]/route.test.ts' src/app/api/runs/route.test.ts src/features/runs/server/runEventSink.test.ts src/features/runs/server/runThread.test.ts src/features/threads/components/RoomThreadNavigation/threadNavigationState.test.ts src/features/threads/components/ThreadComposer/composerState.test.ts src/features/threads/server/threadService.test.ts src/features/threads/session/threadReconciler.test.ts src/features/threads/session/threadSessionRegistry.test.ts",
+        "test:threads:integration": "node --import ../../packages/orchestration/node_modules/tsx/dist/loader.mjs --test src/features/threads/server/threadStore.integration.test.ts src/features/threads/testing/threadFlows.integration.test.ts",
         "gen-types": "supabase gen types typescript --project-id ycwiicwvklctndfmxalz > ../../packages/db/src/generated/database.types.ts"
     },
     "dependencies": {

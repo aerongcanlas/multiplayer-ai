@@ -3,19 +3,14 @@ import { randomUUID } from "node:crypto";
 import test, { after } from "node:test";
 import { createClient } from "@supabase/supabase-js";
 import type { Database, Json } from "@multiplayer-ai/db";
+import { threadTestDatabaseConfig } from "../testing/threadTestDatabase";
 import { createThreadStore } from "./threadStore";
 
-const url = process.env.THREAD_TEST_SUPABASE_URL;
-const serviceKey = process.env.THREAD_TEST_SERVICE_ROLE_KEY;
-const anonKey = process.env.THREAD_TEST_ANON_KEY;
-const enabled = Boolean(url && serviceKey && anonKey);
-
-if ((url || serviceKey || anonKey) && !enabled) {
-  throw new Error(
-    "Thread integration tests require THREAD_TEST_SUPABASE_URL, " +
-      "THREAD_TEST_SERVICE_ROLE_KEY, and THREAD_TEST_ANON_KEY together",
-  );
-}
+const config = threadTestDatabaseConfig();
+const url = config?.url;
+const serviceKey = config?.serviceKey;
+const anonKey = config?.anonKey;
+const enabled = config !== null;
 
 const service = enabled
   ? createClient<Database>(url!, serviceKey!, {
