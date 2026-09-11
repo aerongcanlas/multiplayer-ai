@@ -16,6 +16,7 @@ import { createAdminClient } from "@/lib/supabase/server";
 
 const THREAD_COLUMNS = `
     id,
+    retired_at,
     run_status,
     run_started_at,
     run_by,
@@ -29,6 +30,7 @@ const MESSAGE_COLUMNS = "id, seq, role, parts, metadata" as const;
 
 type ThreadRow = {
     id: string;
+    retired_at: string | null;
     run_status: string;
     run_started_at: string | null;
     run_by: string | null;
@@ -120,52 +122,37 @@ export function createSupabaseRunStore(): RunStore {
             .maybeSingle();
 
         if (error !== null || data === null) {
-            throw new Error("User is not a member of this room");
+            throw Object.assign(
+                new Error("User is not a member of this room"),
+                {
+                    code: "42501",
+                },
+            );
         }
     }
 
-    async function selectActiveThread(
+    async function selectThread(
         supabase: Client,
         roomId: string,
+        threadId: string,
     ): Promise<ThreadRow | null> {
         const { data, error } = await supabase
             .from("ai_thread")
             .select(THREAD_COLUMNS)
+            .eq("id", threadId)
             .eq("room_id", roomId)
-            .is("retired_at", null)
-            .order("created_at", { ascending: false })
-            .limit(1)
             .maybeSingle<ThreadRow>();
 
         if (error !== null) throw error;
         return data;
     }
 
-    async function activeThread(
-        supabase: Client,
-        roomId: string,
-    ): Promise<ThreadRow> {
-        const existing = await selectActiveThread(supabase, roomId);
-        if (existing !== null) return existing;
-
-        const inserted = await supabase
-            .from("ai_thread")
-            .insert({ room_id: roomId })
-            .select(THREAD_COLUMNS)
-            .maybeSingle<ThreadRow>();
-
-        if (inserted.data !== null) return inserted.data;
-
-        const raced = await selectActiveThread(supabase, roomId);
-        if (raced !== null) return raced;
-        throw inserted.error ?? new Error("Could not open a thread for this room");
-    }
-
     async function currentRunner(
         supabase: Client,
         roomId: string,
+        threadId: string,
     ): Promise<RunMessageAuthor | null> {
-        const row = await selectActiveThread(supabase, roomId);
+        const row = await selectThread(supabase, roomId, threadId);
         return row === null ? null : threadRunner(row);
     }
 
@@ -183,15 +170,19 @@ export function createSupabaseRunStore(): RunStore {
             .returns<Array<MessageRow>>();
 
         if (error !== null) throw error;
-        return data.map((row) => ({ message: toRunMessage(row), seq: row.seq }));
+        return data.map((row) => ({
+            message: toRunMessage(row),
+            seq: row.seq,
+        }));
     }
 
     return {
-        async loadFrom(roomId, actor, fromSeq) {
+        async loadFrom(roomId, actor, threadId, fromSeq) {
             const supabase = createAdminClient();
             await assertMember(supabase, roomId, actor.id);
 
-            const thread = await activeThread(supabase, roomId);
+            const thread = await selectThread(supabase, roomId, threadId);
+            if (thread === null) throw new Error("Thread not found");
             return {
                 threadId: thread.id,
                 status: threadStatus(thread),
@@ -200,11 +191,22 @@ export function createSupabaseRunStore(): RunStore {
             };
         },
 
-        async acquireLock(roomId, actor, options): Promise<LockResult> {
+        async acquireLock(
+            roomId,
+            threadId,
+            actor,
+            options,
+        ): Promise<LockResult> {
             const supabase = createAdminClient();
             await assertMember(supabase, roomId, actor.id);
 
-            const thread = await activeThread(supabase, roomId);
+            const thread = await selectThread(supabase, roomId, threadId);
+            if (thread === null) throw new Error("Thread not found");
+            if (thread.retired_at !== null) {
+                throw Object.assign(new Error("Thread is archived"), {
+                    code: "P0001",
+                });
+            }
 
             const update = supabase
                 .from("ai_thread")
@@ -214,16 +216,23 @@ export function createSupabaseRunStore(): RunStore {
                     run_by: actor.id,
                 })
                 .eq("id", thread.id);
+            const activeUpdate = update.is("retired_at", null);
 
             // The exclusivity predicate is the whole lock: zero rows back means it was held.
             // Waiving it leaves the same bookkeeping write, which simply always wins.
             const claimed =
-                options?.exclusive === false ? update : update.or(livePredicate());
+                options?.exclusive === false
+                    ? activeUpdate
+                    : activeUpdate.or(livePredicate());
 
             const { data, error } = await claimed.select("id").maybeSingle();
 
             if (error !== null) throw error;
-            if (data === null) return { acquired: false, runBy: await currentRunner(supabase, roomId) };
+            if (data === null)
+                return {
+                    acquired: false,
+                    runBy: await currentRunner(supabase, roomId, threadId),
+                };
 
             const messages = await messagesFrom(supabase, data.id, 0);
             return {
@@ -270,11 +279,12 @@ export function createSupabaseRunStore(): RunStore {
             if (error !== null) throw error;
         },
 
-        async retire(roomId, actor): Promise<RetireResult> {
+        async retire(roomId, threadId, actor): Promise<RetireResult> {
             const supabase = createAdminClient();
             await assertMember(supabase, roomId, actor.id);
 
-            const thread = await activeThread(supabase, roomId);
+            const thread = await selectThread(supabase, roomId, threadId);
+            if (thread === null) throw new Error("Thread not found");
             const { data, error } = await supabase
                 .from("ai_thread")
                 .update({ retired_at: new Date().toISOString() })
@@ -285,10 +295,16 @@ export function createSupabaseRunStore(): RunStore {
                 .maybeSingle();
 
             if (error !== null) throw error;
-            if (data === null) return { retired: false, runBy: await currentRunner(supabase, roomId) };
-
-            const opened = await activeThread(supabase, roomId);
-            return { retired: true, retiredThreadId: thread.id, threadId: opened.id };
+            if (data === null)
+                return {
+                    retired: false,
+                    runBy: await currentRunner(supabase, roomId, threadId),
+                };
+            return {
+                retired: true,
+                retiredThreadId: thread.id,
+                threadId: thread.id,
+            };
         },
     };
 }

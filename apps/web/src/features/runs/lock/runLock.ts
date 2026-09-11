@@ -5,7 +5,10 @@ import { runLockEnabled } from "./runLockConfig";
 export function claimRun(
     store: RunStore,
     roomId: string,
+    threadId: string,
     actor: RunMessageAuthor,
 ): Promise<LockResult> {
-    return store.acquireLock(roomId, actor, { exclusive: runLockEnabled });
+    return store.acquireLock(roomId, threadId, actor, {
+        exclusive: runLockEnabled,
+    });
 }

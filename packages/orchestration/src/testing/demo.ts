@@ -18,7 +18,8 @@ const sink: EventSink = {
 const roomId = "room-1";
 const actor = { id: crypto.randomUUID(), name: "Demo" };
 const store = createInMemoryRunStore();
-const lock = await store.acquireLock(roomId, actor);
+const threadId = store.createThread(roomId);
+const lock = await store.acquireLock(roomId, threadId, actor);
 if (!lock.acquired) throw new Error("expected an idle thread");
 const userMessage: RunUIMessage = {
   id: "msg-1",
@@ -54,6 +55,7 @@ const stream = createUIMessageStream<RunUIMessage>({
         {
           runId: "run-1",
           roomId,
+          threadId,
           goal: "Recommend a client-side state library for the room UI.",
           model: "openai:gpt-5-mini",
         },
@@ -89,6 +91,6 @@ for await (const _chunk of stream) {
   // Drain the stream so execute() and onEnd() run to completion.
 }
 
-const record = await loadThread(store, roomId, actor);
+const record = await loadThread(store, roomId, threadId, actor);
 console.log(`\n${events.length} events emitted`);
 console.log("persisted messages:", record.messages.length);

@@ -75,6 +75,7 @@ async function run(scenario: "recovers" | "exhausts") {
                     {
                         runId: "verify-1",
                         roomId: "verify-room",
+                        threadId: "verify-thread",
                         goal: "What is the capital of France?",
                         model: "openai:gpt-5-mini",
                         effort: "low",

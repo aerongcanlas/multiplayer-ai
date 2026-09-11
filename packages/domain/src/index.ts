@@ -43,6 +43,23 @@ export {
     startRunRequestSchema,
     Verdict,
 } from "./runs";
+export {
+    createThreadRequestSchema,
+    decodeThreadCursor,
+    encodeThreadCursor,
+    listThreadsQuerySchema,
+    threadCursorSchema,
+    threadSummarySchema,
+    threadTitleSources,
+    updateThreadRequestSchema,
+} from "./threads";
+export type {
+    ThreadCursor,
+    ThreadPage,
+    ThreadSummary,
+    ThreadTitleSource,
+    UpdateThreadRequest,
+} from "./threads";
 export type {
     EffortLevel,
     ModelKey,

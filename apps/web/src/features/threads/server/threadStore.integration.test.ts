@@ -362,3 +362,48 @@ test(
     assert.equal(renamed.titleSource, "manual");
   },
 );
+
+test(
+  "creation retries, stable pagination, and archived history use exact identities",
+  { skip: !enabled },
+  async () => {
+    assert(service);
+    const { roomId, memberId } = await fixture();
+    const store = createThreadStore(service);
+    const creationId = randomUUID();
+    const first = await store.create(roomId, memberId, creationId);
+    const retry = await store.create(roomId, memberId, creationId);
+    assert.equal(retry.id, first.id);
+    await store.create(roomId, memberId, randomUUID());
+    await store.create(roomId, memberId, randomUUID());
+
+    const pageOne = await store.listPage(roomId, memberId, { limit: 2 });
+    assert.equal(pageOne.threads.length, 2);
+    assert.notEqual(pageOne.nextCursor, null);
+    const pageTwo = await store.listPage(roomId, memberId, {
+      limit: 2,
+      cursor: pageOne.nextCursor!,
+    });
+    assert.equal(
+      pageTwo.threads.some((thread) =>
+        pageOne.threads.some((previous) => previous.id === thread.id),
+      ),
+      false,
+    );
+
+    await store.archive(roomId, first.id, memberId);
+    const archived = await store.get(roomId, first.id, memberId);
+    assert.notEqual(archived.retiredAt, null);
+    await assert.rejects(
+      store.claimRun({
+        roomId,
+        threadId: first.id,
+        actorId: memberId,
+        runId: randomUUID(),
+        userMessageId: randomUUID(),
+        parts: textParts("Archived write"),
+      }),
+      (error: unknown) => errorCode(error) === "P0001",
+    );
+  },
+);

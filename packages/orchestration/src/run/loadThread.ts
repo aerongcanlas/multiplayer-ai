@@ -4,15 +4,18 @@ import type { RunStore, ThreadRecord } from "./ports";
 export async function loadThread(
     store: RunStore,
     roomId: string,
+    threadId: string,
     actor: RunMessageAuthor,
+    fromSeq = 0,
 ): Promise<ThreadRecord> {
-    const { threadId, status, runBy, messages } = await store.loadFrom(
-        roomId,
-        actor,
-        0,
-    );
+    const {
+        threadId: loadedThreadId,
+        status,
+        runBy,
+        messages,
+    } = await store.loadFrom(roomId, actor, threadId, fromSeq);
     return {
-        threadId,
+        threadId: loadedThreadId,
         status,
         runBy,
         messages: messages.map((entry) => entry.message),

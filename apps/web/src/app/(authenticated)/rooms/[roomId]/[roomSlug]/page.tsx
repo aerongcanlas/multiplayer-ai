@@ -8,7 +8,9 @@ import { getCurrentUser } from "@/features/auth/server/getCurrentUser";
 import { getRoomPageData } from "@/features/rooms/queries/roomPageQueries";
 import { toRunActor } from "@/features/runs/server/runActor";
 import { runRuntime } from "@/features/runs/server/runRuntime";
+import { createThreadService } from "@/features/threads/server/threadService";
 import { loadThread } from "@multiplayer-ai/orchestration";
+import { z } from "zod";
 import { notFound, redirect } from "next/navigation";
 import AIActivityPanel from "./_components/AIActivityPanel";
 import GroupChatPanel from "./_components/GroupChatPanel";
@@ -21,9 +23,10 @@ interface Props {
         roomId: string;
         roomSlug: string;
     }>;
+    searchParams?: Promise<{ thread?: string }>;
 }
 
-async function RoomPage({ params }: Props) {
+async function RoomPage({ params, searchParams }: Props) {
     const { roomId, roomSlug } = await params;
     const user = await getCurrentUser();
     if (user === null) {
@@ -46,7 +49,45 @@ async function RoomPage({ params }: Props) {
         user,
         roomPageData.currentMembership.profile,
     );
-    const thread = await loadThread(runRuntime.store(), roomId, currentUser);
+    const requestedThreadId = (await searchParams)?.thread;
+    if (
+        requestedThreadId !== undefined &&
+        !z.uuid().safeParse(requestedThreadId).success
+    ) {
+        notFound();
+    }
+    const selectedThreadId =
+        requestedThreadId ??
+        (
+            await createThreadService().list({
+                roomId,
+                actorId: currentUser.id,
+                limit: 1,
+            })
+        ).threads[0]?.id;
+    const thread =
+        selectedThreadId === undefined
+            ? {
+                  threadId: crypto.randomUUID(),
+                  status: "finished" as const,
+                  runBy: null,
+                  messages: [],
+                  lastSeq: 0,
+              }
+            : await loadThread(
+                  runRuntime.store(),
+                  roomId,
+                  selectedThreadId,
+                  currentUser,
+              ).catch((error: unknown) => {
+                  if (
+                      error instanceof Error &&
+                      error.message === "Thread not found"
+                  ) {
+                      notFound();
+                  }
+                  throw error;
+              });
 
     return (
         <PromptSuggestionProvider>
@@ -54,10 +95,7 @@ async function RoomPage({ params }: Props) {
                 orientation="vertical"
                 className="min-h-screen w-full"
             >
-                <ResizablePanel
-                    defaultSize="60%"
-                    minSize="40%"
-                >
+                <ResizablePanel defaultSize="60%" minSize="40%">
                     <Box className="flex h-full min-h-0 flex-col">
                         <Box className="grid shrink-0 grid-cols-[minmax(0,1fr)_minmax(0,auto)_minmax(0,1fr)] items-center gap-3 border-b px-4 py-2">
                             <Box className="col-start-2 min-w-0 truncate text-lg font-semibold">
@@ -72,10 +110,7 @@ async function RoomPage({ params }: Props) {
 
                         <Box className="min-h-0 flex-1">
                             <ResizablePanelGroup>
-                                <ResizablePanel
-                                    defaultSize="60%"
-                                    minSize="30%"
-                                >
+                                <ResizablePanel defaultSize="60%" minSize="30%">
                                     <AIActivityPanel
                                         key={roomId}
                                         roomId={roomId}
@@ -106,10 +141,7 @@ async function RoomPage({ params }: Props) {
 
                 <ResizableHandle />
 
-                <ResizablePanel
-                    defaultSize="40%"
-                    minSize="30%"
-                >
+                <ResizablePanel defaultSize="40%" minSize="30%">
                     <PromptVotePanel />
                 </ResizablePanel>
             </ResizablePanelGroup>

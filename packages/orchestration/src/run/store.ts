@@ -1,4 +1,8 @@
-import type { RunMessageAuthor, RunStatus, RunUIMessage } from "@multiplayer-ai/domain";
+import type {
+    RunMessageAuthor,
+    RunStatus,
+    RunUIMessage,
+} from "@multiplayer-ai/domain";
 import {
     STALE_RUN_MS,
     type LockResult,
@@ -17,8 +21,9 @@ type MemoryThread = {
     messages: Map<string, ThreadMessage>;
 };
 
-
-export function createInMemoryRunStore(): RunStore {
+export function createInMemoryRunStore(): RunStore & {
+    createThread(roomId: string): string;
+} {
     const threads = new Map<string, MemoryThread>();
     let nextSeq = 0;
 
@@ -36,11 +41,12 @@ export function createInMemoryRunStore(): RunStore {
         return thread;
     }
 
-    function activeThread(roomId: string): MemoryThread {
-        for (const thread of threads.values()) {
-            if (thread.roomId === roomId && !thread.retired) return thread;
+    function findThread(roomId: string, threadId: string): MemoryThread {
+        const thread = threads.get(threadId);
+        if (thread === undefined || thread.roomId !== roomId) {
+            throw new Error("Thread not found");
         }
-        return openThread(roomId);
+        return thread;
     }
 
     function expireDeadRun(thread: MemoryThread): MemoryThread {
@@ -62,18 +68,29 @@ export function createInMemoryRunStore(): RunStore {
     }
 
     return {
-        async loadFrom(roomId, _actor, fromSeq) {
-            const thread = expireDeadRun(activeThread(roomId));
+        /** Test/runtime helper: application thread creation is owned by the service API. */
+        createThread(roomId: string): string {
+            return openThread(roomId).id;
+        },
+        async loadFrom(roomId, _actor, threadId, fromSeq) {
+            const thread = expireDeadRun(findThread(roomId, threadId));
             return {
                 threadId: thread.id,
                 status: thread.status,
                 runBy: thread.runBy,
-                messages: ordered(thread).filter((entry) => entry.seq >= fromSeq),
+                messages: ordered(thread).filter(
+                    (entry) => entry.seq >= fromSeq,
+                ),
             };
         },
 
-        async acquireLock(roomId, actor, options): Promise<LockResult> {
-            const thread = expireDeadRun(activeThread(roomId));
+        async acquireLock(
+            roomId,
+            threadId,
+            actor,
+            options,
+        ): Promise<LockResult> {
+            const thread = expireDeadRun(findThread(roomId, threadId));
             if (options?.exclusive !== false && thread.status === "running") {
                 return { acquired: false, runBy: thread.runBy };
             }
@@ -106,8 +123,8 @@ export function createInMemoryRunStore(): RunStore {
             thread.runStartedAt = null;
         },
 
-        async retire(roomId): Promise<RetireResult> {
-            const retired = expireDeadRun(activeThread(roomId));
+        async retire(roomId, threadId): Promise<RetireResult> {
+            const retired = expireDeadRun(findThread(roomId, threadId));
             if (retired.status === "running") {
                 return { retired: false, runBy: retired.runBy };
             }
@@ -117,7 +134,7 @@ export function createInMemoryRunStore(): RunStore {
             return {
                 retired: true,
                 retiredThreadId: retired.id,
-                threadId: openThread(roomId).id,
+                threadId: retired.id,
             };
         },
     };

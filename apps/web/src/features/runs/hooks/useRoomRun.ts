@@ -66,12 +66,19 @@ export function useRoomRun({
 }: Options) {
     const supabase = useMemo(() => createClient(), []);
     const [model, setModel] = useState<ModelKey>("google:gemini-3.6-flash");
-    const { messages, sendMessage, setMessages, stop, status, error, clearError } =
-        useChat<RunUIMessage>({
-            id: roomId,
-            messages: initialMessages,
-            transport,
-        });
+    const {
+        messages,
+        sendMessage,
+        setMessages,
+        stop,
+        status,
+        error,
+        clearError,
+    } = useChat<RunUIMessage>({
+        id: roomId,
+        messages: initialMessages,
+        transport,
+    });
 
     const [view, setView] = useState<ThreadView>({
         threadId: initialThreadId,
@@ -86,6 +93,7 @@ export function useRoomRun({
     const ownRunRef = useRef(false);
     const readingRef = useRef(false);
     const staleRef = useRef(false);
+    const pendingCreationIdRef = useRef<string | null>(null);
     const setMessagesRef = useRef(setMessages);
     useEffect(() => {
         setMessagesRef.current = setMessages;
@@ -125,7 +133,7 @@ export function useRoomRun({
 
     const readThread = useCallback(async () => {
         const response = await fetch(
-            `/api/runs?roomId=${roomId}&from=${viewRef.current.lastSeq}`,
+            `/api/runs?roomId=${roomId}&threadId=${viewRef.current.threadId}&from=${viewRef.current.lastSeq}`,
         );
         if (!response.ok) return;
         const snapshot = (await response.json()) as ThreadSnapshot;
@@ -178,7 +186,11 @@ export function useRoomRun({
 
             if (event.threadId !== current.threadId) return;
 
-            updateView({ ...current, status: event.status, runBy: event.runBy });
+            updateView({
+                ...current,
+                status: event.status,
+                runBy: event.runBy,
+            });
             if (event.kind === "progress" && event.seq >= current.lastSeq) {
                 void sync();
             }
@@ -228,37 +240,57 @@ export function useRoomRun({
                 parts: [{ type: "text", text: goal }],
                 metadata: { author: currentUser },
             },
-            { body: { roomId, goal, model, userMessageId } },
+            {
+                body: {
+                    roomId,
+                    threadId: viewRef.current.threadId,
+                    prompt: goal,
+                    model,
+                    userMessageId,
+                },
+            },
         );
     }
 
     const newThread = useCallback(async () => {
         setRefusal(null);
         let body: unknown;
+        const creationId =
+            pendingCreationIdRef.current ?? crypto.randomUUID();
+        pendingCreationIdRef.current = creationId;
         try {
-            const response = await fetch(`/api/runs?roomId=${roomId}`, {
-                method: "DELETE",
+            const response = await fetch(`/api/rooms/${roomId}/threads`, {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ creationId }),
             });
             body = await response.json();
             if (!response.ok) {
-                setRefusal(refusalNotice(body, "Could not start a new thread."));
+                setRefusal(
+                    refusalNotice(body, "Could not start a new thread."),
+                );
                 return;
             }
         } catch {
             setRefusal("Could not start a new thread.");
             return;
         }
-        const { threadId } = body as { threadId?: unknown };
-        if (typeof threadId !== "string") {
+        const { thread } = body as {
+            thread?: { id?: unknown };
+        };
+        if (typeof thread?.id !== "string") {
             setRefusal("Could not start a new thread.");
             return;
         }
-        adoptThread(threadId, false);
+        pendingCreationIdRef.current = null;
+        adoptThread(thread.id, false);
     }, [adoptThread, roomId]);
 
     const notice =
         refusal ??
-        (error === undefined ? null : refusalNotice(safeJson(error.message), error.message));
+        (error === undefined
+            ? null
+            : refusalNotice(safeJson(error.message), error.message));
 
     const dismissNotice = useCallback(() => {
         setRefusal(null);

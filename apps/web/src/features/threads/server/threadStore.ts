@@ -1,5 +1,11 @@
 import type { Database, Json } from "@multiplayer-ai/db";
-import type { RunStatus, RunUIMessage } from "@multiplayer-ai/domain";
+import {
+  decodeThreadCursor,
+  encodeThreadCursor,
+  type RunStatus,
+  type RunUIMessage,
+  type ThreadPage,
+} from "@multiplayer-ai/domain";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "@/lib/supabase/server";
 
@@ -166,24 +172,54 @@ export function createThreadStore(client: Client = createAdminClient()) {
   async function list(
     roomId: string,
     actorId: string,
-    options: { archived?: boolean; limit?: number } = {},
+    options: { archived?: boolean; limit?: number; cursor?: string } = {},
   ): Promise<Array<ThreadSummary>> {
+    return (await listPage(roomId, actorId, options)).threads;
+  }
+
+  async function listPage(
+    roomId: string,
+    actorId: string,
+    options: { archived?: boolean; limit?: number; cursor?: string } = {},
+  ): Promise<ThreadPage> {
     await assertMember(roomId, actorId);
     const archived = options.archived ?? false;
     const limit = Math.min(Math.max(options.limit ?? 50, 1), 50);
+    const cursor =
+      options.cursor === undefined ? null : decodeThreadCursor(options.cursor);
+    if (options.cursor !== undefined && cursor === null) {
+      throw new ThreadStoreError("invalid_cursor", "Invalid thread cursor");
+    }
     let query = client
       .from("ai_thread")
       .select(THREAD_COLUMNS)
       .eq("room_id", roomId)
       .order("created_at", { ascending: false })
       .order("id", { ascending: false })
-      .limit(limit);
+      .limit(limit + 1);
     query = archived
       ? query.not("retired_at", "is", null)
       : query.is("retired_at", null);
+    if (cursor !== null) {
+      query = query.or(
+        `created_at.lt.${cursor.createdAt},and(created_at.eq.${cursor.createdAt},id.lt.${cursor.id})`,
+      );
+    }
     const { data, error } = await query;
     if (error !== null) throwSupabaseError(error);
-    return data.map(summary);
+    const rows = data.map(summary);
+    const hasMore = rows.length > limit;
+    const threads = hasMore ? rows.slice(0, limit) : rows;
+    return {
+      threads,
+      nextCursor:
+        hasMore && threads.length > 0
+          ? encodeThreadCursor({
+              createdAt: threads.at(-1)!.createdAt,
+              id: threads.at(-1)!.id,
+            })
+          : null,
+    };
   }
 
   async function get(
@@ -306,7 +342,11 @@ export function createThreadStore(client: Client = createAdminClient()) {
       })
       .single();
     if (error !== null) throwSupabaseError(error);
-    return { messageId: data.message_id, seq: data.seq, outcome: data.outcome };
+    return {
+      messageId: data.message_id,
+      seq: data.seq,
+      outcome: data.outcome,
+    };
   }
 
   async function finalizeRun(input: {
@@ -385,6 +425,7 @@ export function createThreadStore(client: Client = createAdminClient()) {
 
   return {
     list,
+    listPage,
     get,
     create,
     claimRun,

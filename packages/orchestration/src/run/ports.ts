@@ -12,6 +12,7 @@ import type {
 export type RunInput = {
     runId: string;
     roomId: string;
+    threadId: string;
     goal: string;
     model: ModelKey;
     effort?: EffortLevel;
@@ -55,6 +56,7 @@ export interface RunStore {
     loadFrom(
         roomId: string,
         actor: RunMessageAuthor,
+        threadId: string,
         fromSeq: number,
     ): Promise<{
         threadId: string;
@@ -68,10 +70,15 @@ export interface RunStore {
      */
     acquireLock(
         roomId: string,
+        threadId: string,
         actor: RunMessageAuthor,
         options?: RunClaimOptions,
     ): Promise<LockResult>;
     upsertMessage(threadId: string, message: RunUIMessage): Promise<number>;
     releaseLock(threadId: string, status: RunStatus): Promise<void>;
-    retire(roomId: string, actor: RunMessageAuthor): Promise<RetireResult>;
+    retire(
+        roomId: string,
+        threadId: string,
+        actor: RunMessageAuthor,
+    ): Promise<RetireResult>;
 }
