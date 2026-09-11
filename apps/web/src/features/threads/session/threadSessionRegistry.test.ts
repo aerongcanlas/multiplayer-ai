@@ -161,6 +161,25 @@ test("a captured suggestion updates only its original unchanged draft", () => {
     assert.equal(registry.get("room", "a")?.state.draft, "suggested A");
 });
 
+test("selection notifies general and navigation observers exactly once", () => {
+    const registry = new ThreadSessionRegistry("alice", {
+        chatFactory: () => new FakeChat(),
+    });
+    let generalNotifications = 0;
+    let selectionNotifications = 0;
+    registry.subscribe(() => {
+        generalNotifications += 1;
+    });
+    registry.subscribeSelection(() => {
+        selectionNotifications += 1;
+    });
+
+    registry.select("room", "thread");
+
+    assert.equal(generalNotifications, 1);
+    assert.equal(selectionNotifications, 1);
+});
+
 test("local fresh sessions remain distinguishable until durable creation", () => {
     const registry = new ThreadSessionRegistry("alice", {
         chatFactory: () => new FakeChat(),

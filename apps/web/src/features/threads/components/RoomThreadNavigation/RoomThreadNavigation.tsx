@@ -20,7 +20,10 @@ import {
     SidebarMenuItem,
     SidebarMenuSub,
 } from "@/components/ui";
-import { JoinRoomLink } from "@/features/rooms/components/JoinRoomLink";
+import {
+    JoinRoomLink,
+    roomHref,
+} from "@/features/rooms/components/JoinRoomLink";
 import type { JoinedRoom } from "@/features/rooms/types/room";
 import { usePathname, useSearchParams, useRouter } from "next/navigation";
 import { markRoomVisited } from "@/features/rooms/actions/markRoomVisited";
@@ -56,9 +59,9 @@ export function RoomThreadNavigation({ rooms, onNavigate }: Props) {
         selectThread: selectSessionThread,
     } = useThreadSessionContext();
     useSyncExternalStore(
-        registry.subscribe,
-        registry.snapshot,
-        registry.snapshot,
+        registry.subscribeSelection,
+        registry.selectionSnapshot,
+        registry.selectionSnapshot,
     );
     const currentRoomId = pathname.match(/^\/rooms\/([^/]+)/)?.[1];
     const explicitThreadId = searchParams.get("thread") ?? undefined;
@@ -77,7 +80,9 @@ export function RoomThreadNavigation({ rooms, onNavigate }: Props) {
     const statesRef = useRef(states);
     const pageDepth = useRef(new Map<string, number>());
     const inFlight = useRef(new Set<string>());
-    const queued = useRef(new Set<string>());
+    const queued = useRef(
+        new Map<string, { view: ThreadNavigationView; cursor?: string }>(),
+    );
     useEffect(() => {
         statesRef.current = states;
     }, [states]);
@@ -92,7 +97,16 @@ export function RoomThreadNavigation({ rooms, onNavigate }: Props) {
         async (roomId: string, view: ThreadNavigationView, cursor?: string) => {
             const key = roomId;
             if (inFlight.current.has(key)) {
-                queued.current.add(key);
+                const pending = queued.current.get(key);
+                const currentView = statesRef.current.get(roomId)?.view;
+                if (
+                    pending === undefined ||
+                    view !== currentView ||
+                    cursor !== undefined ||
+                    pending.cursor === undefined
+                ) {
+                    queued.current.set(key, { view, cursor });
+                }
                 return;
             }
             inFlight.current.add(key);
@@ -236,10 +250,10 @@ export function RoomThreadNavigation({ rooms, onNavigate }: Props) {
     }, [loadRoom, observeRoom, observedRooms, subscribeRoomHints]);
 
     useEffect(() => {
-        for (const id of queued.current) {
+        for (const [id, request] of queued.current) {
             if (!inFlight.current.has(id)) {
                 queued.current.delete(id);
-                void loadRoom(id, states.get(id)?.view ?? "normal");
+                void loadRoom(id, request.view, request.cursor);
             }
         }
     }, [loadRoom, states]);
@@ -279,14 +293,14 @@ export function RoomThreadNavigation({ rooms, onNavigate }: Props) {
     async function selectThread(roomId: string, threadId: string) {
         const room = rooms.find((candidate) => candidate.id === roomId);
         if (room === undefined || typeof window === "undefined") return;
-        const url = `/rooms/${room.id}/${room.slug}?thread=${encodeURIComponent(threadId)}`;
+        const url = roomHref(room.id, room.slug, threadId);
         if (roomId === currentRoomId) {
             selectSessionThread(roomId, threadId);
             window.history.pushState(null, "", url);
         } else {
             const result = await markRoomVisited(roomId);
             if (!result.success) return;
-            registry.select(roomId, threadId);
+            selectSessionThread(roomId, threadId);
             router.push(url);
         }
         onNavigate?.();
@@ -296,7 +310,7 @@ export function RoomThreadNavigation({ rooms, onNavigate }: Props) {
         const room = rooms.find((candidate) => candidate.id === roomId);
         if (room === undefined || typeof window === "undefined") return;
 
-        const roomUrl = `/rooms/${room.id}/${room.slug}`;
+        const roomUrl = roomHref(room.id, room.slug);
         if (roomId !== currentRoomId) {
             const result = await markRoomVisited(roomId);
             if (!result.success) return;
@@ -551,9 +565,10 @@ export function RoomThreadNavigation({ rooms, onNavigate }: Props) {
                                                                         next.set(
                                                                             room.id,
                                                                             {
-                                                                                ...getState(
+                                                                                ...(current.get(
                                                                                     room.id,
-                                                                                ),
+                                                                                ) ??
+                                                                                    createRoomThreadNavigationState()),
                                                                                 error: error.message,
                                                                             },
                                                                         );

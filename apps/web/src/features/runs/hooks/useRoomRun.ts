@@ -9,7 +9,7 @@ import type {
 } from "@multiplayer-ai/domain";
 import { refusalNotice } from "@multiplayer-ai/domain";
 import { selectionFromLocation } from "@/features/threads/components/RoomThreadNavigation/threadNavigationState";
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
     useThreadSession,
     useThreadSessionContext,
@@ -45,7 +45,7 @@ export function useRoomRun({
     initialThreadDurable = true,
 }: Options) {
     const { registry, reconciler, observeRoom } = useThreadSessionContext();
-    const [selection, setSelection] = useState(() => {
+    const [activeThreadId, setActiveThreadId] = useState(() => {
         registry.hydrate(roomId, initialThreadId, {
             messages: initialMessages,
             status: initialStatus,
@@ -59,27 +59,8 @@ export function useRoomRun({
                 : selectionFromLocation(window.location.href, roomId);
         const selected =
             explicit ?? registry.selected(roomId) ?? initialThreadId;
-        return { initialThreadId, activeThreadId: selected };
+        return selected;
     });
-    if (selection.initialThreadId !== initialThreadId) {
-        registry.hydrate(roomId, initialThreadId, {
-            messages: initialMessages,
-            status: initialStatus,
-            runBy: initialRunBy,
-            seq: initialSeq,
-            durable: initialThreadDurable,
-        });
-        setSelection({ initialThreadId, activeThreadId: initialThreadId });
-    }
-    useSyncExternalStore(
-        registry.subscribe,
-        registry.snapshot,
-        registry.snapshot,
-    );
-    const activeThreadId =
-        selection.initialThreadId === initialThreadId
-            ? selection.activeThreadId
-            : initialThreadId;
     const session = useThreadSession(roomId, activeThreadId);
     const { messages, sendMessage, stop, status, error, clearError } =
         useChat<RunUIMessage>({ chat: session.chat as Chat<RunUIMessage> });
@@ -92,7 +73,7 @@ export function useRoomRun({
                 window.history.state?.roomThreadSelection ??
                 initialThreadId;
             registry.select(roomId, threadId);
-            setSelection({ initialThreadId, activeThreadId: threadId });
+            setActiveThreadId(threadId);
         };
         // Seed the entry so Back to a local fresh draft restores that exact session.
         if (selectionFromLocation(window.location.href, roomId) === undefined) {
@@ -105,13 +86,11 @@ export function useRoomRun({
             );
         }
         window.addEventListener("popstate", sync);
-        const unsubscribe = registry.subscribe(() => {
+        const unsubscribe = registry.subscribeSelection(() => {
             const threadId = registry.selected(roomId);
             if (threadId !== undefined)
-                setSelection((previous) =>
-                    previous.activeThreadId === threadId
-                        ? previous
-                        : { initialThreadId, activeThreadId: threadId },
+                setActiveThreadId((previous) =>
+                    previous === threadId ? previous : threadId,
                 );
         });
         return () => {
@@ -172,10 +151,7 @@ export function useRoomRun({
                             url,
                         );
                     }
-                    setSelection({
-                        initialThreadId,
-                        activeThreadId: requestThreadId,
-                    });
+                    setActiveThreadId(requestThreadId);
                     targetSendMessage = (
                         registry.ensure(roomId, requestThreadId)
                             .chat as Chat<RunUIMessage>
@@ -216,7 +192,6 @@ export function useRoomRun({
         [
             activeThreadId,
             currentUser,
-            initialThreadId,
             reconciler,
             registry,
             roomId,
@@ -242,8 +217,8 @@ export function useRoomRun({
             "",
             url,
         );
-        setSelection({ initialThreadId, activeThreadId: localThreadId });
-    }, [activeThreadId, initialThreadId, reconciler, registry, roomId]);
+        setActiveThreadId(localThreadId);
+    }, [activeThreadId, reconciler, registry, roomId]);
 
     const dismissNotice = useCallback(() => {
         registry.setRequestError(roomId, activeThreadId, null);

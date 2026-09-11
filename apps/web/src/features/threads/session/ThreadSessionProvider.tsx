@@ -77,9 +77,6 @@ export function ThreadSessionProvider({
                 })
                 .subscribe((status) => {
                     if (status === "SUBSCRIBED") {
-                        roomHintListeners.current
-                            .get(roomId)
-                            ?.forEach((listener) => listener());
                         void runtime.reconciler.poll();
                     }
                 });

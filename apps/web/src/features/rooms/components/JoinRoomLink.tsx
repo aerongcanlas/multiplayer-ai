@@ -25,7 +25,7 @@ export function JoinRoomLink({
 }: JoinRoomLinkProps) {
     const router = useRouter();
     const [isPending, startTransition] = useTransition();
-    const href = `/rooms/${roomId}/${roomSlug}${threadId === undefined ? "" : `?thread=${encodeURIComponent(threadId)}`}`;
+    const href = roomHref(roomId, roomSlug, threadId);
 
     function handleClick(event: MouseEvent<HTMLAnchorElement>) {
         // Preserve open-in-new-tab and similar browser behavior.
@@ -71,4 +71,10 @@ export function JoinRoomLink({
             {isPending ? "Joining..." : children}
         </Link>
     );
+}
+
+export function roomHref(roomId: string, roomSlug: string, threadId?: string) {
+    return `/rooms/${roomId}/${roomSlug}${
+        threadId === undefined ? "" : `?thread=${encodeURIComponent(threadId)}`
+    }`;
 }

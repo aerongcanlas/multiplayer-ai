@@ -24,59 +24,52 @@ function RoomList({ title, rooms, variant = "short", onNavigate }: Props) {
         <Box className="m-2">
             {variant === "full" && <p>{title}</p>}
             {variant === "short" && (
-                <RoomThreadNavigation rooms={rooms} onNavigate={onNavigate} />
+                <RoomThreadNavigation
+                    key={rooms.map(({ id }) => id).join(":")}
+                    rooms={rooms}
+                    onNavigate={onNavigate}
+                />
             )}
             {variant === "full" && (
                 <BoxColumn>
                     {rooms.map((room) => {
                         return (
                             <BoxColumn key={room.id} className="py-1">
-                                {variant === "full" && (
-                                    <Card>
-                                        <CardHeader>
-                                            <CardTitle>{room.name}</CardTitle>
+                                <Card>
+                                    <CardHeader>
+                                        <CardTitle>{room.name}</CardTitle>
 
-                                            <CardDescription>
-                                                Current members:{" "}
-                                                {room.member_count}
-                                                {" | "}
-                                                Last visited at:{" "}
-                                                {new Intl.DateTimeFormat(
-                                                    "en-US",
-                                                    {
-                                                        dateStyle: "medium",
-                                                        timeStyle: "short",
-                                                    },
-                                                ).format(
-                                                    new Date(
-                                                        room.last_visited_at,
-                                                    ),
-                                                )}
-                                                {" | "}
-                                                Created at:{" "}
-                                                {new Intl.DateTimeFormat(
-                                                    "en-US",
-                                                    {
-                                                        dateStyle: "medium",
-                                                        timeStyle: "short",
-                                                    },
-                                                ).format(
-                                                    new Date(room.created_at),
-                                                )}
-                                            </CardDescription>
+                                        <CardDescription>
+                                            Current members: {room.member_count}
+                                            {" | "}
+                                            Last visited at:{" "}
+                                            {new Intl.DateTimeFormat("en-US", {
+                                                dateStyle: "medium",
+                                                timeStyle: "short",
+                                            }).format(
+                                                new Date(room.last_visited_at),
+                                            )}
+                                            {" | "}
+                                            Created at:{" "}
+                                            {new Intl.DateTimeFormat("en-US", {
+                                                dateStyle: "medium",
+                                                timeStyle: "short",
+                                            }).format(
+                                                new Date(room.created_at),
+                                            )}
+                                        </CardDescription>
 
-                                            <CardAction className="self-center">
-                                                <JoinRoomLink
-                                                    roomId={room.id}
-                                                    roomSlug={room.slug}
-                                                    className={buttonVariants()}
-                                                >
-                                                    Join Room
-                                                </JoinRoomLink>
-                                            </CardAction>
-                                        </CardHeader>
-                                    </Card>
-                                )}
+                                        <CardAction className="self-center">
+                                            <JoinRoomLink
+                                                roomId={room.id}
+                                                roomSlug={room.slug}
+                                                className={buttonVariants()}
+                                            >
+                                                Join Room
+                                            </JoinRoomLink>
+                                        </CardAction>
+                                    </CardHeader>
+                                </Card>
                             </BoxColumn>
                         );
                     })}

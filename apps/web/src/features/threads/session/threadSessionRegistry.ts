@@ -60,12 +60,14 @@ type RegistryOptions = {
 export class ThreadSessionRegistry {
     private readonly sessions = new Map<string, ThreadSession>();
     private readonly listeners = new Set<() => void>();
+    private readonly selectionListeners = new Set<() => void>();
     private readonly maxIdleTranscripts: number;
     private readonly chatFactory: NonNullable<RegistryOptions["chatFactory"]>;
     private readonly onAlreadyAccepted?: RegistryOptions["onAlreadyAccepted"];
     private selection: { roomId: string; threadId: string } | null = null;
     private readonly personalSelections = new Map<string, string>();
     private version = 0;
+    private selectionVersion = 0;
 
     constructor(
         public userId: string,
@@ -83,6 +85,13 @@ export class ThreadSessionRegistry {
     };
 
     snapshot = () => this.version;
+
+    subscribeSelection = (listener: () => void) => {
+        this.selectionListeners.add(listener);
+        return () => this.selectionListeners.delete(listener);
+    };
+
+    selectionSnapshot = () => this.selectionVersion;
 
     ensure(roomId: string, threadId: string): ThreadSession {
         const key = threadKey(roomId, threadId);
@@ -116,8 +125,9 @@ export class ThreadSessionRegistry {
         this.selection = { roomId, threadId };
         this.personalSelections.set(roomId, threadId);
         this.ensure(roomId, threadId);
-        this.evictIdleTranscripts();
-        if (changed) this.emit();
+        const evicted = this.evictIdleTranscripts(false);
+        if (changed || evicted) this.emit();
+        if (changed) this.emitSelection();
     }
 
     selected(roomId: string) {
@@ -329,15 +339,24 @@ export class ThreadSessionRegistry {
         this.emit();
     }
 
-    evictIdleTranscripts() {
+    evictIdleTranscripts(notify = true) {
         const idle = [...this.sessions.values()]
             .filter((session) => !isRunning(session))
             .sort((left, right) => right.lastAccess - left.lastAccess);
+        let changed = false;
         for (const session of idle.slice(this.maxIdleTranscripts)) {
+            if (
+                session.chat.messages.length === 0 &&
+                session.state.transcriptEvicted
+            ) {
+                continue;
+            }
             session.chat.messages = [];
             session.state.transcriptEvicted = true;
+            changed = true;
         }
-        this.emit();
+        if (changed && notify) this.emit();
+        return changed;
     }
 
     async resetForUser(userId: string) {
@@ -349,12 +368,18 @@ export class ThreadSessionRegistry {
         this.personalSelections.clear();
         this.userId = userId;
         this.emit();
+        this.emitSelection();
         await Promise.all(stops);
     }
 
     private emit() {
         this.version += 1;
         this.listeners.forEach((listener) => listener());
+    }
+
+    private emitSelection() {
+        this.selectionVersion += 1;
+        this.selectionListeners.forEach((listener) => listener());
     }
 }
 
