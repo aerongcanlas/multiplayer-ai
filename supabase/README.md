@@ -6,21 +6,47 @@ room-only application or any old worker can still mutate AI threads.
 
 ## Production rollout
 
-1. Take a restorable database backup and record `ai_thread` and `ai_message`
+1. Choose and record two immutable commits: `ROOM_THREADS_RELEASE_SHA` for the
+   release being deployed and `ROOM_THREADS_ROLLBACK_SHA` for the immediately
+   preceding release that already understands explicit thread IDs and fenced
+   ownership. A commit from before the thread work is not a compatible rollback.
+2. Reconcile migration history before applying DDL. The baseline file describes
+   the schema that existed before migrations were adopted; it must be registered,
+   not replayed, on an existing production database:
+
+    ```sh
+    pnpm --filter @multiplayer-ai/web exec supabase migration list --linked
+    pnpm --filter @multiplayer-ai/web exec supabase migration repair 20260911093541 --status applied --linked
+    pnpm --filter @multiplayer-ai/web exec supabase migration list --linked
+    pnpm --filter @multiplayer-ai/web exec supabase db push --linked --dry-run
+    ```
+
+    Stop if the first list does not match the catalog represented by the baseline,
+    if repair would hide a partially applied migration, or if the dry run proposes
+    replaying `20260911093541_baseline_existing_schema.sql`.
+
+3. Take a restorable database backup, record its identifier and tested restore
+   target, and agree on RPO/RTO for the release. Record `ai_thread` and `ai_message`
    counts plus hashes of thread/message identity, authorship and content.
-2. Pause AI/thread mutations at ingress. Room member chat may remain available.
-3. Drain every old AI request. The old route maximum is 300 seconds; confirm
-   there are no live requests or running rows before continuing.
-4. Apply the additive ownership migration, if it is not already present, then
+4. Pause AI/thread mutations at ingress with the deployment platform's route or
+   maintenance control. Record the control/event ID and verify a POST to
+   `/api/runs` is rejected while room member chat remains available.
+5. Drain every old AI request and worker. Wait at least the old route maximum of
+   300 seconds after ingress closes, confirm the platform reports zero active
+   `/api/runs` requests, and confirm the database query below returns zero rows.
+6. Apply the additive ownership migration, if it is not already present, then
    apply the coordinated cutover migration. The cutover rejects thread inserts
-   without `creation_id` and message writes without a fenced `run_id` before it
-   removes `ai_thread_one_active_per_room`.
-5. Deploy only the explicit-thread application and workers from the same
-   release. Never run an old unfenced worker beside this release.
-6. Verify member/nonmember access, service-only function privileges, two
+   without `creation_id`, incompatible direct thread updates, and message writes
+   without a fenced `run_id` before it removes
+   `ai_thread_one_active_per_room`. Abort on any lock timeout or statement error;
+   keep ingress closed and restore from the recorded backup if catalog state is
+   not understood.
+7. Deploy exactly `ROOM_THREADS_RELEASE_SHA` for the application and workers.
+   Never run an old unfenced worker beside this release.
+8. Verify member/nonmember access, service-only function privileges, two
    unarchived threads in one room, parallel runs on different threads, stale
    token rejection, archive/restore and retained legacy history.
-7. Recompute the recorded counts and integrity hashes. Re-enable mutations only
+9. Recompute the recorded counts and integrity hashes. Re-enable mutations only
    when they match and all application checks pass. Otherwise keep the feature
    unavailable and follow the compatible rollback below.
 
@@ -45,13 +71,25 @@ from public.ai_message;
 select routine_name, grantee
 from information_schema.routine_privileges
 where routine_schema = 'public'
-  and routine_name like '%ai_thread%'
+  and (routine_name like '%ai_thread%' or routine_name = '_ai_assert_member')
 order by routine_name, grantee;
+
+select count(*) as live_runs
+from public.ai_thread
+where run_status = 'running' or current_run_id is not null;
+
+select tgname, tgrelid::regclass
+from pg_trigger
+where not tgisinternal
+  and tgname in (
+    'ai_thread_require_explicit_identity',
+    'ai_thread_require_fenced_mutation'
+  );
 ```
 
 ## Compatible rollback
 
-Roll back to an application release that understands explicit thread IDs,
+Roll back to the recorded `ROOM_THREADS_ROLLBACK_SHA`, which must understand explicit thread IDs,
 multiple unarchived threads and fenced ownership. Keep the migrated schema and
 the fail-closed old-writer guards in place. This rollback does not discard or
 archive user work.

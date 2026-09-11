@@ -36,6 +36,7 @@ export function createSupabaseRunStore(): RunStore {
                 threadId,
                 status,
                 runBy: status === "running" ? thread.runBy : null,
+                retired: thread.retiredAt !== null,
                 messages: thread.messages.map((entry) => ({
                     seq: entry.seq,
                     message: {

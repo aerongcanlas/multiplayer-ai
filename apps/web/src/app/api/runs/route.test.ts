@@ -120,5 +120,16 @@ test("run-store identity and archive failures use public no-data/conflict contra
     assert.deepEqual(await archived.json(), {
         error: "Thread is archived",
         code: "archived",
+        runBy: null,
+    });
+
+    const busy = runStoreFailure(
+        Object.assign(new Error("busy"), { code: "55P03" }),
+    );
+    assert.equal(busy.status, 409);
+    assert.deepEqual(await busy.json(), {
+        error: "A run is already in progress",
+        code: "busy",
+        runBy: null,
     });
 });

@@ -107,6 +107,7 @@ test(
     const threadB = await store.create(roomId, memberId, randomUUID());
 
     const messageA = randomUUID();
+    const competingMessage = randomUUID();
     const runA = randomUUID();
     const competingRun = randomUUID();
     const claims = await Promise.allSettled([
@@ -123,7 +124,7 @@ test(
         threadId: threadA.id,
         actorId: otherMemberId,
         runId: competingRun,
-        userMessageId: randomUUID(),
+        userMessageId: competingMessage,
         parts: textParts("Competing prompt"),
       }),
     ]);
@@ -134,6 +135,12 @@ test(
     const rejected = claims.find((result) => result.status === "rejected");
     assert.equal(rejected?.status, "rejected");
     assert.equal(errorCode(rejected?.reason), "55P03");
+    const winningFirstClaim = claims[0]?.status === "fulfilled";
+    const winningActorId = winningFirstClaim ? memberId : otherMemberId;
+    const winningMessageId = winningFirstClaim ? messageA : competingMessage;
+    const winningTitle = winningFirstClaim
+      ? "Explain the plan"
+      : "Competing prompt";
 
     const parallel = await store.claimRun({
       roomId,
@@ -148,18 +155,18 @@ test(
     const retry = await store.claimRun({
       roomId,
       threadId: threadA.id,
-      actorId: memberId,
+      actorId: winningActorId,
       runId: randomUUID(),
-      userMessageId: messageA,
+      userMessageId: winningMessageId,
       parts: textParts("Must not duplicate"),
     });
     assert.equal(retry.outcome, "already_accepted");
     const historyA = await store.get(roomId, threadA.id, memberId);
     assert.equal(
-      historyA.messages.filter((entry) => entry.id === messageA).length,
+      historyA.messages.filter((entry) => entry.id === winningMessageId).length,
       1,
     );
-    assert.equal(historyA.title, "Explain the plan");
+    assert.equal(historyA.title, winningTitle);
     const incremental = await store.loadFrom(
       roomId,
       threadA.id,
@@ -167,8 +174,8 @@ test(
       retry.acceptedMessageSeq,
     );
     assert.equal(incremental.messages.length, 1);
-    assert.equal(incremental.messages[0]?.id, messageA);
-    assert.equal(incremental.runBy?.id, memberId);
+    assert.equal(incremental.messages[0]?.id, winningMessageId);
+    assert.equal(incremental.runBy?.id, winningActorId);
 
     await assert.rejects(
       store.claimRun({
@@ -176,7 +183,7 @@ test(
         threadId: threadB.id,
         actorId: memberId,
         runId: randomUUID(),
-        userMessageId: messageA,
+        userMessageId: winningMessageId,
         parts: textParts("Foreign collision"),
       }),
       (error: unknown) => errorCode(error) === "23505",
@@ -220,6 +227,12 @@ test(
     const { roomId, memberId } = await fixture();
     const store = createThreadStore(service);
     const thread = await store.create(roomId, memberId, randomUUID());
+
+    const incompatibleUpdate = await service
+      .from("ai_thread")
+      .update({ run_status: "running", run_by: memberId })
+      .eq("id", thread.id);
+    assert.equal(incompatibleUpdate.error?.code, "55000");
     const oldRunId = randomUUID();
     await store.claimRun({
       roomId,

@@ -31,6 +31,31 @@ test("a rejected finalization never broadcasts completion and closes", async () 
     assert.equal(closed, true);
 });
 
+test("rapid persisted snapshots coalesce realtime progress hints", async () => {
+    const events: unknown[] = [];
+    let seq = 0;
+    const thread = openRunThread(
+        {
+            writeMessage: async () => ++seq,
+        } as never,
+        {
+            send: async (event: unknown) => {
+                events.push(event);
+            },
+            close: async () => {},
+        },
+        "room",
+        "thread",
+        { id: "actor", name: "Actor" },
+        "run",
+    );
+
+    await thread.publish({ id: "one", role: "assistant", parts: [] });
+    await thread.publish({ id: "two", role: "assistant", parts: [] });
+
+    assert.equal(events.length, 1);
+});
+
 test("completion waits for execution then the snapshot queue", async () => {
     let release!: () => void;
     const delay = new Promise<void>((resolve) => {

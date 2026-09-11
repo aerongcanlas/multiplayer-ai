@@ -28,6 +28,7 @@ import {
 } from "./threadSessionRegistry";
 
 const FALLBACK_REFRESH_MS = 5_000;
+const CANONICAL_REFRESH_TIMEOUT_MS = 15_000;
 
 type SessionContextValue = {
     registry: ThreadSessionRegistry;
@@ -231,7 +232,9 @@ async function fetchCanonicalThread(
         threadId,
         from: String(from),
     });
-    const response = await fetch(`/api/runs?${query}`);
+    const response = await fetch(`/api/runs?${query}`, {
+        signal: AbortSignal.timeout(CANONICAL_REFRESH_TIMEOUT_MS),
+    });
     if (!response.ok) {
         throw Object.assign(new Error("Could not refresh thread."), {
             status: response.status,

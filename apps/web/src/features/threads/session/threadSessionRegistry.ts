@@ -199,6 +199,7 @@ export class ThreadSessionRegistry {
         Object.assign(session.state, {
             status: snapshot.status,
             runBy: snapshot.runBy,
+            retired: snapshot.retired ?? session.state.retired,
             lastSeq: Math.max(
                 session.state.lastSeq,
                 ...snapshot.messages.map(({ seq }) => seq),

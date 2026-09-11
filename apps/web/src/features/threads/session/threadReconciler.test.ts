@@ -72,7 +72,7 @@ test("hint during an in-flight fetch schedules one follow-up refresh", async () 
     await initial;
 
     assert.equal(calls, 2);
-    assert.deepEqual(applied, [2]);
+    assert.deepEqual(applied, [1, 2]);
 });
 
 test("terminal fallback polling refreshes selected and running entries only", async () => {
@@ -154,7 +154,13 @@ test("authorization denial clears inaccessible state; transient error preserves 
 });
 
 function snapshot(threadId: string): CanonicalThreadSnapshot {
-    return { threadId, status: "finished", runBy: null, messages: [] };
+    return {
+        threadId,
+        status: "finished",
+        runBy: null,
+        retired: false,
+        messages: [],
+    };
 }
 
 function message(value: string): RunUIMessage {

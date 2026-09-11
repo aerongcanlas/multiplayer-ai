@@ -56,6 +56,28 @@ test("same-sequence canonical revisions replace content", () => {
     assert.equal(session?.state.lastSeq, 7);
 });
 
+test("canonical refresh updates remote archive state without discarding history", () => {
+    const registry = new ThreadSessionRegistry("alice", {
+        chatFactory: () => new FakeChat(),
+    });
+    registry.hydrate("room", "thread", {
+        messages: [message("kept")],
+        retired: false,
+    });
+
+    registry.mergeCanonical("room", "thread", {
+        threadId: "thread",
+        status: "finished",
+        runBy: null,
+        retired: true,
+        messages: [],
+    });
+
+    const session = registry.get("room", "thread");
+    assert.equal(session?.state.retired, true);
+    assert.equal(text(session?.chat.messages[0]), "kept");
+});
+
 test("same sequence cannot retain two message identities", () => {
     const registry = new ThreadSessionRegistry("alice", {
         chatFactory: () => new FakeChat(),

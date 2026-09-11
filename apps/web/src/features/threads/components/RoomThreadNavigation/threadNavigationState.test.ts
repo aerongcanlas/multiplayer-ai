@@ -12,8 +12,8 @@ import {
     retainSelectedSummary,
     setRoomExpanded,
     setThreadNavigationView,
+    shouldAdoptPromotedThread,
     visibleThreadSummaries,
-    selectionAfterCreation,
     selectionFromLocation,
     threadMutationError,
 } from "./threadNavigationState";
@@ -136,11 +136,6 @@ test("initial failure is not empty, transient refresh retains known rows, auth c
     assert.equal(known.retainedSelection, null);
 });
 
-test("creation changes only initiating browser selection", () => {
-    assert.equal(selectionAfterCreation(A, B, true), B);
-    assert.equal(selectionAfterCreation(A, B, false), A);
-});
-
 test("history addresses exact thread including back and forward", () => {
     const path = `/rooms/${roomId}/room`;
     assert.equal(selectionFromLocation(`${path}?thread=${A}`, roomId), A);
@@ -154,6 +149,11 @@ test("history addresses exact thread including back and forward", () => {
         selectionFromLocation(`/rooms/elsewhere/room?thread=${B}`, roomId),
         undefined,
     );
+});
+
+test("delayed durable creation cannot reverse a newer selection", () => {
+    assert.equal(shouldAdoptPromotedThread(A, A), true);
+    assert.equal(shouldAdoptPromotedThread(B, A), false);
 });
 
 test("personal selection survives pagination and an archived selection", () => {

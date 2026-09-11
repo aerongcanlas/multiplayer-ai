@@ -12,12 +12,14 @@ export async function loadThread(
         threadId: loadedThreadId,
         status,
         runBy,
+        retired,
         messages,
     } = await store.loadFrom(roomId, actor, threadId, fromSeq);
     return {
         threadId: loadedThreadId,
         status,
         runBy,
+        retired,
         messages: messages.map((entry) => entry.message),
         lastSeq: messages.at(-1)?.seq ?? 0,
     };

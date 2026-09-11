@@ -10,7 +10,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "demo": "tsx src/testing/demo.ts",
     "verify:replay": "tsx src/testing/verify-replay.ts",
-    "verify:retry": "tsx src/testing/verify-retry.ts"
+    "verify:retry": "tsx src/testing/verify-retry.ts",
+    "test:threads": "node --import ./node_modules/tsx/dist/loader.mjs --test src/run/store.test.ts"
   },
   "dependencies": {
     "@ai-sdk/provider": "^4.0.7",

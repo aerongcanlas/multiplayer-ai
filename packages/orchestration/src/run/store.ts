@@ -85,6 +85,7 @@ export function createInMemoryRunStore(): RunStore & {
                 threadId: thread.id,
                 status: thread.status,
                 runBy: thread.runBy,
+                retired: thread.retired,
                 messages: ordered(thread).filter(
                     (entry) => entry.seq >= fromSeq,
                 ),

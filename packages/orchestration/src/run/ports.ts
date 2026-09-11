@@ -34,6 +34,7 @@ export type ThreadRecord = {
     messages: Array<RunUIMessage>;
     status: RunStatus;
     runBy: RunMessageAuthor | null;
+    retired: boolean;
     lastSeq: number;
 };
 
@@ -55,6 +56,7 @@ export interface RunStore {
         threadId: string;
         status: RunStatus;
         runBy: RunMessageAuthor | null;
+        retired: boolean;
         messages: Array<ThreadMessage>;
     }>;
     claimRun(

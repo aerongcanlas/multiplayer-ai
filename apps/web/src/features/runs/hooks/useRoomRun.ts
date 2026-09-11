@@ -8,7 +8,10 @@ import type {
     RunUIMessage,
 } from "@multiplayer-ai/domain";
 import { refusalNotice } from "@multiplayer-ai/domain";
-import { selectionFromLocation } from "@/features/threads/components/RoomThreadNavigation/threadNavigationState";
+import {
+    selectionFromLocation,
+    shouldAdoptPromotedThread,
+} from "@/features/threads/components/RoomThreadNavigation/threadNavigationState";
 import { useCallback, useEffect, useState } from "react";
 import {
     useThreadSession,
@@ -32,6 +35,7 @@ interface Options {
     initialRunBy?: RunMessageAuthor | null;
     initialSeq?: number;
     initialThreadDurable?: boolean;
+    initialThreadRetired?: boolean;
 }
 
 export function useRoomRun({
@@ -43,6 +47,7 @@ export function useRoomRun({
     initialRunBy = null,
     initialSeq = 0,
     initialThreadDurable = true,
+    initialThreadRetired = false,
 }: Options) {
     const { registry, reconciler, observeRoom } = useThreadSessionContext();
     const [activeThreadId, setActiveThreadId] = useState(() => {
@@ -52,6 +57,7 @@ export function useRoomRun({
             runBy: initialRunBy,
             seq: initialSeq,
             durable: initialThreadDurable,
+            retired: initialThreadRetired,
         });
         const explicit =
             typeof window === "undefined"
@@ -132,26 +138,33 @@ export function useRoomRun({
             try {
                 let targetSendMessage = sendMessage;
                 if (!session.state.durable) {
+                    const initiatingThreadId = activeThreadId;
                     requestThreadId = await createDurableThread(
                         roomId,
-                        activeThreadId,
+                        initiatingThreadId,
+                    );
+                    const stillSelected = shouldAdoptPromotedThread(
+                        registry.selected(roomId),
+                        initiatingThreadId,
                     );
                     registry.promoteLocal(
                         roomId,
-                        activeThreadId,
+                        initiatingThreadId,
                         requestThreadId,
                     );
-                    registry.select(roomId, requestThreadId);
-                    const url = new URL(window.location.href);
-                    if (url.pathname.split("/")[2] === roomId) {
-                        url.searchParams.set("thread", requestThreadId);
-                        window.history.replaceState(
-                            window.history.state,
-                            "",
-                            url,
-                        );
+                    if (stillSelected) {
+                        registry.select(roomId, requestThreadId);
+                        const url = new URL(window.location.href);
+                        if (url.pathname.split("/")[2] === roomId) {
+                            url.searchParams.set("thread", requestThreadId);
+                            window.history.replaceState(
+                                window.history.state,
+                                "",
+                                url,
+                            );
+                        }
+                        setActiveThreadId(requestThreadId);
                     }
-                    setActiveThreadId(requestThreadId);
                     targetSendMessage = (
                         registry.ensure(roomId, requestThreadId)
                             .chat as Chat<RunUIMessage>

@@ -69,6 +69,7 @@ async function RoomPage({ params, searchParams }: Props) {
                   runBy: null,
                   messages: [],
                   lastSeq: 0,
+                  retired: false,
               }
             : await loadThread(
                   runRuntime.store(),
@@ -111,6 +112,7 @@ async function RoomPage({ params, searchParams }: Props) {
                         initialRunBy={thread.runBy}
                         initialSeq={thread.lastSeq}
                         initialThreadDurable={selectedThreadId !== undefined}
+                        initialThreadRetired={thread.retired}
                     />
                 }
                 memberChatPanel={

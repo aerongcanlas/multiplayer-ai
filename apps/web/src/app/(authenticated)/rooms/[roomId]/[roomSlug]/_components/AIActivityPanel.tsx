@@ -22,6 +22,7 @@ interface Props {
     initialRunBy?: RunMessageAuthor | null;
     initialSeq?: number;
     initialThreadDurable?: boolean;
+    initialThreadRetired?: boolean;
 }
 
 function AIActivityPanel({
@@ -33,6 +34,7 @@ function AIActivityPanel({
     initialRunBy,
     initialSeq,
     initialThreadDurable,
+    initialThreadRetired,
 }: Props) {
     const {
         activeThreadId,
@@ -65,6 +67,7 @@ function AIActivityPanel({
         initialRunBy,
         initialSeq,
         initialThreadDurable,
+        initialThreadRetired,
     });
 
     const streamingHere = status === "submitted" || status === "streaming";

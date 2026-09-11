@@ -195,19 +195,18 @@ export function resolveThreadSelection(input: {
     return { kind: "fresh", threadId: null };
 }
 
-export function selectionAfterCreation(
-    current: string | undefined,
-    created: string,
-    initiatingBrowser: boolean,
-) {
-    return initiatingBrowser ? created : current;
-}
-
 export function selectionFromLocation(location: string, roomId: string) {
     const url = new URL(location, "https://local.invalid");
     return url.pathname.split("/")[2] === roomId
         ? (url.searchParams.get("thread") ?? undefined)
         : undefined;
+}
+
+export function shouldAdoptPromotedThread(
+    selectedThreadId: string | undefined,
+    initiatingThreadId: string,
+) {
+    return selectedThreadId === initiatingThreadId;
 }
 
 export function threadMutationError(

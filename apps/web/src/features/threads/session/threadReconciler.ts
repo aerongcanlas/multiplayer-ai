@@ -8,6 +8,7 @@ export type CanonicalThreadSnapshot = {
     threadId: string;
     status: RunStatus;
     runBy: RunMessageAuthor | null;
+    retired?: boolean;
     messages: Array<{ seq: number; message: RunUIMessage }>;
 };
 
@@ -115,7 +116,6 @@ export class ThreadReconciler {
         }
         if (state.inFlight !== null) {
             state.again = true;
-            state.generation += 1;
             return state.inFlight;
         }
 

@@ -92,6 +92,7 @@ declare
     existing public.ai_thread%rowtype;
 begin
     perform public._ai_assert_member(p_room_id, p_actor_id);
+    perform set_config('app.ai_thread_mutation', 'fenced', true);
 
     if p_creation_id is not null then
         select t.* into existing
@@ -162,6 +163,7 @@ declare
     auto_title text;
 begin
     perform public._ai_assert_member(p_room_id, p_actor_id);
+    perform set_config('app.ai_thread_mutation', 'fenced', true);
 
     select * into t
     from public.ai_thread
@@ -315,6 +317,7 @@ declare
     t public.ai_thread%rowtype;
 begin
     perform public._ai_assert_member(p_room_id, p_actor_id);
+    perform set_config('app.ai_thread_mutation', 'fenced', true);
     if p_status not in ('finished', 'failed', 'cancelled') then
         raise exception using errcode = '22023', message = 'invalid terminal run status';
     end if;
@@ -348,6 +351,7 @@ declare
     archived_at timestamptz;
 begin
     perform public._ai_assert_member(p_room_id, p_actor_id);
+    perform set_config('app.ai_thread_mutation', 'fenced', true);
     select * into t from public.ai_thread where id = p_thread_id for update;
     if not found or t.room_id <> p_room_id then
         raise exception using errcode = 'P0002', message = 'thread not found';
@@ -385,6 +389,7 @@ declare
     t public.ai_thread%rowtype;
 begin
     perform public._ai_assert_member(p_room_id, p_actor_id);
+    perform set_config('app.ai_thread_mutation', 'fenced', true);
     select * into t from public.ai_thread where id = p_thread_id for update;
     if not found or t.room_id <> p_room_id then
         raise exception using errcode = 'P0002', message = 'thread not found';
@@ -416,6 +421,7 @@ declare
     normalized text := btrim(p_title);
 begin
     perform public._ai_assert_member(p_room_id, p_actor_id);
+    perform set_config('app.ai_thread_mutation', 'fenced', true);
     if normalized = '' or char_length(normalized) > 80 then
         raise exception using errcode = '22023', message = 'thread title must be 1 to 80 characters';
     end if;

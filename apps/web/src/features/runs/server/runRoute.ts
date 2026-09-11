@@ -33,12 +33,16 @@ export function runStoreFailure(error: unknown): Response {
             : "";
     if (code === "55P03")
         return Response.json(
-            { error: "A run is already in progress", code: "busy" },
+            {
+                error: "A run is already in progress",
+                code: "busy",
+                runBy: null,
+            },
             { status: 409 },
         );
     if (code === "P0001")
         return Response.json(
-            { error: "Thread is archived", code: "archived" },
+            { error: "Thread is archived", code: "archived", runBy: null },
             { status: 409 },
         );
     if (
@@ -221,9 +225,9 @@ export const getRun = withActor(async (request, actor) => {
     } catch (error) {
         return runStoreFailure(error);
     }
-    const { threadId, status, runBy, messages } = loaded;
+    const { threadId, status, runBy, retired, messages } = loaded;
 
-    return Response.json({ threadId, status, runBy, messages });
+    return Response.json({ threadId, status, runBy, retired, messages });
 });
 
 export const deleteRun = withActor(async (request, actor) => {

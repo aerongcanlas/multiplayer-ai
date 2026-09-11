@@ -337,12 +337,12 @@ export function RoomThreadNavigation({ rooms, onNavigate }: Props) {
 
     async function updateThread(
         roomId: string,
-        summary: ThreadSummary,
+        threadId: string,
         action: UpdateThreadRequest,
     ) {
         try {
             const response = await fetch(
-                `/api/rooms/${roomId}/threads/${summary.id}`,
+                `/api/rooms/${roomId}/threads/${threadId}`,
                 {
                     method: "PATCH",
                     headers: { "content-type": "application/json" },
@@ -357,21 +357,21 @@ export function RoomThreadNavigation({ rooms, onNavigate }: Props) {
             if (!response.ok)
                 throw new Error(threadMutationError(response.status, body));
             if (body.thread === undefined) return false;
-            await reconciler.refresh(roomId, summary.id);
+            await reconciler.refresh(roomId, threadId);
             setStates((current) => {
                 const next = new Map(current);
                 const state =
                     next.get(roomId) ?? createRoomThreadNavigationState();
                 if (action.action === "archive" && state.view === "normal") {
                     const withRetainedSelection =
-                        registry.selected(roomId) === summary.id
-                            ? retainSelectedSummary(state, summary.id)
+                        registry.selected(roomId) === threadId
+                            ? retainSelectedSummary(state, threadId)
                             : state;
                     next.set(
                         roomId,
                         removeThreadFromNormalList(
                             withRetainedSelection,
-                            summary.id,
+                            threadId,
                         ),
                     );
                 } else if (
@@ -381,7 +381,7 @@ export function RoomThreadNavigation({ rooms, onNavigate }: Props) {
                     next.set(roomId, {
                         ...state,
                         summaries: state.summaries.filter(
-                            (candidate) => candidate.id !== summary.id,
+                            (candidate) => candidate.id !== threadId,
                         ),
                     });
                 } else {
@@ -522,7 +522,7 @@ export function RoomThreadNavigation({ rooms, onNavigate }: Props) {
                                         onUpdate={(action) =>
                                             updateThread(
                                                 room.id,
-                                                summary,
+                                                summary.id,
                                                 action,
                                             )
                                         }
@@ -541,10 +541,10 @@ export function RoomThreadNavigation({ rooms, onNavigate }: Props) {
                                                 onClick={() => {
                                                     void updateThread(
                                                         room.id,
+                                                        selectedId,
                                                         {
-                                                            id: selectedId,
-                                                        } as ThreadSummary,
-                                                        { action: "restore" },
+                                                            action: "restore",
+                                                        },
                                                     )
                                                         .then(() =>
                                                             loadRoom(

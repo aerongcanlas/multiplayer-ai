@@ -15,6 +15,7 @@ export function openRunThread(
     runId: string,
 ) {
     let finishing: Promise<boolean> | undefined;
+    let lastProgressBroadcastAt = 0;
     return {
         async publish(message: RunUIMessage) {
             const seq = await store.writeMessage(
@@ -24,13 +25,17 @@ export function openRunThread(
                 runId,
                 message,
             );
-            await broadcaster.send({
-                kind: "progress",
-                threadId,
-                status: "running",
-                runBy: actor,
-                seq,
-            });
+            const now = Date.now();
+            if (now - lastProgressBroadcastAt >= 500) {
+                lastProgressBroadcastAt = now;
+                await broadcaster.send({
+                    kind: "progress",
+                    threadId,
+                    status: "running",
+                    runBy: actor,
+                    seq,
+                });
+            }
         },
 
         finish(status: Exclude<RunStatus, "running">) {
