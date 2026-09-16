@@ -3,13 +3,19 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./testing": "./scripts/schema-fixture.mjs"
   },
   "scripts": {
+    "gen-types": "node scripts/generate-types.mjs",
+    "test": "node scripts/generate-types.mjs --check",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
+    "@supabase/postgrest-typegen": "0.2.0",
+    "prettier": "^3.9.6",
     "@multiplayer-ai/eslint-config": "workspace:*",
     "eslint": "^9",
     "typescript": "^5.9.3"

@@ -1,0 +1,11 @@
+{
+  "extends": ["//"],
+  "tasks": {
+    "gen-types": {
+      "cache": false
+    },
+    "test": {
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/supabase/migrations/**"]
+    }
+  }
+}

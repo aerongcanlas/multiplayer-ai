@@ -1,5 +1,26 @@
 # Room-thread database rollout
 
+## Desktop API and local schema types
+
+The monorepo also contains `20260914120000_desktop_room_api.sql`. Apply it after
+the September 11 migrations. The baseline already creates
+`desktop_prompt_suggestion`; the new migration adds the desktop snapshot/command
+RPCs, suggestion index and authenticated-only API permissions. It preserves the
+web thread ownership guards. Existing deployments must reconcile their migration
+history before applying it; never replay the baseline on an existing database.
+
+Run `pnpm db:types` to regenerate `packages/db/src/generated/database.types.ts`
+from the canonical migration chain using an in-memory PGlite database and
+Supabase's pinned `@supabase/postgrest-typegen` generator. It needs neither Docker
+nor remote credentials. The fixture stubs only platform auth/roles; application
+tables and functions come directly from migrations. Generated output covers the
+`public` application schema. `pnpm test` checks that the generated file is current.
+
+See [shared-room setup](../docs/shared-rooms.md) for the desktop's public
+configuration and GitHub OAuth loopback redirect.
+
+## Web thread cutover
+
 The multi-thread schema is additive until the final cutover migration. Do not
 run `20260911120000_enable_multiple_room_threads.sql` while the previous
 room-only application or any old worker can still mutate AI threads.

@@ -1,3 +1,4 @@
+// Generated from supabase/migrations by pnpm db:types. Do not edit.
 export type Json =
   | string
   | number
@@ -7,31 +8,6 @@ export type Json =
   | Json[];
 
 export type Database = {
-  graphql_public: {
-    Tables: {
-      [_ in never]: never;
-    };
-    Views: {
-      [_ in never]: never;
-    };
-    Functions: {
-      graphql: {
-        Args: {
-          extensions?: Json;
-          operationName?: string;
-          query?: string;
-          variables?: Json;
-        };
-        Returns: Json;
-      };
-    };
-    Enums: {
-      [_ in never]: never;
-    };
-    CompositeTypes: {
-      [_ in never]: never;
-    };
-  };
   public: {
     Tables: {
       ai_message: {
@@ -433,6 +409,8 @@ export type Database = {
           title_source: string;
         }[];
       };
+      desktop_room_command: { Args: { p_command: Json }; Returns: Json };
+      desktop_room_snapshot: { Args: never; Returns: Json };
       finalize_ai_thread_run: {
         Args: {
           p_actor_id: string;
@@ -615,9 +593,6 @@ export type CompositeTypes<
     : never;
 
 export const Constants = {
-  graphql_public: {
-    Enums: {},
-  },
   public: {
     Enums: {},
   },
