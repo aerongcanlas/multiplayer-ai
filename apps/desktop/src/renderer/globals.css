@@ -1,0 +1,6 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "@multiplayer-ai/ui/styles/theme.css";
+@import "@multiplayer-ai/ui/styles/chat.css";
+
+@source "../../../../packages/ui/src";

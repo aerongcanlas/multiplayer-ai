@@ -2,11 +2,27 @@
   "name": "multiplayer-ai",
   "private": true,
   "packageManager": "pnpm@11.24.0",
+  "engines": {
+    "node": ">=24.14.0"
+  },
   "scripts": {
     "dev": "turbo run dev --parallel",
+    "dev:web": "pnpm --filter @multiplayer-ai/web dev",
+    "dev:desktop": "pnpm --filter @multiplayer-ai/desktop dev",
     "build": "turbo run build",
+    "build:web": "turbo run build --filter=@multiplayer-ai/web",
+    "build:desktop": "turbo run build --filter=@multiplayer-ai/desktop",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
+    "test": "turbo run test test:threads",
+    "test:desktop": "turbo run test --filter=@multiplayer-ai/desktop",
+    "test:ui:e2e": "turbo run test:e2e --filter=@multiplayer-ai/ui",
+    "test:desktop:e2e": "turbo run test:e2e test:shared test:codex --filter=@multiplayer-ai/desktop --concurrency=1",
+    "test:desktop:packaged": "turbo run test:packaged --filter=@multiplayer-ai/desktop",
+    "package:desktop": "turbo run package --filter=@multiplayer-ai/desktop",
+    "dist:desktop": "turbo run dist --filter=@multiplayer-ai/desktop",
+    "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm build",
+    "db:types": "pnpm --filter @multiplayer-ai/db gen-types",
     "prettier": "prettier --write .",
     "prepare": "husky"
   },
