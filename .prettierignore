@@ -1,0 +1,15 @@
+node_modules/
+.pnpm-store/
+.next/
+.turbo/
+out/
+dist/
+release/
+output/
+build/
+coverage/
+pnpm-lock.yaml
+packages/db/src/generated/
+.lavish/
+.playwright-cli/
+.vercel/
