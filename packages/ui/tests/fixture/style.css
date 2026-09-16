@@ -1,0 +1,13 @@
+@import "tailwindcss";
+@import "../../src/styles/theme.css";
+@import "../../src/styles/chat.css";
+@source "../../src";
+
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+}
+button,
+select {
+  font: inherit;
+}
