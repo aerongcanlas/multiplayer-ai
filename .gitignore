@@ -14,6 +14,7 @@ node_modules/
 out/
 build/
 dist/
+release/
 coverage/
 .turbo/
 
@@ -28,6 +29,15 @@ coverage/
 /output
 docs/
 scripts/
+!/apps/desktop/scripts/
+!/apps/desktop/scripts/**
+!/packages/db/scripts/
+!/packages/db/scripts/**
+!/docs/
+/docs/*
+!/docs/desktop-migration.md
+!/docs/shared-rooms.md
+!/docs/codex-runner.md
 /.worktrees/
 MEMORY.md
 memory.md
@@ -35,6 +45,15 @@ memory.md
 **/supabase/.temp/
 .DS_Store
 *.pem
+*.key
+*.p12
+*.pfx
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite-journal
+supabase-session.bin
+supabase-session.bin.tmp
 
 # debug logs
 npm-debug.log*
@@ -45,3 +64,7 @@ yarn-error.log*
 # TypeScript
 *.tsbuildinfo
 next-env.d.ts
+
+# Next.js development-generated local agent guides
+/apps/web/AGENTS.md
+/apps/web/CLAUDE.md
