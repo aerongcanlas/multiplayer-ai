@@ -1,0 +1,37 @@
+{
+  "extends": ["//"],
+  "tasks": {
+    "build": {
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/tsconfig.base.json"],
+      "outputs": ["out/**"]
+    },
+    "typecheck": {
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/tsconfig.base.json"]
+    },
+    "test": {
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/supabase/migrations/**"]
+    },
+    "test:e2e": {
+      "dependsOn": ["build"],
+      "cache": false
+    },
+    "test:shared": {
+      "dependsOn": ["build"],
+      "cache": false
+    },
+    "test:codex": {
+      "dependsOn": ["build"],
+      "cache": false
+    },
+    "package": {
+      "cache": false
+    },
+    "dist": {
+      "cache": false
+    },
+    "test:packaged": {
+      "dependsOn": ["package"],
+      "cache": false
+    }
+  }
+}

@@ -1,7 +1,10 @@
 packages:
-  - 'apps/*'
-  - 'packages/*'
+  - "apps/*"
+  - "packages/*"
 verifyDepsBeforeRun: false
 allowBuilds:
+  electron: true
+  # The desktop uses NSIS; the optional Squirrel installer is not built.
+  electron-winstaller: false
   esbuild: false
   unrs-resolver: false
