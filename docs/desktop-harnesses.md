@@ -49,6 +49,15 @@ Transcript entries are marked for what they may share with a future read-along v
 
 If the app quits during a turn, the tab shows the turn as interrupted after restart and clears pending approvals and questions; send a follow-up to continue the same session. If a harness cannot resume a tab's session, the tab says so and offers **Start fresh session**.
 
+## Release checks
+
+Before a release, run the live checks against disposable checkouts with a signed-in machine:
+
+- `node apps/desktop/scripts/codex-e2e.mjs --live --repository <checkout>`: managed download, models, a plan-mode turn, a declined approval, and Stop.
+- `node apps/desktop/scripts/claude-e2e.mjs --repository <checkout>`: managed download with the existing login, models, a project skill that asks a question, plan-mode continue, and resume after restart.
+
+A Claude Code tab on Windows without Git for Windows must also run a shell command; that check needs a Windows machine.
+
 ## Troubleshooting
 
 - **Download failed:** check your connection and choose **Retry download**. A checksum failure means the file changed in transit or upstream; the app never runs it.
