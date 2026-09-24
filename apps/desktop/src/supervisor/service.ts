@@ -17,6 +17,14 @@ import { Journal } from "./journal";
 import { MockRunner, type RunnerAdapter, type RunnerUpdate } from "./runner";
 import { inspectWorkspace, publicWorkspace } from "./workspace";
 import { CodexRunner, type CodexEvent } from "./codex-runner";
+import type { HarnessRegistry } from "./harnesses/registry";
+import { TabHost, type TabCommand } from "./tabs/host";
+import { TranscriptWriter } from "./tabs/transcript";
+import {
+  tabBusy,
+  type TranscriptBatch,
+  type TranscriptPage,
+} from "../shared/tabs";
 
 const now = () => new Date().toISOString();
 const findRoom = (state: Snapshot, id: string) => {
@@ -34,6 +42,8 @@ export class SupervisorService {
   private state: Snapshot;
   private controllers = new Map<string, AbortController>();
   private closed = false;
+  private host?: TabHost;
+  private registry?: HarnessRegistry;
 
   constructor(
     private journal: Journal,
@@ -41,8 +51,43 @@ export class SupervisorService {
     private runner: RunnerAdapter = new MockRunner(),
     private codex?: CodexRunner,
     private openLogin?: (url: string) => void,
+    harnesses?: {
+      registry: HarnessRegistry;
+      publishTranscript: (batches: TranscriptBatch[]) => void;
+      transcriptInterval?: number;
+      stopTimeoutMs?: number;
+    },
   ) {
     this.state = journal.load();
+    if (harnesses) {
+      this.registry = harnesses.registry;
+      this.host = new TabHost(
+        {
+          read: () => this.state,
+          transaction: (mutate) => this.transaction((draft) => mutate(draft)),
+          workspacePath: (roomId) => {
+            const workspace = this.state.rooms.find(
+              (room) => room.id === roomId,
+            )?.workspace;
+            return workspace
+              ? (journal.getWorkspace(workspace.id)?.path ?? null)
+              : null;
+          },
+          transcriptPage: (tabId, beforeSeq, limit) =>
+            journal.transcriptPage(tabId, beforeSeq, limit),
+          pendingEntries: (tabId) => journal.pendingEntries(tabId),
+          deleteTranscript: (tabId) => journal.deleteTranscript(tabId),
+        },
+        harnesses.registry,
+        new TranscriptWriter(
+          journal,
+          harnesses.publishTranscript,
+          harnesses.transcriptInterval,
+        ),
+        harnesses.stopTimeoutMs,
+      );
+      this.host.recover();
+    }
     this.transaction((draft, events) => {
       for (const room of draft.rooms) {
         for (const execution of room.executions.filter(
@@ -79,7 +124,39 @@ export class SupervisorService {
       ...structuredClone(this.state),
       protocolVersion: PROTOCOL_VERSION,
       ...(this.codex ? { provider: this.codex.client.snapshot() } : {}),
+      ...(this.registry ? { harnesses: this.registry.snapshot() } : {}),
     };
+  }
+
+  /** Harness program, sign-in, or model state changed; it is not journaled. */
+  harnessesChanged() {
+    if (this.closed) return;
+    this.state = { ...this.state, revision: this.state.revision + 1 };
+    this.publish(this.snapshot());
+    this.host?.syncStatuses();
+  }
+
+  /** Dispatches a command and returns the snapshot plus a transcript page when one was asked for. */
+  async dispatchResult(
+    input: SupervisorRequest["command"],
+  ): Promise<{ snapshot: Snapshot; transcript?: TranscriptPage }> {
+    if (this.closed) throw new Error("The supervisor is shutting down.");
+    if (
+      input.type.startsWith("tab.") ||
+      input.type === "question.answer" ||
+      (input.type === "approval.respond" && "tabId" in input && input.tabId)
+    ) {
+      if (!this.host)
+        throw new Error("Chat tabs are unavailable in this build.");
+      const transcript = await this.host.handle(
+        commandSchema.parse(input) as TabCommand,
+      );
+      return {
+        snapshot: this.snapshot(),
+        ...(transcript ? { transcript } : {}),
+      };
+    }
+    return { snapshot: await this.dispatch(input) };
   }
 
   private transaction(
@@ -119,6 +196,18 @@ export class SupervisorService {
 
   async dispatch(input: SupervisorRequest["command"]): Promise<Snapshot> {
     if (this.closed) throw new Error("The supervisor is shutting down.");
+    // Main-only messages from the private transport.
+    if (input.type === "host.environment") {
+      this.registry?.setEnvironment(input.env);
+      return this.snapshot();
+    }
+    if (input.type === "harness.setExecutable") {
+      if (!this.registry)
+        throw new Error("Harnesses are unavailable in this build.");
+      this.registry.setExecutable(input.harness, input.path);
+      void this.registry.refresh(input.harness);
+      return this.snapshot();
+    }
     if (input.type === "shared.import") {
       if (!input.room.shared)
         throw new Error("Shared room identity is required.");
@@ -134,6 +223,8 @@ export class SupervisorService {
         ) {
           if (old.executions.some((run) => run.status === "running"))
             throw new Error("Stop the previous account execution first.");
+          if (old.tabs.some((tab) => tabBusy(tab.status)))
+            throw new Error("Stop the previous account's running tabs first.");
         }
         const sameAccount =
           old?.shared?.userId === input.room.shared?.userId &&
@@ -155,7 +246,10 @@ export class SupervisorService {
     // workspace.register is accepted only on the private main-to-supervisor transport.
     if (input.type === "workspace.register") {
       const room = findRoom(this.state, input.roomId);
-      if (room.executions.some((run) => run.status === "running"))
+      if (
+        room.executions.some((run) => run.status === "running") ||
+        room.tabs.some((tab) => tabBusy(tab.status))
+      )
         throw new Error("Stop the active run before changing the repository.");
       this.transaction((draft) => {
         findRoom(draft, input.roomId).workspace = publicWorkspace(
@@ -183,13 +277,34 @@ export class SupervisorService {
       }
       return this.snapshot();
     }
+    if (isHarnessCommand(command)) {
+      const registry = this.registry;
+      if (!registry)
+        throw new Error("Harnesses are unavailable in this build.");
+      // Harness I/O runs in the background and reports through snapshots (KTD16).
+      if (command.type === "harness.refresh")
+        void registry.refresh(command.harness);
+      else if (command.type === "harness.signIn")
+        void registry.signIn(command.harness).catch(() => {
+          /* The failure is recorded in the harness state. */
+        });
+      else if (command.type === "harness.useManaged") {
+        registry.setExecutable(command.harness, null);
+        void registry.refresh(command.harness);
+      } else if (command.type === "harness.acknowledgeNotice")
+        registry.acknowledgeNotice(command.harness);
+      else
+        throw new Error(
+          "Choosing an executable requires the desktop file dialog.",
+        );
+      return this.snapshot();
+    }
     if (
-      isHarnessCommand(command) ||
       command.type.startsWith("tab.") ||
       command.type === "question.answer" ||
       (command.type === "approval.respond" && command.tabId)
     )
-      throw new Error("Chat tabs are not available in this build yet.");
+      return (await this.dispatchResult(command)).snapshot;
     if (command.type === "approval.respond" && command.executionId) {
       const execution = findExecution(
         findRoom(this.state, command.roomId),
@@ -725,7 +840,14 @@ export class SupervisorService {
     });
   }
 
+  /** Stops running tabs in a room, for example after its membership is lost. */
+  stopRoom(roomId: string) {
+    this.host?.stopRoom(roomId);
+  }
+
   close() {
+    this.host?.close();
+    this.registry?.close();
     this.closed = true;
     for (const controller of this.controllers.values()) controller.abort();
     this.controllers.clear();

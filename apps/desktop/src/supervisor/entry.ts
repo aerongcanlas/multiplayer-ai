@@ -4,6 +4,9 @@ import { Journal } from "./journal";
 import { SupervisorService } from "./service";
 import { CodexClient } from "./codex-client";
 import { CodexRunner } from "./codex-runner";
+import { HarnessRegistry } from "./harnesses/registry";
+import { ProgramManager } from "./programs/manager";
+import { HARNESS_MANIFEST } from "./programs/manifest";
 import type { SupervisorMessage, SupervisorRequest } from "../shared/contracts";
 
 // Electron utilityProcess exposes parentPort, never a renderer-facing Node connection.
@@ -23,8 +26,19 @@ const fixture = process.argv[3];
 if (!parent || !directory)
   throw new Error("Supervisor must be launched by the desktop host.");
 mkdirSync(directory, { recursive: true });
-const service = new SupervisorService(
-  new Journal(join(directory, "execution-journal.sqlite")),
+const journal = new Journal(join(directory, "execution-journal.sqlite"));
+// Harness state changes reach the service once it exists.
+let harnessesChanged = () => {};
+const registry = new HarnessRegistry({
+  adapters: [],
+  programs: new ProgramManager({ root: directory, manifest: HARNESS_MANIFEST }),
+  settings: journal,
+  changed: () => harnessesChanged(),
+  openLogin: (harness, url) =>
+    parent.postMessage({ type: "open-login", harness, url }),
+});
+const supervisor = new SupervisorService(
+  journal,
   (snapshot) => parent.postMessage({ type: "snapshot", snapshot }),
   undefined,
   new CodexRunner(
@@ -41,8 +55,14 @@ const service = new SupervisorService(
     join(directory, "worktrees"),
   ),
   (url) => parent.postMessage({ type: "open-provider-login", url }),
+  {
+    registry,
+    publishTranscript: (batches) =>
+      parent.postMessage({ type: "transcript", batches }),
+  },
 );
-parent.postMessage({ type: "ready", snapshot: service.snapshot() });
+harnessesChanged = () => supervisor.harnessesChanged();
+parent.postMessage({ type: "ready", snapshot: supervisor.snapshot() });
 const heartbeat = setInterval(
   () => parent.postMessage({ type: "heartbeat" }),
   2_000,
@@ -51,11 +71,12 @@ let pending = Promise.resolve();
 parent.on("message", ({ data }) => {
   pending = pending.then(async () => {
     try {
-      const snapshot = await service.dispatch(data.command);
+      // Harness I/O runs as background jobs, so a slow refresh never holds this queue (KTD16).
+      const result = await supervisor.dispatchResult(data.command);
       parent.postMessage({
         type: "response",
         id: data.id,
-        result: { ok: true, snapshot },
+        result: { ok: true, ...result },
       });
     } catch (error) {
       parent.postMessage({
@@ -74,5 +95,5 @@ parent.on("message", ({ data }) => {
 });
 process.on("exit", () => {
   clearInterval(heartbeat);
-  service.close();
+  supervisor.close();
 });
