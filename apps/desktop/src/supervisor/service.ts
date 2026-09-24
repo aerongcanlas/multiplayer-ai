@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 import {
+  PROTOCOL_VERSION,
   commandSchema,
   currentSummary,
+  isHarnessCommand,
   type Command,
   type Execution,
   type Room,
@@ -75,6 +77,7 @@ export class SupervisorService {
   snapshot(): Snapshot {
     return {
       ...structuredClone(this.state),
+      protocolVersion: PROTOCOL_VERSION,
       ...(this.codex ? { provider: this.codex.client.snapshot() } : {}),
     };
   }
@@ -141,6 +144,7 @@ export class SupervisorService {
               workspace: old.workspace,
               executions: old.executions,
               summaries: old.summaries,
+              tabs: old.tabs,
             }
           : input.room;
         if (index < 0) draft.rooms.push(room);
@@ -179,7 +183,14 @@ export class SupervisorService {
       }
       return this.snapshot();
     }
-    if (command.type === "approval.respond") {
+    if (
+      isHarnessCommand(command) ||
+      command.type.startsWith("tab.") ||
+      command.type === "question.answer" ||
+      (command.type === "approval.respond" && command.tabId)
+    )
+      throw new Error("Chat tabs are not available in this build yet.");
+    if (command.type === "approval.respond" && command.executionId) {
       const execution = findExecution(
         findRoom(this.state, command.roomId),
         command.executionId,
@@ -227,6 +238,7 @@ export class SupervisorService {
           suggestions: [],
           executions: [],
           summaries: [],
+          tabs: [],
         });
         return;
       }

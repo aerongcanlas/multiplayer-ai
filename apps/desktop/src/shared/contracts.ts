@@ -10,6 +10,14 @@ import type {
   RoomNotice,
   SharedRoomScope,
 } from "./collaboration";
+import {
+  tabCommandSchemas,
+  type HarnessId,
+  type HarnessState,
+  type Tab,
+  type TranscriptBatch,
+  type TranscriptPage,
+} from "./tabs";
 
 import { PROTOCOL_VERSION } from "./channels";
 export {
@@ -17,6 +25,7 @@ export {
   COMMAND_CHANNEL,
   SNAPSHOT_CHANNEL,
   HEALTH_CHANNEL,
+  TRANSCRIPT_CHANNEL,
 } from "./channels";
 
 const id = z.uuid();
@@ -30,11 +39,16 @@ export const commandSchema = z.discriminatedUnion("type", [
     .object({
       type: z.literal("approval.respond"),
       roomId: id,
-      executionId: id,
+      // A lead-run approval names its execution; a tab approval names its tab.
+      executionId: id.optional(),
+      tabId: id.optional(),
       approvalId: id,
       decision: z.enum(["accept", "decline"]),
     })
-    .strict(),
+    .strict()
+    .refine((value) => Boolean(value.executionId) !== Boolean(value.tabId), {
+      message: "An approval names exactly one execution or tab.",
+    }),
   z.object({ type: z.literal("auth.signIn") }).strict(),
   z.object({ type: z.literal("auth.cancel") }).strict(),
   z.object({ type: z.literal("auth.signOut") }).strict(),
@@ -94,9 +108,13 @@ export const commandSchema = z.discriminatedUnion("type", [
   z
     .object({ type: z.literal("execution.stop"), roomId: id, executionId: id })
     .strict(),
+  ...tabCommandSchemas,
 ]);
 
 export type Command = z.infer<typeof commandSchema>;
+export type HarnessCommand = Extract<Command, { type: `harness.${string}` }>;
+export const isHarnessCommand = (command: Command): command is HarnessCommand =>
+  command.type.startsWith("harness.");
 export type TaskStatus =
   | "queued"
   | "running"
@@ -230,10 +248,12 @@ export interface Room {
   suggestions: Suggestion[];
   executions: Execution[];
   summaries: ContextSummary[];
+  tabs: Tab[];
 }
 
 export interface Snapshot {
   provider?: ProviderState;
+  harnesses?: HarnessState[];
   collaboration?: CollaborationState;
   protocolVersion: typeof PROTOCOL_VERSION;
   revision: number;
@@ -243,7 +263,12 @@ export interface Snapshot {
 }
 
 export type Result =
-  | { ok: true; snapshot: Snapshot; notice?: RoomNotice }
+  | {
+      ok: true;
+      snapshot: Snapshot;
+      notice?: RoomNotice;
+      transcript?: TranscriptPage;
+    }
   | { ok: false; error: string };
 export interface Health {
   status: "connecting" | "live" | "stale";
@@ -300,10 +325,16 @@ export interface SupervisorRequest {
         type: "workspace.register";
         roomId: string;
         workspace: PrivateWorkspace;
-      };
+      }
+    // Main-only: a path chosen in a native dialog, or null for the managed program.
+    | { type: "harness.setExecutable"; harness: HarnessId; path: string | null }
+    // Main-only: the host's login-shell environment for harness launches (KTD15).
+    | { type: "host.environment"; env: Record<string, string> };
 }
 export type SupervisorMessage =
   | { type: "open-provider-login"; url: string }
+  | { type: "open-login"; harness: HarnessId; url: string }
+  | { type: "transcript"; batches: TranscriptBatch[] }
   | { type: "ready"; snapshot: Snapshot }
   | { type: "snapshot"; snapshot: Snapshot }
   | { type: "heartbeat" }

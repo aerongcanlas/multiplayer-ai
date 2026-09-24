@@ -21,11 +21,12 @@ test("projection ignores delayed local replies and hides cached shared rooms fro
     },
     executions: [],
     summaries: [],
+    tabs: [],
     messages: [],
     suggestions: [],
   };
   const local: Snapshot = {
-    protocolVersion: 1,
+    protocolVersion: 2,
     sync: "local-only",
     revision: 10,
     hostId: randomUUID(),

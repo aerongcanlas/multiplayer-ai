@@ -1,9 +1,10 @@
-import type {
-  Command,
-  PrivateWorkspace,
-  Result,
-  Snapshot,
-  SupervisorRequest,
+import {
+  isHarnessCommand,
+  type Command,
+  type PrivateWorkspace,
+  type Result,
+  type Snapshot,
+  type SupervisorRequest,
 } from "../shared/contracts";
 import type { CollaborationClient } from "./collaboration-client";
 
@@ -54,6 +55,7 @@ export class DesktopCoordinator {
             workspace: cached.workspace,
             executions: cached.executions,
             summaries: cached.summaries,
+            tabs: cached.tabs,
           }
         : remote;
     });
@@ -95,7 +97,8 @@ export class DesktopCoordinator {
         command.type === "provider.refresh" ||
         command.type === "provider.connect" ||
         command.type === "provider.cancel" ||
-        command.type === "provider.disconnect"
+        command.type === "provider.disconnect" ||
+        isHarnessCommand(command)
       )
         await this.localCommand(command);
       else if (command.type === "auth.signIn") await this.shared.signIn();

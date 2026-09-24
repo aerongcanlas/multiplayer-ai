@@ -79,5 +79,6 @@ export function asSharedRoom(
     workspace: null,
     executions: [],
     summaries: [],
+    tabs: [],
   };
 }

@@ -18,7 +18,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "lint": "eslint src scripts electron.vite.config.ts",
     "test": "pnpm run test:unit && pnpm run test:database",
-    "test:unit": "tsx --test src/supervisor/*.test.ts src/shared/*.test.ts src/main/*.test.ts",
+    "test:unit": "tsx --test \"src/**/*.test.ts\"",
     "test:database": "node --test scripts/shared-database.test.mjs",
     "test:shared": "node scripts/shared-e2e.mjs",
     "test:e2e": "node scripts/e2e.mjs",
