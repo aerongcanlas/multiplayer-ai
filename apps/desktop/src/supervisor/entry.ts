@@ -5,6 +5,7 @@ import { SupervisorService } from "./service";
 import { CodexClient } from "./codex-client";
 import { CodexRunner } from "./codex-runner";
 import { HarnessRegistry } from "./harnesses/registry";
+import { CodexAdapter } from "./harnesses/codex/adapter";
 import { ProgramManager } from "./programs/manager";
 import { HARNESS_MANIFEST } from "./programs/manifest";
 import type { SupervisorMessage, SupervisorRequest } from "../shared/contracts";
@@ -29,8 +30,18 @@ mkdirSync(directory, { recursive: true });
 const journal = new Journal(join(directory, "execution-journal.sqlite"));
 // Harness state changes reach the service once it exists.
 let harnessesChanged = () => {};
+// Fixtures are passed only by an unpackaged E2E launch; they run under Electron's Node.
+const fixtureLauncher =
+  (script: string) =>
+  (_executable: string, args: string[], env: Record<string, string>) => ({
+    executable: process.execPath,
+    args: [script, ...args],
+    env: { ...env, ELECTRON_RUN_AS_NODE: "1" },
+  });
 const registry = new HarnessRegistry({
-  adapters: [],
+  adapters: [
+    new CodexAdapter(fixture ? { launcher: fixtureLauncher(fixture) } : {}),
+  ],
   programs: new ProgramManager({ root: directory, manifest: HARNESS_MANIFEST }),
   settings: journal,
   changed: () => harnessesChanged(),

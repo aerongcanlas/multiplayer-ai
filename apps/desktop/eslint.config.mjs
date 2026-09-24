@@ -4,7 +4,14 @@ import tseslint from "typescript-eslint";
 import hooks from "eslint-plugin-react-hooks";
 
 export default tseslint.config(
-  { ignores: ["out/**", "release/**", "output/**"] },
+  {
+    ignores: [
+      "out/**",
+      "release/**",
+      "output/**",
+      "src/supervisor/harnesses/codex/generated/**",
+    ],
+  },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   { languageOptions: { globals: { ...globals.node, ...globals.browser } } },

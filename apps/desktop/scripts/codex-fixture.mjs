@@ -1,7 +1,42 @@
-// Local JSONL protocol fixture. It never makes network requests or executes model commands.
+// Local Codex app-server fixture speaking the 0.155.1 method names. It never makes network requests
+// or runs model commands. Prompt markers select behavior: FIXTURE_APPROVAL, FIXTURE_QUESTION,
+// FIXTURE_PERMISSIONS, FIXTURE_ELICIT, FIXTURE_USAGE, FIXTURE_CRASH, FIXTURE_SLOW, and
+// FIXTURE_UNKNOWN_REQUEST.
+// MP_FIXTURE_STATE persists threads so a restarted fixture can resume them; MP_FIXTURE_LOG records
+// every request, the launch arguments, and the environment for tests to inspect.
 import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
-const threads = new Map();
+import {
+  appendFileSync,
+  existsSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
+
+const statePath = process.env.MP_FIXTURE_STATE;
+const logPath = process.env.MP_FIXTURE_LOG;
+const threads = new Map(
+  statePath && existsSync(statePath)
+    ? Object.entries(JSON.parse(readFileSync(statePath, "utf8")))
+    : [],
+);
+const saveThreads = () => {
+  if (statePath)
+    writeFileSync(statePath, JSON.stringify(Object.fromEntries(threads)));
+};
+const log = (entry) => {
+  if (logPath) appendFileSync(logPath, JSON.stringify(entry) + "\n");
+};
+log({
+  type: "launch",
+  argv: process.argv.slice(2),
+  env: Object.fromEntries(
+    Object.entries(process.env).filter(([key]) =>
+      /^(PATH|SSH_AUTH_SOCK|HOME|CODEX_HOME|[A-Z_]*API_KEY)$/.test(key),
+    ),
+  ),
+});
+
 const pending = new Map();
 let signedIn = process.env.MP_FIXTURE_SIGNED_IN === "1";
 const send = (value) => process.stdout.write(JSON.stringify(value) + "\n");
@@ -13,36 +48,195 @@ const models = [
     displayName: "Fixture Codex",
     defaultReasoningEffort: "medium",
     supportedReasoningEfforts: [
-      { reasoningEffort: "medium" },
-      { reasoningEffort: "low" },
+      { reasoningEffort: "medium", description: "" },
+      { reasoningEffort: "low", description: "" },
     ],
     isDefault: true,
   },
 ];
-function finish(threadId, turnId, text, status = "completed") {
-  if (text) {
-    notify("item/agentMessage/delta", {
+const running = new Map();
+
+function message(threadId, turnId, text) {
+  const itemId = randomUUID();
+  const half = Math.ceil(text.length / 2);
+  for (const delta of [text.slice(0, half), text.slice(half)])
+    notify("item/agentMessage/delta", { threadId, turnId, itemId, delta });
+  notify("item/completed", {
+    threadId,
+    turnId,
+    item: { type: "agentMessage", id: itemId, text },
+  });
+}
+function complete(threadId, turnId, status = "completed", error = null) {
+  running.delete(threadId);
+  notify("turn/completed", {
+    threadId,
+    turn: { id: turnId, status, error, items: [] },
+  });
+}
+function ask(method, params) {
+  const id = randomUUID();
+  send({ id, method, params });
+  return new Promise((resolve) => pending.set(id, resolve));
+}
+function command(threadId, turnId, text) {
+  const itemId = randomUUID();
+  const item = {
+    type: "commandExecution",
+    id: itemId,
+    command: text,
+    cwd: ".",
+  };
+  notify("item/started", { threadId, turnId, item });
+  notify("item/completed", {
+    threadId,
+    turnId,
+    item: { ...item, aggregatedOutput: "Fixture command output", exitCode: 0 },
+  });
+}
+
+async function turn(threadId, turnId, prompt, params) {
+  const thread = threads.get(threadId) ?? { turns: 0 };
+  const planMode = params.collaborationMode?.mode === "plan";
+  if (prompt.includes("FIXTURE_CRASH")) process.exit(1);
+  if (prompt.includes("FIXTURE_SLOW") || prompt.includes("FIXTURE_CANCEL"))
+    return;
+  if (prompt.includes("FIXTURE_USAGE")) {
+    notify("account/rateLimits/updated", {
+      rateLimits: {
+        limitId: "codex",
+        primary: {
+          usedPercent: 100,
+          windowDurationMins: 300,
+          resetsAt: 2000000000,
+        },
+      },
+    });
+    notify("error", {
       threadId,
       turnId,
-      delta: "Inspecting the requested scope...",
+      willRetry: false,
+      error: {
+        message: "You've hit your usage limit.",
+        codexErrorInfo: "usageLimitExceeded",
+      },
+    });
+    return complete(threadId, turnId, "failed", {
+      message: "You've hit your usage limit.",
+      codexErrorInfo: "usageLimitExceeded",
+    });
+  }
+  if (prompt.includes("FIXTURE_UNKNOWN_REQUEST")) {
+    const result = await ask("item/tool/call", {
+      threadId,
+      turnId,
+      tool: "unknown",
+    });
+    log({ type: "answer", method: "item/tool/call", result });
+  }
+  if (prompt.includes("FIXTURE_APPROVAL")) {
+    const result = await ask("item/commandExecution/requestApproval", {
+      threadId,
+      turnId,
+      itemId: randomUUID(),
+      command: "git status --short",
+      reason: "Fixture approval request",
+    });
+    log({
+      type: "answer",
+      method: "item/commandExecution/requestApproval",
+      result,
+    });
+    if (result?.decision === "cancel") return;
+    if (result?.decision === "accept")
+      command(threadId, turnId, "git status --short");
+    else message(threadId, turnId, "The command was declined.");
+  }
+  if (prompt.includes("FIXTURE_PERMISSIONS")) {
+    const result = await ask("item/permissions/requestApproval", {
+      threadId,
+      turnId,
+      itemId: randomUUID(),
+      cwd: ".",
+      reason: "Needs network",
+      permissions: { network: { enabled: true }, fileSystem: null },
+    });
+    log({ type: "answer", method: "item/permissions/requestApproval", result });
+    if (!result?.permissions?.network) return;
+  }
+  if (prompt.includes("FIXTURE_QUESTION")) {
+    const result = await ask("item/tool/requestUserInput", {
+      threadId,
+      turnId,
+      itemId: randomUUID(),
+      isBlocking: true,
+      autoResolutionMs: null,
+      questions: [
+        {
+          id: "scope",
+          header: "Scope",
+          question: "Which scope?",
+          isOther: true,
+          isSecret: false,
+          options: [
+            { label: "Small", description: "One file" },
+            { label: "Large", description: "The module" },
+          ],
+        },
+      ],
+    });
+    log({ type: "answer", method: "item/tool/requestUserInput", result });
+    const answer = result?.answers?.scope?.answers?.[0];
+    if (!answer) return;
+    message(threadId, turnId, `Scope chosen: ${answer}.`);
+  }
+  if (prompt.includes("FIXTURE_ELICIT")) {
+    const result = await ask("mcpServer/elicitation/request", {
+      threadId,
+      turnId,
+      serverName: "fixture",
+      mode: "form",
+      _meta: null,
+      message: "Pick a region",
+      requestedSchema: {
+        type: "object",
+        properties: {
+          region: { type: "string", enum: ["us", "eu"], title: "Region" },
+        },
+      },
+    });
+    log({ type: "answer", method: "mcpServer/elicitation/request", result });
+  }
+  if (planMode) {
+    const itemId = randomUUID();
+    notify("turn/plan/updated", {
+      threadId,
+      turnId,
+      explanation: "Fixture plan",
+      plan: [{ step: "Inspect the repository", status: "pending" }],
     });
     notify("item/completed", {
       threadId,
       turnId,
-      item: { type: "agentMessage", id: randomUUID(), text },
+      item: {
+        type: "plan",
+        id: itemId,
+        text: "1. Inspect the repository\n2. Make the change",
+      },
     });
+  } else {
+    command(threadId, turnId, "git status --short");
+    message(
+      threadId,
+      turnId,
+      `Fixture reply (previous turns: ${thread.turns}) with ${params.collaborationMode?.settings?.model}.`,
+    );
   }
-  notify("turn/completed", {
-    threadId,
-    turn: {
-      id: turnId,
-      status,
-      ...(status === "failed"
-        ? { error: { message: "Fixture provider failure" } }
-        : {}),
-    },
-  });
+  thread.turns += 1;
+  saveThreads();
+  complete(threadId, turnId);
 }
+
 createInterface({ input: process.stdin })
   .on("line", (line) => {
     const message = JSON.parse(line);
@@ -51,12 +245,21 @@ createInterface({ input: process.stdin })
       const held = pending.get(id);
       if (held) {
         pending.delete(id);
-        held(message.result?.decision === "accept");
+        held(message.result ?? { error: message.error });
       }
       return;
     }
-    const result = (result) => send({ id, result });
-    if (method === "initialize") result({ userAgent: "fixture" });
+    log({ type: "request", method, params });
+    const result = (value) => send({ id, result: value });
+    const error = (text) =>
+      send({ id, error: { code: -32600, message: text } });
+    if (method === "initialize")
+      result({
+        userAgent: "multiplayer_ai_desktop/0.155.1 (fixture)",
+        codexHome: "/tmp/fixture",
+        platformFamily: "unix",
+        platformOs: "macos",
+      });
     else if (method === "account/read")
       result({
         account: signedIn
@@ -87,13 +290,16 @@ createInterface({ input: process.stdin })
       result({
         type: "chatgpt",
         loginId: "fixture-login",
-        authUrl: "https://auth.openai.com/authorize?state=fixture",
+        authUrl:
+          process.env.MP_FIXTURE_LOGIN_URL ??
+          "https://auth.openai.com/authorize?state=fixture",
       });
       setTimeout(() => {
         signedIn = true;
         notify("account/login/completed", {
           loginId: "fixture-login",
           success: true,
+          error: null,
         });
       }, 100);
     } else if (method === "account/login/cancel") result({});
@@ -102,102 +308,138 @@ createInterface({ input: process.stdin })
       result({});
     } else if (method === "thread/start") {
       const threadId = randomUUID();
-      threads.set(threadId, params);
-      result({ thread: { id: threadId } });
+      threads.set(threadId, {
+        turns: 0,
+        cwd: params.cwd,
+        legacy: Boolean(params.developerInstructions),
+        role: params.developerInstructions?.match(/You are the (\w+)/)?.[1],
+      });
+      saveThreads();
+      result({
+        thread: { id: threadId },
+        model: params.model ?? "fixture-codex",
+      });
+    } else if (method === "thread/resume") {
+      if (!threads.has(params.threadId))
+        return error(`no rollout found for thread id ${params.threadId}`);
+      result({ thread: { id: params.threadId }, model: "fixture-codex" });
     } else if (method === "turn/interrupt") {
-      finish(params.threadId, params.turnId, "", "interrupted");
       result({});
+      complete(params.threadId, params.turnId, "interrupted");
     } else if (method === "turn/start") {
       const threadId = params.threadId;
       const turnId = randomUUID();
       const prompt = params.input?.[0]?.text ?? "";
-      notify("turn/started", { threadId, turn: { id: turnId } });
-      result({ turn: { id: turnId, status: "inProgress" } });
-      if (prompt.includes("FIXTURE_CANCEL")) return;
-      const role = threads
-        .get(threadId)
-        ?.developerInstructions.match(/You are the (\w+)/)?.[1];
-      const complete = () => {
-        if (prompt.startsWith("Plan specialist"))
-          finish(
-            threadId,
-            turnId,
-            JSON.stringify({
-              tasks: [
-                {
-                  role: "planner",
-                  objective: "Inspect repository structure",
-                  criteria: "Identify components with source evidence",
-                  dependencies: [],
-                },
-                {
-                  role: "validator",
-                  objective: "Independently verify findings",
-                  criteria: "Check reported files",
-                  dependencies: [0],
-                },
-              ],
-            }),
-          );
-        else if (prompt.startsWith("Review these"))
-          finish(
-            threadId,
-            turnId,
-            JSON.stringify({
-              currentWork: "Lead reviewed both specialist results.",
-              decisions: ["Repository inspected."],
-              uncertainties: ["No builds were run."],
-              questions: [],
-            }),
-          );
-        else {
-          notify("item/completed", {
-            threadId,
-            turnId,
-            item: {
-              type: "commandExecution",
-              id: randomUUID(),
-              command: "git status --short",
-              aggregatedOutput: "Fixture command output",
-              exitCode: 0,
-            },
-          });
-          finish(
-            threadId,
-            turnId,
-            JSON.stringify({
-              summary: `${role} completed the inspection.`,
-              succeeded: !prompt.includes("FIXTURE_FAILED_REVIEW"),
-              evidence: ["Inspected repository files."],
-              uncertainties: ["No builds run."],
-            }),
-          );
-        }
-      };
-      if (
-        prompt.includes("FIXTURE_APPROVAL") &&
-        !prompt.startsWith("Review these")
-      ) {
-        const requestId = randomUUID();
-        pending.set(requestId, (accepted) =>
-          accepted ? complete() : finish(threadId, turnId, "", "failed"),
-        );
-        send({
-          id: requestId,
-          method: "item/commandExecution/requestApproval",
-          params: {
-            threadId,
-            turnId,
-            itemId: randomUUID(),
-            command: "git status --short",
-            reason: "Fixture approval request",
-          },
-        });
-      } else setTimeout(complete, 200);
-    } else if (id !== undefined)
-      send({
-        id,
-        error: { code: -32601, message: `Unknown fixture method: ${method}` },
+      running.set(threadId, turnId);
+      notify("turn/started", {
+        threadId,
+        turn: { id: turnId, status: "inProgress", items: [] },
       });
+      result({ turn: { id: turnId, status: "inProgress", items: [] } });
+      if (threads.get(threadId)?.legacy)
+        return legacyTurn(threadId, turnId, prompt);
+      void turn(threadId, turnId, prompt, params);
+    } else if (id !== undefined) error(`Unknown fixture method: ${method}`);
   })
   .on("close", () => process.exit(0));
+
+// The lead/specialist run's scripted structured replies. Removed with the lead run.
+function legacyTurn(threadId, turnId, prompt) {
+  if (prompt.includes("FIXTURE_CANCEL")) return;
+  const role = threads.get(threadId)?.role;
+  const finish = (text, status = "completed") => {
+    if (text) {
+      notify("item/agentMessage/delta", {
+        threadId,
+        turnId,
+        delta: "Inspecting the requested scope...",
+      });
+      notify("item/completed", {
+        threadId,
+        turnId,
+        item: { type: "agentMessage", id: randomUUID(), text },
+      });
+    }
+    notify("turn/completed", {
+      threadId,
+      turn: {
+        id: turnId,
+        status,
+        ...(status === "failed"
+          ? { error: { message: "Fixture provider failure" } }
+          : {}),
+      },
+    });
+  };
+  const done = () => {
+    if (prompt.startsWith("Plan specialist"))
+      finish(
+        JSON.stringify({
+          tasks: [
+            {
+              role: "planner",
+              objective: "Inspect repository structure",
+              criteria: "Identify components with source evidence",
+              dependencies: [],
+            },
+            {
+              role: "validator",
+              objective: "Independently verify findings",
+              criteria: "Check reported files",
+              dependencies: [0],
+            },
+          ],
+        }),
+      );
+    else if (prompt.startsWith("Review these"))
+      finish(
+        JSON.stringify({
+          currentWork: "Lead reviewed both specialist results.",
+          decisions: ["Repository inspected."],
+          uncertainties: ["No builds were run."],
+          questions: [],
+        }),
+      );
+    else {
+      notify("item/completed", {
+        threadId,
+        turnId,
+        item: {
+          type: "commandExecution",
+          id: randomUUID(),
+          command: "git status --short",
+          aggregatedOutput: "Fixture command output",
+          exitCode: 0,
+        },
+      });
+      finish(
+        JSON.stringify({
+          summary: `${role} completed the inspection.`,
+          succeeded: !prompt.includes("FIXTURE_FAILED_REVIEW"),
+          evidence: ["Inspected repository files."],
+          uncertainties: ["No builds run."],
+        }),
+      );
+    }
+  };
+  if (
+    prompt.includes("FIXTURE_APPROVAL") &&
+    !prompt.startsWith("Review these")
+  ) {
+    const requestId = randomUUID();
+    pending.set(requestId, (value) =>
+      value?.decision === "accept" ? done() : finish("", "failed"),
+    );
+    send({
+      id: requestId,
+      method: "item/commandExecution/requestApproval",
+      params: {
+        threadId,
+        turnId,
+        itemId: randomUUID(),
+        command: "git status --short",
+        reason: "Fixture approval request",
+      },
+    });
+  } else setTimeout(done, 200);
+}
