@@ -17,8 +17,12 @@ import {
   COMMAND_CHANNEL,
   SNAPSHOT_CHANNEL,
   HEALTH_CHANNEL,
+  TRANSCRIPT_CHANNEL,
   type Result,
 } from "../shared/contracts";
+import { HARNESS_LABELS } from "../shared/tabs";
+import { loginAllowed } from "./supervisor-messages";
+import { resolveLoginEnvironment } from "./login-environment";
 import { isLocalDevUrl, isTrustedDocument } from "../shared/security";
 import { inspectWorkspace } from "../supervisor/workspace";
 import { SupervisorClient } from "./supervisor-client";
@@ -149,6 +153,26 @@ else {
           void shell.openExternal(url.href);
       },
       testing ? process.env.MP_TEST_CODEX_FIXTURE : undefined,
+      {
+        // Transcripts go only to the trusted main frame of the app window.
+        onTranscript: (batches) => {
+          if (
+            window &&
+            isTrustedDocument(window.webContents.getURL(), documentUrl)
+          )
+            window.webContents.send(TRANSCRIPT_CHANNEL, batches);
+        },
+        openLogin: (harness, url) => {
+          if (testing && process.env.MP_TEST_CODEX_FIXTURE) return;
+          if (loginAllowed(harness, url)) void shell.openExternal(url);
+        },
+        claudeFixture: testing ? process.env.MP_TEST_CLAUDE_FIXTURE : undefined,
+      },
+    );
+    // Harnesses launch with the host's login-shell environment; the supervisor strips provider
+    // credentials before any harness sees it (KTD15).
+    void resolveLoginEnvironment().then((env) =>
+      supervisor.request({ type: "host.environment", env }),
     );
     collaboration = new CollaborationClient(
       testing && process.env.MP_TEST_SUPABASE_URL
@@ -176,6 +200,15 @@ else {
         return canceled || !filePaths[0]
           ? null
           : inspectWorkspace(filePaths[0]);
+      },
+      async (harness) => {
+        if (!window) return null;
+        const { canceled, filePaths } = await dialog.showOpenDialog(window, {
+          title: `Choose the ${HARNESS_LABELS[harness]} executable`,
+          properties: ["openFile"],
+          buttonLabel: "Use executable",
+        });
+        return canceled || !filePaths[0] ? null : filePaths[0];
       },
     );
     ipcMain.handle(

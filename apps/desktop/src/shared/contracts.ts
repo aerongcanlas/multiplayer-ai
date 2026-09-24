@@ -14,6 +14,7 @@ import {
   tabCommandSchemas,
   type HarnessId,
   type HarnessState,
+  type Loadout,
   type Tab,
   type TranscriptBatch,
   type TranscriptPage,
@@ -311,6 +312,39 @@ export interface DesktopBridge {
   stopExecution(roomId: string, executionId: string): Promise<Result>;
   onSnapshot(listener: (snapshot: Snapshot) => void): () => void;
   onHealth(listener: (health: Health) => void): () => void;
+  openTab(roomId: string, harness: HarnessId): Promise<Result>;
+  renameTab(roomId: string, tabId: string, title: string): Promise<Result>;
+  closeTab(roomId: string, tabId: string, confirm?: boolean): Promise<Result>;
+  setLoadout(roomId: string, tabId: string, loadout: Loadout): Promise<Result>;
+  sendToTab(
+    input: Omit<Extract<Command, { type: "tab.send" }>, "type">,
+  ): Promise<Result>;
+  stopTab(roomId: string, tabId: string): Promise<Result>;
+  // The page arrives in the Result's `transcript` field.
+  loadTranscript(
+    roomId: string,
+    tabId: string,
+    beforeSeq?: number,
+  ): Promise<Result>;
+  resetTabSession(roomId: string, tabId: string): Promise<Result>;
+  respondToTabApproval(
+    roomId: string,
+    tabId: string,
+    approvalId: string,
+    decision: "accept" | "decline",
+  ): Promise<Result>;
+  answerQuestion(
+    roomId: string,
+    tabId: string,
+    questionId: string,
+    answers: Record<string, string[]>,
+  ): Promise<Result>;
+  refreshHarness(harness: HarnessId): Promise<Result>;
+  signInHarness(harness: HarnessId): Promise<Result>;
+  chooseHarnessExecutable(harness: HarnessId): Promise<Result>;
+  useManagedHarness(harness: HarnessId): Promise<Result>;
+  acknowledgeHarnessNotice(harness: HarnessId): Promise<Result>;
+  onTranscript(listener: (batches: TranscriptBatch[]) => void): () => void;
 }
 
 export interface PrivateWorkspace extends Workspace {

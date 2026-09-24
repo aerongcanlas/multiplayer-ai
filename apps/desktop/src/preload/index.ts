@@ -4,6 +4,7 @@ import {
   COMMAND_CHANNEL,
   SNAPSHOT_CHANNEL,
   HEALTH_CHANNEL,
+  TRANSCRIPT_CHANNEL,
 } from "../shared/channels";
 import type {
   Command,
@@ -12,6 +13,7 @@ import type {
   Result,
   Snapshot,
 } from "../shared/contracts";
+import type { TranscriptBatch } from "../shared/tabs";
 
 const invoke = (command: Command): Promise<Result> =>
   ipcRenderer.invoke(COMMAND_CHANNEL, command);
@@ -63,6 +65,49 @@ const bridge: DesktopBridge = {
       listener(health);
     ipcRenderer.on(HEALTH_CHANNEL, handler);
     return () => ipcRenderer.removeListener(HEALTH_CHANNEL, handler);
+  },
+  openTab: (roomId, harness) => invoke({ type: "tab.open", roomId, harness }),
+  renameTab: (roomId, tabId, title) =>
+    invoke({ type: "tab.rename", roomId, tabId, title }),
+  closeTab: (roomId, tabId, confirm) =>
+    invoke({
+      type: "tab.close",
+      roomId,
+      tabId,
+      ...(confirm ? { confirm: true as const } : {}),
+    }),
+  setLoadout: (roomId, tabId, loadout) =>
+    invoke({ type: "tab.setLoadout", roomId, tabId, loadout }),
+  sendToTab: (input) => invoke({ ...input, type: "tab.send" }),
+  stopTab: (roomId, tabId) => invoke({ type: "tab.stop", roomId, tabId }),
+  loadTranscript: (roomId, tabId, beforeSeq) =>
+    invoke({
+      type: "tab.transcript",
+      roomId,
+      tabId,
+      ...(beforeSeq ? { beforeSeq } : {}),
+    }),
+  resetTabSession: (roomId, tabId) =>
+    invoke({ type: "tab.resetSession", roomId, tabId }),
+  respondToTabApproval: (roomId, tabId, approvalId, decision) =>
+    invoke({ type: "approval.respond", roomId, tabId, approvalId, decision }),
+  answerQuestion: (roomId, tabId, questionId, answers) =>
+    invoke({ type: "question.answer", roomId, tabId, questionId, answers }),
+  refreshHarness: (harness) => invoke({ type: "harness.refresh", harness }),
+  signInHarness: (harness) => invoke({ type: "harness.signIn", harness }),
+  chooseHarnessExecutable: (harness) =>
+    invoke({ type: "harness.chooseExecutable", harness }),
+  useManagedHarness: (harness) =>
+    invoke({ type: "harness.useManaged", harness }),
+  acknowledgeHarnessNotice: (harness) =>
+    invoke({ type: "harness.acknowledgeNotice", harness }),
+  onTranscript: (listener) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      batches: TranscriptBatch[],
+    ) => listener(batches);
+    ipcRenderer.on(TRANSCRIPT_CHANNEL, handler);
+    return () => ipcRenderer.removeListener(TRANSCRIPT_CHANNEL, handler);
   },
 };
 contextBridge.exposeInMainWorld("desktop", Object.freeze(bridge));

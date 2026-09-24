@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { setTimeout as wait } from "node:timers/promises";
+import { randomUUID } from "node:crypto";
 import { Journal } from "../journal";
 import { SupervisorService } from "../service";
 import { inspectWorkspace } from "../workspace";
@@ -689,6 +690,47 @@ test("changing the harness between turns starts a new session", async () => {
       title: "Refactor",
     });
     assert.equal(setup.tab(tab.id).title, "Refactor");
+  } finally {
+    setup.close();
+  }
+});
+
+test("a shared-room import keeps local tabs for the same account and project", async () => {
+  const fake = new FakeHarness();
+  const setup = await start(fake);
+  try {
+    const shared = {
+      ...structuredClone(setup.service.snapshot().rooms[0]),
+      id: randomUUID(),
+      workspace: null,
+      tabs: [],
+      shared: {
+        userId: randomUUID(),
+        project: "test",
+        isAdmin: true,
+        members: [],
+      },
+    };
+    await setup.dispatch({ type: "shared.import", room: shared });
+    await setup.dispatch({
+      type: "tab.open",
+      roomId: shared.id,
+      harness: "codex",
+    });
+    const room = () =>
+      setup.service.snapshot().rooms.find((item) => item.id === shared.id)!;
+    const tabId = room().tabs[0].id;
+    await setup.dispatch({
+      type: "shared.import",
+      room: { ...shared, name: "Renamed" },
+    });
+    assert.equal(room().name, "Renamed");
+    assert.equal(room().tabs[0].id, tabId);
+    await setup.dispatch({
+      type: "shared.import",
+      room: { ...shared, shared: { ...shared.shared, userId: randomUUID() } },
+    });
+    assert.deepEqual(room().tabs, []);
   } finally {
     setup.close();
   }

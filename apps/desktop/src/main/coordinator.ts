@@ -7,6 +7,20 @@ import {
   type SupervisorRequest,
 } from "../shared/contracts";
 import type { CollaborationClient } from "./collaboration-client";
+import { tabBusy, type HarnessId, type TranscriptPage } from "../shared/tabs";
+
+// Commands that start work wait on shared-room checks; everything else reaches the supervisor
+// directly so Stop and responses work while the shared connection is down (KTD17).
+const DIRECT = new Set([
+  "execution.stop",
+  "tab.stop",
+  "tab.close",
+  "tab.rename",
+  "tab.transcript",
+  "tab.resetSession",
+  "approval.respond",
+  "question.answer",
+]);
 
 interface Supervisor {
   request(command: SupervisorRequest["command"]): Promise<Result>;
@@ -31,6 +45,9 @@ export class DesktopCoordinator {
     >,
     private publish: (snapshot: Snapshot) => void,
     private chooseWorkspace: () => Promise<PrivateWorkspace | null>,
+    private chooseExecutable: (
+      harness: HarnessId,
+    ) => Promise<string | null> = async () => null,
   ) {}
   acceptLocal(snapshot: Snapshot) {
     if (this.local && snapshot.revision < this.local.revision) return;
@@ -82,18 +99,35 @@ export class DesktopCoordinator {
           executionId: run.id,
         });
       }
+      for (const tab of room.tabs.filter((tab) => tabBusy(tab.status)))
+        void this.supervisor.request({
+          type: "tab.stop",
+          roomId: room.id,
+          tabId: tab.id,
+        });
     }
   }
   private async localCommand(command: SupervisorRequest["command"]) {
     const result = await this.supervisor.request(command);
     if (!result.ok) throw new Error(result.error);
     this.acceptLocal(result.snapshot);
+    return result;
   }
   async dispatch(command: Command): Promise<Result> {
     try {
       if (!this.local) await this.localCommand({ type: "snapshot" });
       let notice: Extract<Result, { ok: true }>["notice"];
-      if (
+      let transcript: TranscriptPage | undefined;
+      if (command.type === "harness.chooseExecutable") {
+        // The path comes from main's native dialog, never from the renderer.
+        const path = await this.chooseExecutable(command.harness);
+        if (path)
+          await this.localCommand({
+            type: "harness.setExecutable",
+            harness: command.harness,
+            path,
+          });
+      } else if (
         command.type === "provider.refresh" ||
         command.type === "provider.connect" ||
         command.type === "provider.cancel" ||
@@ -132,7 +166,7 @@ export class DesktopCoordinator {
         } else {
           if (command.type === "invite.create")
             throw new Error("Invitations are available in shared rooms.");
-          if (room.shared && command.type !== "execution.stop") {
+          if (room.shared && !DIRECT.has(command.type)) {
             await this.shared.refresh();
             room = this.shared.rooms.find((item) => item.id === command.roomId);
             if (!room || this.shared.state.status !== "connected")
@@ -170,11 +204,16 @@ export class DesktopCoordinator {
               )
             )
               throw new Error("Room membership changed.");
-            await this.localCommand(command);
+            transcript = (await this.localCommand(command)).transcript;
           }
         }
       }
-      return { ok: true, snapshot: this.view!, ...(notice ? { notice } : {}) };
+      return {
+        ok: true,
+        snapshot: this.view!,
+        ...(notice ? { notice } : {}),
+        ...(transcript ? { transcript } : {}),
+      };
     } catch (error) {
       return {
         ok: false,
