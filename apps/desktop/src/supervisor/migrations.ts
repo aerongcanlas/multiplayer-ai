@@ -99,6 +99,12 @@ export function migrate(
       : stored;
   if (start === list.length && !branchShaped) return stored;
   if (tables.has("state")) backup(db, file);
+  // Steps drop and rebuild tables that reference each other; enforcement resumes afterwards.
+  // (The pragma is a no-op inside a transaction, so it is set before BEGIN.)
+  const foreignKeys = Number(
+    db.prepare("PRAGMA foreign_keys").get()?.foreign_keys ?? 0,
+  );
+  db.exec("PRAGMA foreign_keys = OFF");
   db.exec("BEGIN IMMEDIATE");
   try {
     if (branchShaped) rebuildBranchJournal(db, tables);
@@ -109,6 +115,8 @@ export function migrate(
   } catch (error) {
     db.exec("ROLLBACK");
     throw error;
+  } finally {
+    db.exec(`PRAGMA foreign_keys = ${foreignKeys ? "ON" : "OFF"}`);
   }
   return stored;
 }

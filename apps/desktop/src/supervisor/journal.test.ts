@@ -143,6 +143,11 @@ function writeBranchJournal(file: string) {
     JSON.stringify({ ...room.workspace, path: "/tmp/repo" }),
   );
   db.prepare("INSERT INTO connections (id, body) VALUES ('x', '{}')").run();
+  // Branch journals carry event rows that outbox rows reference.
+  db.prepare(
+    "INSERT INTO events (id, execution_id, seq, body) VALUES ('e1', 'x', 1, '{}')",
+  ).run();
+  db.prepare("INSERT INTO outbox (event_id) VALUES ('e1')").run();
   db.close();
   return room;
 }
