@@ -16,6 +16,7 @@ import { Readable, Transform, type Writable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { ReadableStream as WebReadableStream } from "node:stream/web";
 import { createZstdDecompress } from "node:zlib";
+import { extractTar } from "./tar";
 import type { HarnessId } from "../../shared/tabs";
 import type {
   Digest,
@@ -158,14 +159,12 @@ export class ProgramManager extends EventEmitter {
     return { platform, asset };
   }
 
+  private folder(harness: HarnessId) {
+    return join(this.options.root, "harnesses", harness, this.pinned(harness));
+  }
+
   private location(harness: HarnessId, asset: ProgramAsset) {
-    return join(
-      this.options.root,
-      "harnesses",
-      harness,
-      this.pinned(harness),
-      asset.file,
-    );
+    return join(this.folder(harness), ...asset.file.split("/"));
   }
 
   /** Whether a verified managed program is already stored, without downloading. */
@@ -233,6 +232,8 @@ export class ProgramManager extends EventEmitter {
       await this.writeMeta(target, harness, platform, asset);
       return { path: target, source: "managed", version };
     }
+    if (asset.archive === "tar")
+      return this.acquireArchive(harness, platform, asset, target, version);
     await rm(target, { force: true });
     await rm(`${target}.meta`, { force: true });
     await mkdir(dirname(target), { recursive: true });
@@ -272,6 +273,61 @@ export class ProgramManager extends EventEmitter {
     } catch (error) {
       await rm(partial, { force: true });
       await rm(unpacked, { force: true });
+      throw classify(
+        error,
+        "The harness program could not be downloaded. Check your connection and retry.",
+      );
+    }
+  }
+
+  /** Unpacks a verified package into a staging folder, checks the executable, then swaps it in. */
+  private async acquireArchive(
+    harness: HarnessId,
+    platform: PlatformKey,
+    asset: ProgramAsset,
+    target: string,
+    version: string,
+  ): Promise<ResolvedProgram> {
+    const folder = this.folder(harness);
+    const partial = `${folder}.partial`;
+    const staging = `${folder}.unpacked`;
+    await mkdir(dirname(folder), { recursive: true });
+    await rm(staging, { recursive: true, force: true });
+    try {
+      await this.download(harness, asset, partial);
+      await mkdir(staging, { recursive: true });
+      try {
+        if (asset.compression === "zstd")
+          await pipeline(
+            createReadStream(partial),
+            createZstdDecompress(),
+            extractTar(staging),
+          );
+        else await pipeline(createReadStream(partial), extractTar(staging));
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOSPC") throw error;
+        throw new ProgramError(
+          "checksum_mismatch",
+          `The downloaded harness package could not be unpacked. ${error instanceof Error ? error.message : ""}`.trim(),
+        );
+      }
+      const binary = asset.binary ?? asset.download;
+      const actual = await fileDigest(
+        join(staging, ...asset.file.split("/")),
+      ).catch(() => ({ sha256: "", size: -1 }));
+      if (actual.sha256 !== binary.sha256 || actual.size !== binary.size)
+        throw new ProgramError(
+          "checksum_mismatch",
+          "The unpacked harness program does not match its pinned checksum.",
+        );
+      await rm(partial, { force: true });
+      await rm(folder, { recursive: true, force: true });
+      await rename(staging, folder);
+      await this.writeMeta(target, harness, platform, asset);
+      return { path: target, source: "managed", version };
+    } catch (error) {
+      await rm(partial, { force: true });
+      await rm(staging, { recursive: true, force: true });
       throw classify(
         error,
         "The harness program could not be downloaded. Check your connection and retry.",

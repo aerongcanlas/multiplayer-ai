@@ -18,11 +18,13 @@ export interface Digest {
 }
 export interface ProgramAsset {
   url: string;
-  // The executable's file name once stored.
+  // The executable's path once stored; inside the unpacked folder for an archive.
   file: string;
   // The downloaded file.
   download: Digest;
   compression?: "zstd";
+  // A tar package unpacked into the version folder (the executable needs its companion files).
+  archive?: "tar";
   // The decompressed executable; equal to `download` when uncompressed.
   binary?: Digest;
 }

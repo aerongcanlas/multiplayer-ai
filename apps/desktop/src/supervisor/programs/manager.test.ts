@@ -290,3 +290,125 @@ test("a custom path is used without downloading, and a missing one never downloa
     await server.close();
   }
 });
+
+// A minimal ustar writer for test packages.
+function tar(
+  entries: { name: string; body?: Buffer; mode?: number; type?: string }[],
+) {
+  const blocks: Buffer[] = [];
+  for (const entry of entries) {
+    const body = entry.body ?? Buffer.alloc(0);
+    const header = Buffer.alloc(512);
+    header.write(entry.name, 0, 100);
+    header.write(
+      `${(entry.mode ?? 0o644).toString(8).padStart(7, "0")}\0`,
+      100,
+    );
+    header.write(`${body.length.toString(8).padStart(11, "0")}\0`, 124);
+    header.write(" ".repeat(8), 148);
+    header.write(entry.type ?? "0", 156);
+    header.write("ustar\0" + "00", 257);
+    let sum = 0;
+    for (const byte of header) sum += byte;
+    header.write(`${sum.toString(8).padStart(6, "0")}\0 `, 148);
+    blocks.push(header, body, Buffer.alloc((512 - (body.length % 512)) % 512));
+  }
+  blocks.push(Buffer.alloc(1024));
+  return Buffer.concat(blocks);
+}
+
+async function archiveSetup(
+  entries: Parameters<typeof tar>[0],
+  executable: Buffer,
+) {
+  const archive = zstdCompressSync(tar(entries));
+  const server = await serve((_path, respond) => respond(200, archive));
+  const root = await mkdtemp(join(tmpdir(), "multiplayer-archive-"));
+  const manager = new ProgramManager({
+    root,
+    platform: "darwin-arm64",
+    manifest: {
+      ...manifest(server.url),
+      codex: {
+        version: "1.0.0",
+        platforms: {
+          "darwin-arm64": {
+            url: `${server.url}/codex-package.tar.zst`,
+            file: "bin/codex",
+            download: digest(archive),
+            compression: "zstd",
+            archive: "tar",
+            binary: digest(executable),
+          },
+        },
+      },
+    },
+  });
+  return { server, root, manager };
+}
+
+test("a package archive unpacks the executable with its companion files", async () => {
+  const helper = Buffer.from("code mode host");
+  const { server, root, manager } = await archiveSetup(
+    [
+      { name: "bin/", type: "5", mode: 0o755 },
+      { name: "bin/codex", body: binary, mode: 0o755 },
+      { name: "bin/codex-code-mode-host", body: helper, mode: 0o755 },
+      { name: "codex-package.json", body: Buffer.from("{}") },
+    ],
+    binary,
+  );
+  try {
+    const resolved = await manager.resolve("codex");
+    assert.equal(
+      resolved.path,
+      join(root, "harnesses", "codex", "1.0.0", "bin", "codex"),
+    );
+    assert.deepEqual(await readFile(resolved.path), binary);
+    const companion = join(
+      root,
+      "harnesses",
+      "codex",
+      "1.0.0",
+      "bin",
+      "codex-code-mode-host",
+    );
+    assert.deepEqual(await readFile(companion), helper);
+    if (process.platform !== "win32") {
+      const { stat } = await import("node:fs/promises");
+      assert.ok((await stat(companion)).mode & 0o100);
+    }
+    assert.equal(await manager.installed("codex"), true);
+    assert.deepEqual((await readdir(join(root, "harnesses", "codex"))).sort(), [
+      "1.0.0",
+    ]);
+  } finally {
+    await server.close();
+  }
+});
+
+test("a package that writes outside its folder or lacks the pinned executable is refused", async () => {
+  for (const entries of [
+    [{ name: "../escape", body: Buffer.from("x") }],
+    [
+      {
+        name: "bin/codex",
+        body: Buffer.from("not the pinned binary"),
+        mode: 0o755,
+      },
+    ],
+    [{ name: "bin/link", type: "2" }],
+  ]) {
+    const { server, root, manager } = await archiveSetup(entries, binary);
+    try {
+      await assert.rejects(manager.resolve("codex"), (error: ProgramError) => {
+        assert.equal(error.code, "checksum_mismatch");
+        return true;
+      });
+      assert.equal(existsSync(join(root, "harnesses", "escape")), false);
+      assert.deepEqual(await readdir(join(root, "harnesses", "codex")), []);
+    } finally {
+      await server.close();
+    }
+  }
+});

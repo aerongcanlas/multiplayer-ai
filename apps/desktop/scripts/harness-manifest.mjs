@@ -1,8 +1,9 @@
 // Maintainer script: regenerates the embedded harness program manifest when pins move.
 //   node scripts/harness-manifest.mjs            writes src/supervisor/programs/manifest.ts
 //   node scripts/harness-manifest.mjs --print    prints the digests instead
-// Codex digests come from the GitHub release (trust on first use); the binary digest is computed
-// by downloading and decompressing each asset. Claude Code digests come from the manifest.json
+// Codex comes from the release's per-platform `codex-package` archive, because the codex binary
+// needs its companions (codex-code-mode-host, rg) beside it. Digests come from the GitHub release
+// (trust on first use); the executable's digest is computed by downloading and unpacking each one. Claude Code digests come from the manifest.json
 // shipped in the paired Claude Agent SDK package.
 import { createHash } from "node:crypto";
 import { writeFile } from "node:fs/promises";
@@ -22,8 +23,8 @@ const codexTargets = {
   "linux-x64": "x86_64-unknown-linux-musl",
   "linux-arm64-musl": "aarch64-unknown-linux-musl",
   "linux-x64-musl": "x86_64-unknown-linux-musl",
-  "win32-arm64": "aarch64-pc-windows-msvc.exe",
-  "win32-x64": "x86_64-pc-windows-msvc.exe",
+  "win32-arm64": "aarch64-pc-windows-msvc",
+  "win32-x64": "x86_64-pc-windows-msvc",
 };
 
 const sha256 = (buffer) => createHash("sha256").update(buffer).digest("hex");
@@ -41,31 +42,70 @@ async function codex() {
     )
   ).json();
   const platforms = {};
-  const binaries = new Map();
+  const unpacked = new Map();
   for (const [platform, target] of Object.entries(codexTargets)) {
-    const name = `codex-${target}.zst`;
+    const name = `codex-package-${target}.tar.zst`;
     const asset = release.assets?.find((item) => item.name === name);
     if (!asset?.digest?.startsWith("sha256:"))
       throw new Error(
         `Codex ${CODEX_VERSION} has no published digest for ${name}.`,
       );
     const digest = asset.digest.slice("sha256:".length);
-    if (!binaries.has(name)) {
+    if (!unpacked.has(name)) {
       const compressed = await download(asset.browser_download_url);
       if (sha256(compressed) !== digest)
         throw new Error(`${name} does not match its published digest.`);
-      const binary = zstdDecompressSync(compressed);
-      binaries.set(name, { sha256: sha256(binary), size: binary.length });
+      const archive = zstdDecompressSync(compressed);
+      const entries = tarEntries(archive);
+      const file = [...entries.keys()].find((entry) =>
+        /^bin\/codex(\.exe)?$/.test(entry),
+      );
+      if (!file) throw new Error(`${name} has no bin/codex executable.`);
+      const binary = entries.get(file);
+      unpacked.set(name, {
+        file,
+        binary: { sha256: sha256(binary), size: binary.length },
+      });
+      console.error(
+        `${name}: ${[...entries.keys()].filter((entry) => entry.startsWith("bin/")).join(", ")}`,
+      );
     }
+    const { file, binary } = unpacked.get(name);
     platforms[platform] = {
       url: asset.browser_download_url,
-      file: platform.startsWith("win32") ? "codex.exe" : "codex",
+      file,
       download: { sha256: digest, size: asset.size },
       compression: "zstd",
-      binary: binaries.get(name),
+      archive: "tar",
+      binary,
     };
   }
   return { version: CODEX_VERSION, platforms };
+}
+
+// Lists the regular files in a tar archive, honoring ustar prefixes and pax paths.
+function tarEntries(archive) {
+  const files = new Map();
+  let pax;
+  for (let offset = 0; offset + 512 <= archive.length;) {
+    const header = archive.subarray(offset, offset + 512);
+    if (header.every((byte) => byte === 0)) break;
+    const text = (start, length) =>
+      header.toString("utf8", start, start + length).replace(/\0.*$/s, "");
+    const size = parseInt(text(124, 12).trim() || "0", 8);
+    const type = String.fromCharCode(header[156] || 48);
+    const body = archive.subarray(offset + 512, offset + 512 + size);
+    const prefix = text(345, 155);
+    const name = pax ?? (prefix ? `${prefix}/${text(0, 100)}` : text(0, 100));
+    if (type === "x")
+      pax = /(?:^|\n)\d+ path=([^\n]*)\n/.exec(body.toString("utf8"))?.[1];
+    else {
+      pax = undefined;
+      if (type === "0") files.set(name.replace(/^\.\//, ""), body);
+    }
+    offset += 512 + Math.ceil(size / 512) * 512;
+  }
+  return files;
 }
 
 // Reads one file out of the SDK's npm tarball without a tar dependency.
