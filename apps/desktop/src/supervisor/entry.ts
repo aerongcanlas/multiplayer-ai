@@ -2,8 +2,6 @@ import { join } from "node:path";
 import { mkdirSync } from "node:fs";
 import { Journal } from "./journal";
 import { SupervisorService } from "./service";
-import { CodexClient } from "./codex-client";
-import { CodexRunner } from "./codex-runner";
 import { HarnessRegistry } from "./harnesses/registry";
 import { CodexAdapter } from "./harnesses/codex/adapter";
 import { ClaudeAdapter } from "./harnesses/claude/adapter";
@@ -57,21 +55,6 @@ const registry = new HarnessRegistry({
 const supervisor = new SupervisorService(
   journal,
   (snapshot) => parent.postMessage({ type: "snapshot", snapshot }),
-  undefined,
-  new CodexRunner(
-    new CodexClient({
-      cwd: directory,
-      ...(fixture
-        ? {
-            executable: process.execPath,
-            args: [fixture],
-            env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
-          }
-        : {}),
-    }),
-    join(directory, "worktrees"),
-  ),
-  (url) => parent.postMessage({ type: "open-provider-login", url }),
   {
     registry,
     publishTranscript: (batches) =>

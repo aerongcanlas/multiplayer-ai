@@ -23,9 +23,7 @@ import { SharedConnection } from "./components/SharedConnection";
 import { HarnessSettings } from "./components/HarnessSettings";
 import { TabsPanel } from "./components/tabs/TabsPanel";
 
-const roomBusy = (room: Room) =>
-  room.tabs.some((tab) => tabBusy(tab.status)) ||
-  room.executions.some((run) => run.status === "running");
+const roomBusy = (room: Room) => room.tabs.some((tab) => tabBusy(tab.status));
 
 function RoomView({
   room,

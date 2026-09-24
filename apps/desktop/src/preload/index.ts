@@ -18,18 +18,6 @@ import type { TranscriptBatch } from "../shared/tabs";
 const invoke = (command: Command): Promise<Result> =>
   ipcRenderer.invoke(COMMAND_CHANNEL, command);
 const bridge: DesktopBridge = {
-  refreshProvider: () => invoke({ type: "provider.refresh" }),
-  connectProvider: () => invoke({ type: "provider.connect" }),
-  cancelProviderLogin: () => invoke({ type: "provider.cancel" }),
-  disconnectProvider: () => invoke({ type: "provider.disconnect" }),
-  respondToApproval: (roomId, executionId, approvalId, decision) =>
-    invoke({
-      type: "approval.respond",
-      roomId,
-      executionId,
-      approvalId,
-      decision,
-    }),
   protocolVersion: PROTOCOL_VERSION,
   getSnapshot: () => invoke({ type: "snapshot" }),
   createRoom: (name, scope) => invoke({ type: "room.create", name, scope }),
@@ -51,9 +39,6 @@ const bridge: DesktopBridge = {
       prompt,
       expectedRevision,
     }),
-  startExecution: (input) => invoke({ ...input, type: "execution.start" }),
-  stopExecution: (roomId, executionId) =>
-    invoke({ type: "execution.stop", roomId, executionId }),
   onSnapshot: (listener) => {
     const handler = (_event: Electron.IpcRendererEvent, snapshot: Snapshot) =>
       listener(snapshot);

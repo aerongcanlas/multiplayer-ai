@@ -60,19 +60,12 @@ async function start(
     environmentTimeoutMs: 0,
   });
   registry.setEnvironment({ PATH: process.env.PATH ?? "" });
-  const service = new SupervisorService(
-    journal,
-    () => {},
-    undefined,
-    undefined,
-    undefined,
-    {
-      registry,
-      publishTranscript: (items) => batches.push(...items),
-      transcriptInterval: 5,
-      stopTimeoutMs: 300,
-    },
-  );
+  const service = new SupervisorService(journal, () => {}, {
+    registry,
+    publishTranscript: (items) => batches.push(...items),
+    transcriptInterval: 5,
+    stopTimeoutMs: 300,
+  });
   changed = () => service.harnessesChanged();
   await registry.refresh(fake.id);
   const roomId = service.snapshot().rooms[0].id;

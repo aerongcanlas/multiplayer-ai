@@ -164,6 +164,11 @@ test("a journal written by main migrates with its rooms, chat, and suggestions",
   // The backup is main's journal as it was.
   assert.equal(version(`${file}.bak`), 0);
   assert.ok(tables(file).includes("transcript_entries"));
+  // The lead run's history is removed along with the run itself.
+  assert.equal("executions" in snapshot.rooms[0], false);
+  assert.equal("summaries" in snapshot.rooms[0], false);
+  for (const table of ["events", "outbox", "runner_sessions"])
+    assert.ok(!tables(file).includes(table));
 });
 
 test("a branch-shaped journal is backed up and rebuilt into the tab schema", async () => {
@@ -176,7 +181,7 @@ test("a branch-shaped journal is backed up and rebuilt into the tab schema", asy
   assert.equal(snapshot.rooms[0].id, room.id);
   assert.deepEqual(snapshot.rooms[0].messages, room.messages);
   assert.deepEqual(snapshot.rooms[0].suggestions, room.suggestions);
-  assert.deepEqual(snapshot.rooms[0].executions, []);
+  assert.equal("executions" in snapshot.rooms[0], false);
   assert.deepEqual(snapshot.rooms[0].tabs, []);
   assert.equal(workspace?.path, "/tmp/repo");
   assert.equal("connections" in snapshot, false);

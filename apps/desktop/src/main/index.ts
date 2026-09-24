@@ -141,17 +141,6 @@ else {
       app.getPath("userData"),
       (snapshot) => coordinator?.acceptLocal(snapshot),
       (health) => window?.webContents.send(HEALTH_CHANNEL, health),
-      (value) => {
-        const url = new URL(value);
-        if (testing && process.env.MP_TEST_CODEX_FIXTURE) return;
-        if (
-          url.protocol === "https:" &&
-          ["auth.openai.com", "chatgpt.com"].includes(url.hostname) &&
-          !url.username &&
-          !url.password
-        )
-          void shell.openExternal(url.href);
-      },
       testing ? process.env.MP_TEST_CODEX_FIXTURE : undefined,
       {
         // Transcripts go only to the trusted main frame of the app window.

@@ -308,12 +308,7 @@ createInterface({ input: process.stdin })
       result({});
     } else if (method === "thread/start") {
       const threadId = randomUUID();
-      threads.set(threadId, {
-        turns: 0,
-        cwd: params.cwd,
-        legacy: Boolean(params.developerInstructions),
-        role: params.developerInstructions?.match(/You are the (\w+)/)?.[1],
-      });
+      threads.set(threadId, { turns: 0, cwd: params.cwd });
       saveThreads();
       result({
         thread: { id: threadId },
@@ -336,110 +331,7 @@ createInterface({ input: process.stdin })
         turn: { id: turnId, status: "inProgress", items: [] },
       });
       result({ turn: { id: turnId, status: "inProgress", items: [] } });
-      if (threads.get(threadId)?.legacy)
-        return legacyTurn(threadId, turnId, prompt);
       void turn(threadId, turnId, prompt, params);
     } else if (id !== undefined) error(`Unknown fixture method: ${method}`);
   })
   .on("close", () => process.exit(0));
-
-// The lead/specialist run's scripted structured replies. Removed with the lead run.
-function legacyTurn(threadId, turnId, prompt) {
-  if (prompt.includes("FIXTURE_CANCEL")) return;
-  const role = threads.get(threadId)?.role;
-  const finish = (text, status = "completed") => {
-    if (text) {
-      notify("item/agentMessage/delta", {
-        threadId,
-        turnId,
-        delta: "Inspecting the requested scope...",
-      });
-      notify("item/completed", {
-        threadId,
-        turnId,
-        item: { type: "agentMessage", id: randomUUID(), text },
-      });
-    }
-    notify("turn/completed", {
-      threadId,
-      turn: {
-        id: turnId,
-        status,
-        ...(status === "failed"
-          ? { error: { message: "Fixture provider failure" } }
-          : {}),
-      },
-    });
-  };
-  const done = () => {
-    if (prompt.startsWith("Plan specialist"))
-      finish(
-        JSON.stringify({
-          tasks: [
-            {
-              role: "planner",
-              objective: "Inspect repository structure",
-              criteria: "Identify components with source evidence",
-              dependencies: [],
-            },
-            {
-              role: "validator",
-              objective: "Independently verify findings",
-              criteria: "Check reported files",
-              dependencies: [0],
-            },
-          ],
-        }),
-      );
-    else if (prompt.startsWith("Review these"))
-      finish(
-        JSON.stringify({
-          currentWork: "Lead reviewed both specialist results.",
-          decisions: ["Repository inspected."],
-          uncertainties: ["No builds were run."],
-          questions: [],
-        }),
-      );
-    else {
-      notify("item/completed", {
-        threadId,
-        turnId,
-        item: {
-          type: "commandExecution",
-          id: randomUUID(),
-          command: "git status --short",
-          aggregatedOutput: "Fixture command output",
-          exitCode: 0,
-        },
-      });
-      finish(
-        JSON.stringify({
-          summary: `${role} completed the inspection.`,
-          succeeded: !prompt.includes("FIXTURE_FAILED_REVIEW"),
-          evidence: ["Inspected repository files."],
-          uncertainties: ["No builds run."],
-        }),
-      );
-    }
-  };
-  if (
-    prompt.includes("FIXTURE_APPROVAL") &&
-    !prompt.startsWith("Review these")
-  ) {
-    const requestId = randomUUID();
-    pending.set(requestId, (value) =>
-      value?.decision === "accept" ? done() : finish("", "failed"),
-    );
-    send({
-      id: requestId,
-      method: "item/commandExecution/requestApproval",
-      params: {
-        threadId,
-        turnId,
-        itemId: randomUUID(),
-        command: "git status --short",
-        reason: "Fixture approval request",
-      },
-    });
-  } else setTimeout(done, 200);
-}

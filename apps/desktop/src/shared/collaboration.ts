@@ -77,8 +77,6 @@ export function asSharedRoom(
     ...room,
     shared: { userId, project, isAdmin: room.isAdmin, members: room.members },
     workspace: null,
-    executions: [],
-    summaries: [],
     tabs: [],
   };
 }

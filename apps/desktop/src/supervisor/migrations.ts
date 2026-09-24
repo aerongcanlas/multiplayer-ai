@@ -27,6 +27,27 @@ export const steps: readonly Step[] = [
     `);
     rewriteState(db, (state) => ({ ...state, protocolVersion: 2 }), 2);
   },
+  // 4: the lead/specialist run is gone; its executions, summaries, and event log go with it.
+  (db) => {
+    rewriteState(
+      db,
+      (state) => ({
+        ...state,
+        provider: undefined,
+        rooms: (Array.isArray(state.rooms) ? state.rooms : []).map((room) => ({
+          ...(room as StateBody),
+          executions: undefined,
+          summaries: undefined,
+        })),
+      }),
+      2,
+    );
+    db.exec(`
+      DROP TABLE IF EXISTS runner_sessions;
+      DROP TABLE IF EXISTS outbox;
+      DROP TABLE IF EXISTS events;
+    `);
+  },
 ];
 
 export const JOURNAL_SCHEMA_VERSION = steps.length;
@@ -132,8 +153,6 @@ function rebuildBranchJournal(db: DatabaseSync, tables: Set<string>) {
         workspace: room.workspace ?? null,
         messages: Array.isArray(room.messages) ? room.messages : [],
         suggestions: Array.isArray(room.suggestions) ? room.suggestions : [],
-        executions: [],
-        summaries: [],
       };
     }),
   };

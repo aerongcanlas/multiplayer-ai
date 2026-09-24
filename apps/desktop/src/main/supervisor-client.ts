@@ -31,7 +31,6 @@ export class SupervisorClient {
     directory: string,
     private onSnapshot: (snapshot: Snapshot) => void,
     private onHealth: (health: Health) => void,
-    private openProviderLogin?: (url: string) => void,
     codexFixture?: string,
     private tabs: {
       onTranscript?: (batches: TranscriptBatch[]) => void;
@@ -66,8 +65,6 @@ export class SupervisorClient {
       );
       this.child.on("message", (message: SupervisorMessage) => {
         this.heartbeatAt = Date.now();
-        if (message.type === "open-provider-login")
-          this.openProviderLogin?.(message.url);
         if (message.type === "open-login")
           this.tabs.openLogin?.(message.harness, message.url);
         if (message.type === "transcript") {

@@ -12,7 +12,6 @@ import { tabBusy, type HarnessId, type TranscriptPage } from "../shared/tabs";
 // Commands that start work wait on shared-room checks; everything else reaches the supervisor
 // directly so Stop and responses work while the shared connection is down (KTD17).
 const DIRECT = new Set([
-  "execution.stop",
   "tab.stop",
   "tab.close",
   "tab.rename",
@@ -70,8 +69,6 @@ export class DesktopCoordinator {
         ? {
             ...remote,
             workspace: cached.workspace,
-            executions: cached.executions,
-            summaries: cached.summaries,
             tabs: cached.tabs,
           }
         : remote;
@@ -86,19 +83,10 @@ export class DesktopCoordinator {
       collaboration: structuredClone(this.shared.state),
     };
     this.publish(this.view);
-    // A revoked membership or sign-out also stops any local run associated with that account.
+    // A revoked membership or sign-out also stops running tabs associated with that account.
     for (const room of this.local.rooms.filter(
       (room) => room.shared && !sharedRooms.some((item) => item.id === room.id),
     )) {
-      for (const run of room.executions.filter(
-        (run) => run.status === "running",
-      )) {
-        void this.supervisor.request({
-          type: "execution.stop",
-          roomId: room.id,
-          executionId: run.id,
-        });
-      }
       for (const tab of room.tabs.filter((tab) => tabBusy(tab.status)))
         void this.supervisor.request({
           type: "tab.stop",
@@ -127,14 +115,7 @@ export class DesktopCoordinator {
             harness: command.harness,
             path,
           });
-      } else if (
-        command.type === "provider.refresh" ||
-        command.type === "provider.connect" ||
-        command.type === "provider.cancel" ||
-        command.type === "provider.disconnect" ||
-        isHarnessCommand(command)
-      )
-        await this.localCommand(command);
+      } else if (isHarnessCommand(command)) await this.localCommand(command);
       else if (command.type === "auth.signIn") await this.shared.signIn();
       else if (command.type === "auth.signOut") await this.shared.signOut();
       else if (command.type === "auth.cancel") await this.shared.cancelSignIn();

@@ -6,7 +6,7 @@ import type { Room } from "../../shared/contracts";
 import { perform } from "../lib/desktop-store";
 import { Button } from "./ui/Button";
 import { PromptInput } from "./PromptInput";
-import { timeLabel } from "./StatusBadge";
+import { timeLabel } from "../lib/time";
 
 export function GroupChatPanel({
   room,

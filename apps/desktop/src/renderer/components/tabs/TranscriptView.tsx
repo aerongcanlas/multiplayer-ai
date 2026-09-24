@@ -17,7 +17,7 @@ import {
 } from "../../../shared/tabs";
 import { loadOlder, useTranscript } from "../../lib/transcript-store";
 import { Button } from "../ui/Button";
-import { timeLabel } from "../StatusBadge";
+import { timeLabel } from "../../lib/time";
 import { ApprovalCard } from "./ApprovalCard";
 import { QuestionCard } from "./QuestionCard";
 

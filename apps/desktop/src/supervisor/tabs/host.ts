@@ -778,13 +778,6 @@ export class TabHost {
     if (live?.turn === turn) live.turn = undefined;
   }
 
-  /** Stops every running turn in a room, for example after losing membership. */
-  stopRoom(roomId: string) {
-    for (const [tabId, live] of this.live)
-      if (live.turn && !live.turn.finished && live.turn.roomId === roomId)
-        this.stop(tabId, live.turn);
-  }
-
   close() {
     this.closed = true;
     for (const live of this.live.values()) {

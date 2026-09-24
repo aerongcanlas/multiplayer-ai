@@ -4,7 +4,6 @@ import {
   PROTOCOL_VERSION,
   type Snapshot,
   type PrivateWorkspace,
-  type ProgressEvent,
   type Room,
 } from "../shared/contracts";
 import type { Tab, TranscriptEntry, TranscriptPage } from "../shared/tabs";
@@ -60,19 +59,13 @@ export class Journal {
           workspace: null,
           messages: [],
           suggestions: [],
-          executions: [],
-          summaries: [],
           tabs: [],
         },
       ],
     };
   }
 
-  save(
-    snapshot: Snapshot,
-    events: ProgressEvent[] = [],
-    workspace?: PrivateWorkspace,
-  ) {
+  save(snapshot: Snapshot, workspace?: PrivateWorkspace) {
     this.write(() => {
       // Tabs live in their own table; the state body keeps rooms without them.
       const body = {
@@ -99,21 +92,6 @@ export class Journal {
         this.db
           .prepare("INSERT OR REPLACE INTO workspaces (id, body) VALUES (?, ?)")
           .run(workspace.id, JSON.stringify(workspace));
-      const insertEvent = this.db.prepare(
-        "INSERT OR IGNORE INTO events (id, execution_id, seq, body) VALUES (?, ?, ?, ?)",
-      );
-      const insertOutbox = this.db.prepare(
-        "INSERT OR IGNORE INTO outbox (event_id) VALUES (?)",
-      );
-      for (const event of events) {
-        insertEvent.run(
-          event.id,
-          event.executionId,
-          event.seq,
-          JSON.stringify(event),
-        );
-        insertOutbox.run(event.id);
-      }
     });
   }
 
@@ -210,20 +188,6 @@ export class Journal {
       .prepare("SELECT body FROM workspaces WHERE id = ?")
       .get(id);
     return row ? (JSON.parse(row.body as string) as PrivateWorkspace) : null;
-  }
-
-  eventCount(): number {
-    return Number(
-      this.db.prepare("SELECT COUNT(*) AS count FROM events").get()?.count ?? 0,
-    );
-  }
-
-  saveSession(executionId: string, taskId: string, threadId: string) {
-    this.db
-      .prepare(
-        "INSERT INTO runner_sessions (execution_id, task_id, thread_id) VALUES (?, ?, ?) ON CONFLICT(task_id) DO UPDATE SET thread_id=excluded.thread_id",
-      )
-      .run(executionId, taskId, threadId);
   }
 
   close() {

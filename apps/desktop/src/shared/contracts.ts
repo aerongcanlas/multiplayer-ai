@@ -1,10 +1,4 @@
 import { z } from "zod";
-import {
-  runConfigurationSchema,
-  type ProviderState,
-  type RunApproval,
-  type RunConfiguration,
-} from "./provider";
 import type {
   CollaborationState,
   RoomNotice,
@@ -32,24 +26,15 @@ export {
 const id = z.uuid();
 const text = z.string().trim().min(1).max(8_000);
 export const commandSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("provider.refresh") }).strict(),
-  z.object({ type: z.literal("provider.connect") }).strict(),
-  z.object({ type: z.literal("provider.cancel") }).strict(),
-  z.object({ type: z.literal("provider.disconnect") }).strict(),
   z
     .object({
       type: z.literal("approval.respond"),
       roomId: id,
-      // A lead-run approval names its execution; a tab approval names its tab.
-      executionId: id.optional(),
-      tabId: id.optional(),
+      tabId: id,
       approvalId: id,
       decision: z.enum(["accept", "decline"]),
     })
-    .strict()
-    .refine((value) => Boolean(value.executionId) !== Boolean(value.tabId), {
-      message: "An approval names exactly one execution or tab.",
-    }),
+    .strict(),
   z.object({ type: z.literal("auth.signIn") }).strict(),
   z.object({ type: z.literal("auth.cancel") }).strict(),
   z.object({ type: z.literal("auth.signOut") }).strict(),
@@ -94,21 +79,6 @@ export const commandSchema = z.discriminatedUnion("type", [
       expectedRevision: z.number().int().positive(),
     })
     .strict(),
-  z
-    .object({
-      type: z.literal("execution.start"),
-      roomId: id,
-      prompt: text,
-      suggestionId: id.optional(),
-      suggestionRevision: z.number().int().positive().optional(),
-      scenario: z.enum(["success", "validation-failure"]).default("success"),
-      runner: z.enum(["mock", "codex"]).optional(),
-      configuration: runConfigurationSchema.optional(),
-    })
-    .strict(),
-  z
-    .object({ type: z.literal("execution.stop"), roomId: id, executionId: id })
-    .strict(),
   ...tabCommandSchemas,
 ]);
 
@@ -116,18 +86,6 @@ export type Command = z.infer<typeof commandSchema>;
 export type HarnessCommand = Extract<Command, { type: `harness.${string}` }>;
 export const isHarnessCommand = (command: Command): command is HarnessCommand =>
   command.type.startsWith("harness.");
-export type TaskStatus =
-  | "queued"
-  | "running"
-  | "waiting_for_input"
-  | "blocked"
-  | "completed"
-  | "failed"
-  | "cancelled";
-export type Role =
-  "lead" | "planner" | "designer" | "implementer" | "validator";
-export type ExecutionStatus =
-  "running" | "completed" | "failed" | "cancelled" | "blocked";
 
 export interface Workspace {
   id: string;
@@ -150,6 +108,7 @@ export interface Suggestion {
   authorId?: string;
   id: string;
   prompt: string;
+  // Always 0 since lead summaries were removed; kept for the shared-room wire format.
   contextVersion: number;
   sourceMessageIds: string[];
   sources: ChatMessage[];
@@ -157,86 +116,6 @@ export interface Suggestion {
   status: "draft" | "submitted";
   createdAt: string;
   updatedAt: string;
-}
-
-export interface Task {
-  id: string;
-  agentId: string;
-  parentId: string | null;
-  role: Role;
-  objective: string;
-  criteria: string;
-  dependencies: string[];
-  status: TaskStatus;
-  contextVersion: number;
-  inputRevision: string;
-  workspaceId: string;
-  activity: string;
-  updatedAt: string;
-  startedAt: string | null;
-  completedAt: string | null;
-}
-
-export interface Evidence {
-  id: string;
-  taskId: string;
-  label: string;
-  outcome: "passed" | "failed";
-  kind: "simulation" | "command" | "review" | "patch";
-  detail: string;
-  revision: string;
-  recordedAt: string;
-}
-
-export interface ProgressEvent {
-  id: string;
-  seq: number;
-  executionId: string;
-  taskId: string;
-  agentId: string;
-  generation: number;
-  type: "status" | "activity" | "evidence" | "summary" | "recovery";
-  message: string;
-  createdAt: string;
-}
-
-export interface ContextSummary {
-  version: number;
-  executionId: string;
-  goal: string;
-  decisions: string[];
-  currentWork: string;
-  uncertainties: string[];
-  questions: string[];
-  createdAt: string;
-}
-
-export interface Execution {
-  id: string;
-  roomId: string;
-  hostId: string;
-  generation: number;
-  planVersion: number;
-  runner: "mock" | "codex";
-  configuration?: RunConfiguration;
-  approvals?: RunApproval[];
-  artifact?: {
-    branch: string;
-    revision: string;
-    files: string[];
-    diff: string;
-  };
-  scenario: "success" | "validation-failure";
-  workspace: Workspace;
-  prompt: string;
-  contextVersion: number;
-  sourceSuggestion: Suggestion | null;
-  status: ExecutionStatus;
-  startedAt: string;
-  endedAt: string | null;
-  tasks: Task[];
-  events: ProgressEvent[];
-  evidence: Evidence[];
 }
 
 export interface Room {
@@ -247,13 +126,10 @@ export interface Room {
   workspace: Workspace | null;
   messages: ChatMessage[];
   suggestions: Suggestion[];
-  executions: Execution[];
-  summaries: ContextSummary[];
   tabs: Tab[];
 }
 
 export interface Snapshot {
-  provider?: ProviderState;
   harnesses?: HarnessState[];
   collaboration?: CollaborationState;
   protocolVersion: typeof PROTOCOL_VERSION;
@@ -278,16 +154,6 @@ export interface Health {
 
 // Each method corresponds to one validated operation. No arbitrary IPC, paths, or commands.
 export interface DesktopBridge {
-  refreshProvider(): Promise<Result>;
-  connectProvider(): Promise<Result>;
-  cancelProviderLogin(): Promise<Result>;
-  disconnectProvider(): Promise<Result>;
-  respondToApproval(
-    roomId: string,
-    executionId: string,
-    approvalId: string,
-    decision: "accept" | "decline",
-  ): Promise<Result>;
   protocolVersion: typeof PROTOCOL_VERSION;
   getSnapshot(): Promise<Result>;
   createRoom(name: string, scope?: "local" | "shared"): Promise<Result>;
@@ -306,10 +172,6 @@ export interface DesktopBridge {
     prompt: string,
     expectedRevision: number,
   ): Promise<Result>;
-  startExecution(
-    input: Omit<Extract<Command, { type: "execution.start" }>, "type">,
-  ): Promise<Result>;
-  stopExecution(roomId: string, executionId: string): Promise<Result>;
   onSnapshot(listener: (snapshot: Snapshot) => void): () => void;
   onHealth(listener: (health: Health) => void): () => void;
   openTab(roomId: string, harness: HarnessId): Promise<Result>;
@@ -366,12 +228,9 @@ export interface SupervisorRequest {
     | { type: "host.environment"; env: Record<string, string> };
 }
 export type SupervisorMessage =
-  | { type: "open-provider-login"; url: string }
   | { type: "open-login"; harness: HarnessId; url: string }
   | { type: "transcript"; batches: TranscriptBatch[] }
   | { type: "ready"; snapshot: Snapshot }
   | { type: "snapshot"; snapshot: Snapshot }
   | { type: "heartbeat" }
   | { type: "response"; id: string; result: Result };
-
-export { currentSummary, currentExecution } from "./selectors";

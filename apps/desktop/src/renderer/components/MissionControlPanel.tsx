@@ -1,29 +1,25 @@
 import { Pencil, Sparkles } from "lucide-react";
 import { useState } from "react";
 import type { Room, Suggestion } from "../../shared/contracts";
-import { currentSummary } from "../../shared/selectors";
 import { Button } from "./ui/Button";
-import { timeLabel } from "./StatusBadge";
+import { timeLabel } from "../lib/time";
 import { perform } from "../lib/desktop-store";
 
 function SuggestionCard({
   suggestion,
   roomId,
-  contextVersion,
   disabled,
   canEdit,
   onUse,
 }: {
   suggestion: Suggestion;
   roomId: string;
-  contextVersion: number;
   disabled: boolean;
   canEdit: boolean;
   onUse: (suggestion: Suggestion) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(suggestion.prompt);
-  const stale = suggestion.contextVersion !== contextVersion;
   const submitted = suggestion.status === "submitted";
   async function save() {
     const result = await perform(() =>
@@ -39,12 +35,8 @@ function SuggestionCard({
   return (
     <article className="suggestion-card">
       <div className="card-meta">
-        <span>
-          Context v{suggestion.contextVersion} · edit {suggestion.revision}
-        </span>
-        <span>
-          {submitted ? "Submitted" : stale ? "Older context" : "Draft"}
-        </span>
+        <span>Edit {suggestion.revision}</span>
+        <span>{submitted ? "Submitted" : "Draft"}</span>
       </div>
       {editing ? (
         <textarea
@@ -95,7 +87,7 @@ function SuggestionCard({
           <>
             <Button
               size="xs"
-              disabled={disabled || submitted || stale}
+              disabled={disabled || submitted}
               onClick={() => onUse(suggestion)}
             >
               Use prompt
@@ -112,11 +104,6 @@ function SuggestionCard({
           </>
         )}
       </div>
-      {stale && !submitted && (
-        <p className="subtle">
-          Select the source messages again to use the current context.
-        </p>
-      )}
     </article>
   );
 }
@@ -130,7 +117,6 @@ export function MissionControlPanel({
   onUseSuggestion: (suggestion: Suggestion) => void;
   disabled: boolean;
 }) {
-  const summary = currentSummary(room);
   return (
     <section className="mission-panel" aria-label="Mission Control">
       <header className="panel-header">
@@ -168,7 +154,6 @@ export function MissionControlPanel({
                     key={`${suggestion.id}:${suggestion.revision}`}
                     suggestion={suggestion}
                     roomId={room.id}
-                    contextVersion={room.shared ? 0 : (summary?.version ?? 0)}
                     canEdit={
                       !room.shared ||
                       room.shared.isAdmin ||

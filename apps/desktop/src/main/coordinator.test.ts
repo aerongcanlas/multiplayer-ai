@@ -20,8 +20,6 @@ test("projection ignores delayed local replies and hides cached shared rooms fro
       revision: "abc",
       dirty: false,
     },
-    executions: [],
-    summaries: [],
     tabs: [],
     messages: [],
     suggestions: [],
@@ -85,8 +83,6 @@ const tabRoom = (userId: string, status: Tab["status"] = "idle"): Room => {
     createdAt: new Date().toISOString(),
     shared: { userId, project: "test", isAdmin: true, members: [] },
     workspace: null,
-    executions: [],
-    summaries: [],
     messages: [],
     suggestions: [],
     tabs: [
