@@ -1,17 +1,9 @@
-import {
-  CheckCircle2,
-  ClipboardList,
-  GitBranch,
-  Pencil,
-  Radio,
-  Sparkles,
-  XCircle,
-} from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-import type { Execution, Room, Suggestion } from "../../shared/contracts";
+import { Pencil, Sparkles } from "lucide-react";
+import { useState } from "react";
+import type { Room, Suggestion } from "../../shared/contracts";
 import { currentSummary } from "../../shared/selectors";
 import { Button } from "./ui/Button";
-import { StatusBadge, durationLabel, timeLabel } from "./StatusBadge";
+import { timeLabel } from "./StatusBadge";
 import { perform } from "../lib/desktop-store";
 
 function SuggestionCard({
@@ -131,191 +123,26 @@ function SuggestionCard({
 
 export function MissionControlPanel({
   room,
-  execution,
-  selectedTaskId,
-  onTaskSelect,
   onUseSuggestion,
   disabled,
-  stale,
 }: {
   room: Room;
-  execution?: Execution;
-  selectedTaskId: string | null;
-  onTaskSelect: (id: string | null) => void;
   onUseSuggestion: (suggestion: Suggestion) => void;
   disabled: boolean;
-  stale: boolean;
 }) {
   const summary = currentSummary(room);
-  const complete =
-    execution?.tasks.filter((task) => task.status === "completed").length ?? 0;
-  const taskScroll = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    taskScroll.current?.scrollTo({ top: 0 });
-  }, [execution?.id]);
   return (
     <section className="mission-panel" aria-label="Mission Control">
       <header className="panel-header">
         <h2>
-          <Radio size={16} />
-          Mission Control
+          <Sparkles size={16} />
+          Prompt suggestions
         </h2>
         <span className="subtle">
-          {execution
-            ? `${complete} of ${execution.tasks.length} tasks completed · Plan v${execution.planVersion}`
-            : "Ready for your first direction"}
+          Use a suggestion to fill the active tab&apos;s composer.
         </span>
       </header>
-      <div className="mission-grid">
-        <section className="mission-column" aria-label="Lead context">
-          <h3>
-            <ClipboardList size={14} />
-            Lead context<span>{summary ? `v${summary.version}` : "v0"}</span>
-          </h3>
-          <div className="mission-scroll">
-            {summary ? (
-              <div className="summary-content">
-                <span className="eyebrow">Goal</span>
-                <p className="summary-goal">{summary.goal}</p>
-                <span className="eyebrow">Current work</span>
-                <p>{summary.currentWork}</p>
-                <span className="eyebrow">Decisions</span>
-                <ul>
-                  {summary.decisions.map((item) => (
-                    <li key={item}>{item}</li>
-                  ))}
-                </ul>
-                <span className="eyebrow">Open questions</span>
-                {summary.questions.map((item) => (
-                  <p key={item}>{item}</p>
-                ))}
-                <details>
-                  <summary>Uncertainties</summary>
-                  {summary.uncertainties.map((item) => (
-                    <p key={item}>{item}</p>
-                  ))}
-                </details>
-              </div>
-            ) : (
-              <div className="column-empty">
-                <p>The lead’s summary will appear here after an execution.</p>
-                <p>
-                  Goals, decisions, evidence, and open questions stay tied to a
-                  context version.
-                </p>
-              </div>
-            )}
-          </div>
-        </section>
-        <section className="mission-column" aria-label="Agent task tree">
-          <h3>
-            <GitBranch size={14} />
-            Agent tasks{execution && <span>{execution.tasks.length}</span>}
-          </h3>
-          <div className="mission-scroll" ref={taskScroll}>
-            {execution ? (
-              <>
-                <div className="task-tree">
-                  {execution.tasks.map((task) => (
-                    <button
-                      type="button"
-                      key={task.id}
-                      className={`task-row ${task.parentId ? "task-child" : ""} ${selectedTaskId === task.id ? "task-selected" : ""}`}
-                      aria-pressed={selectedTaskId === task.id}
-                      onClick={() =>
-                        onTaskSelect(
-                          selectedTaskId === task.id ? null : task.id,
-                        )
-                      }
-                    >
-                      <div className="task-heading">
-                        <strong>{task.role}</strong>
-                        <StatusBadge status={task.status} stale={stale} />
-                      </div>
-                      <p>{task.objective}</p>
-                      <span className="task-activity">{task.activity}</span>
-                      <span className="task-time">
-                        {task.startedAt
-                          ? durationLabel(
-                              task.startedAt,
-                              task.completedAt ?? task.updatedAt,
-                            )
-                          : "Queued"}{" "}
-                        · {timeLabel(task.updatedAt)}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-                {execution.evidence
-                  .filter((item) => item.kind !== "command")
-                  .map((item) => (
-                    <div
-                      key={item.id}
-                      className={`evidence evidence-${item.outcome}`}
-                    >
-                      {item.outcome === "passed" ? (
-                        <CheckCircle2 size={14} />
-                      ) : (
-                        <XCircle size={14} />
-                      )}
-                      <div>
-                        <strong>
-                          {item.kind === "simulation"
-                            ? "Simulated validation"
-                            : item.label}{" "}
-                          {item.outcome}
-                        </strong>
-                        <details>
-                          <summary>Evidence</summary>
-                          <p>{item.detail}</p>
-                        </details>
-                        <span>Revision {item.revision.slice(0, 8)}</span>
-                      </div>
-                    </div>
-                  ))}
-                {execution.evidence.some((item) => item.kind === "command") && (
-                  <details className="command-evidence">
-                    <summary>
-                      {
-                        execution.evidence.filter(
-                          (item) => item.kind === "command",
-                        ).length
-                      }{" "}
-                      command results
-                    </summary>
-                    {execution.evidence
-                      .filter((item) => item.kind === "command")
-                      .map((item) => (
-                        <details
-                          className={`evidence evidence-${item.outcome}`}
-                          key={item.id}
-                        >
-                          <summary>
-                            {item.label}: {item.outcome}
-                          </summary>
-                          <pre>{item.detail}</pre>
-                        </details>
-                      ))}
-                  </details>
-                )}
-                {execution.artifact && (
-                  <details className="artifact">
-                    <summary>
-                      Review patch · {execution.artifact.files.length} files
-                    </summary>
-                    <p>{execution.artifact.branch}</p>
-                    <pre>{execution.artifact.diff || "No file changes."}</pre>
-                  </details>
-                )}
-              </>
-            ) : (
-              <div className="column-empty">
-                <p>Watch each agent’s assignment and latest activity here.</p>
-                <p>Select an agent to inspect its detailed activity above.</p>
-              </div>
-            )}
-          </div>
-        </section>
+      <div className="mission-grid mission-grid-single">
         <section className="mission-column" aria-label="Prompt suggestions">
           <h3>
             <Sparkles size={14} />
@@ -330,7 +157,7 @@ export function MissionControlPanel({
                 </p>
                 <p>
                   Edit the draft and choose <strong>Use prompt</strong> to fill
-                  the composer. Send it when you’re ready.
+                  the active tab. Send it when you’re ready.
                 </p>
               </div>
             ) : (

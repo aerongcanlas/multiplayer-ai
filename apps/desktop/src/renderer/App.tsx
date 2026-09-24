@@ -12,89 +12,37 @@ import {
   Users,
 } from "lucide-react";
 import type { Room, Suggestion } from "../shared/contracts";
-import { currentExecution } from "../shared/selectors";
+import { tabBusy, type HarnessState } from "../shared/tabs";
 import { dismissError, perform, useDesktop } from "./lib/desktop-store";
 import { Button } from "./components/ui/Button";
 import { Input } from "./components/ui/Input";
 import { RoomWorkspace } from "@multiplayer-ai/ui/layouts/room-workspace";
-import { AIActivityPanel } from "./components/AIActivityPanel";
 import { GroupChatPanel } from "./components/GroupChatPanel";
 import { MissionControlPanel } from "./components/MissionControlPanel";
 import { SharedConnection } from "./components/SharedConnection";
-import { ProviderConnection } from "./components/ProviderConnection";
-import { RunControls } from "./components/RunControls";
-import type { ProviderState, RunConfiguration } from "../shared/provider";
+import { HarnessSettings } from "./components/HarnessSettings";
+import { TabsPanel } from "./components/tabs/TabsPanel";
+
+const roomBusy = (room: Room) =>
+  room.tabs.some((tab) => tabBusy(tab.status)) ||
+  room.executions.some((run) => run.status === "running");
 
 function RoomView({
   room,
   disabled,
-  active,
   stale,
-  provider,
+  harnesses,
 }: {
   room: Room;
   disabled: boolean;
-  active: boolean;
   stale: boolean;
-  provider?: ProviderState;
+  harnesses: HarnessState[];
 }) {
   const [draft, setDraft] = useState("");
   const [source, setSource] = useState<Suggestion | null>(null);
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
-  const [taskId, setTaskId] = useState<string | null>(null);
-  const [scenario, setScenario] = useState<"success" | "validation-failure">(
-    "success",
-  );
   const [announcement, setAnnouncement] = useState("");
   const [invite, setInvite] = useState<string | null>(null);
-  const [runnerChoice, setRunnerChoice] = useState<"mock" | "codex" | null>(
-    null,
-  );
-  const runner =
-    runnerChoice ?? (provider?.status === "connected" ? "codex" : "mock");
-  const [options, setOptions] = useState<RunConfiguration>({
-    model: "",
-    effort: "medium",
-    mode: "read-only",
-    concurrency: 2,
-  });
-  const selectedModel =
-    provider?.models.find((item) => item.id === options.model) ??
-    provider?.models.find((item) => item.isDefault) ??
-    provider?.models[0];
-  const configuration: RunConfiguration = {
-    ...options,
-    model: selectedModel?.id ?? "",
-    effort: selectedModel?.efforts.includes(options.effort)
-      ? options.effort
-      : ((selectedModel?.defaultEffort ??
-          "medium") as RunConfiguration["effort"]),
-  };
-  const execution =
-    room.executions.find((run) => run.id === selectedRunId) ??
-    currentExecution(room);
-  async function run(prompt: string) {
-    const result = await perform(() =>
-      window.desktop.startExecution({
-        roomId: room.id,
-        prompt,
-        scenario,
-        runner,
-        ...(runner === "codex" ? { configuration } : {}),
-        ...(source
-          ? { suggestionId: source.id, suggestionRevision: source.revision }
-          : {}),
-      }),
-    );
-    if (!result) return false;
-    setSource(null);
-    setSelectedRunId(null);
-    setTaskId(null);
-    setAnnouncement(
-      runner === "codex" ? "Codex execution started." : "Simulation started.",
-    );
-    return true;
-  }
+  const active = roomBusy(room);
   return (
     <main className="room-view">
       <header className="room-header">
@@ -174,61 +122,34 @@ function RoomView({
           mode="window"
           promptResizeLabel="Resize Mission Control"
           aiPanel={
-            <AIActivityPanel
+            <TabsPanel
               room={room}
-              execution={execution}
-              taskId={taskId}
-              onTaskSelect={setTaskId}
-              onExecutionSelect={(id) => {
-                setSelectedRunId(id);
-                setTaskId(null);
-              }}
+              harnesses={harnesses}
+              disabled={disabled}
+              stale={stale}
               draft={draft}
               onDraftChange={setDraft}
               source={source}
               onSourceClear={() => setSource(null)}
-              scenario={scenario}
-              onScenarioChange={setScenario}
-              onSubmit={run}
-              disabled={disabled}
-              active={active}
-              stale={stale}
-              runner={runner}
-              ready={
-                runner === "mock" ||
-                (provider?.status === "connected" && Boolean(selectedModel))
-              }
-              controls={
-                <RunControls
-                  runner={runner}
-                  onRunner={setRunnerChoice}
-                  provider={provider}
-                  configuration={configuration}
-                  onConfiguration={setOptions}
-                  disabled={active || disabled}
-                />
-              }
+              onSent={(message) => {
+                setDraft("");
+                setAnnouncement(message);
+              }}
             />
           }
           memberChatPanel={<GroupChatPanel room={room} disabled={disabled} />}
           promptPanel={
             <MissionControlPanel
               room={room}
-              execution={execution}
-              selectedTaskId={taskId}
-              onTaskSelect={setTaskId}
               disabled={disabled}
-              stale={stale}
               onUseSuggestion={(suggestion) => {
                 setDraft(suggestion.prompt);
                 setSource(suggestion);
                 setAnnouncement(
-                  "Prompt added to the composer. Review it, then start the run.",
+                  "Prompt added to the active tab's composer. Review it, then send.",
                 );
                 document
-                  .querySelector<HTMLTextAreaElement>(
-                    '[aria-label="Agent direction"]',
-                  )
+                  .querySelector<HTMLTextAreaElement>('[aria-label="Message"]')
                   ?.focus();
               }}
             />
@@ -256,11 +177,6 @@ export default function App() {
   const room =
     snapshot?.rooms.find((room) => room.id === selectedRoomId) ??
     snapshot?.rooms[0];
-  const active = Boolean(
-    snapshot?.rooms.some((room) =>
-      room.executions.some((run) => run.status === "running"),
-    ),
-  );
   const disabled = pending > 0 || health.status !== "live";
   function toggleSidebar() {
     setSidebarOpen((current) => {
@@ -432,13 +348,8 @@ export default function App() {
                   >
                     {item.shared ? <Users size={15} /> : <Hash size={15} />}
                     <span>{item.name}</span>
-                    {item.executions.some(
-                      (run) => run.status === "running",
-                    ) && (
-                      <span
-                        className="room-running"
-                        aria-label="Execution running"
-                      />
+                    {roomBusy(item) && (
+                      <span className="room-running" aria-label="Tab running" />
                     )}
                   </button>
                 ))}
@@ -448,10 +359,9 @@ export default function App() {
                 disabled={disabled}
                 onRoom={selectRoom}
               />
-              <ProviderConnection
-                provider={snapshot?.provider}
+              <HarnessSettings
+                harnesses={snapshot?.harnesses ?? []}
                 disabled={disabled}
-                active={active}
               />
               <div className="sidebar-footer">
                 <div className="local-avatar">Y</div>
@@ -487,9 +397,8 @@ export default function App() {
                 room.shared && snapshot?.collaboration?.status !== "connected",
               )
             }
-            active={active}
             stale={health.status !== "live"}
-            provider={snapshot?.provider}
+            harnesses={snapshot?.harnesses ?? []}
           />
         ) : (
           <main className="loading-screen">
@@ -512,7 +421,7 @@ export default function App() {
         </span>
         <span>
           {room?.shared
-            ? "Chat and suggestions shared · Runs stay on this desktop"
+            ? "Chat and suggestions shared · Tabs run on this desktop"
             : "Saved on this desktop · Private local room"}
         </span>
       </footer>
