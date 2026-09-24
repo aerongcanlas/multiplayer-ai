@@ -6,6 +6,8 @@ import { CodexClient } from "./codex-client";
 import { CodexRunner } from "./codex-runner";
 import { HarnessRegistry } from "./harnesses/registry";
 import { CodexAdapter } from "./harnesses/codex/adapter";
+import { ClaudeAdapter } from "./harnesses/claude/adapter";
+import { claudeFixture } from "./harnesses/claude/fixture";
 import { ProgramManager } from "./programs/manager";
 import { HARNESS_MANIFEST } from "./programs/manifest";
 import type { SupervisorMessage, SupervisorRequest } from "../shared/contracts";
@@ -24,6 +26,7 @@ const parent = (
 ).parentPort;
 const directory = process.argv[2];
 const fixture = process.argv[3];
+const claudeFixturePath = process.argv[4];
 if (!parent || !directory)
   throw new Error("Supervisor must be launched by the desktop host.");
 mkdirSync(directory, { recursive: true });
@@ -41,6 +44,9 @@ const fixtureLauncher =
 const registry = new HarnessRegistry({
   adapters: [
     new CodexAdapter(fixture ? { launcher: fixtureLauncher(fixture) } : {}),
+    new ClaudeAdapter(
+      claudeFixturePath ? claudeFixture(claudeFixturePath).options : {},
+    ),
   ],
   programs: new ProgramManager({ root: directory, manifest: HARNESS_MANIFEST }),
   settings: journal,
