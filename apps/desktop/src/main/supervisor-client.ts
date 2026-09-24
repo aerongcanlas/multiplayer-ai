@@ -36,6 +36,7 @@ export class SupervisorClient {
       onTranscript?: (batches: TranscriptBatch[]) => void;
       openLogin?: (harness: HarnessId, url: string) => void;
       claudeFixture?: string;
+      harnessManifest?: string;
     } = {},
   ) {
     // Credentials and provider keys from the launching terminal are not inherited by the mock supervisor.
@@ -48,7 +49,12 @@ export class SupervisorClient {
     );
     this.child = utilityProcess.fork(
       entry,
-      [directory, codexFixture ?? "", tabs.claudeFixture ?? ""],
+      [
+        directory,
+        codexFixture ?? "",
+        tabs.claudeFixture ?? "",
+        tabs.harnessManifest ?? "",
+      ],
       {
         serviceName: "Multiplayer AI Supervisor",
         stdio: "pipe",

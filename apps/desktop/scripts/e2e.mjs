@@ -5,6 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { mkdir, writeFile } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import assert from "node:assert/strict";
+import { startProgramServer } from "./programs-fixture.mjs";
 
 const require = createRequire(import.meta.url);
 const appDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -18,12 +19,25 @@ if (
 ) {
   throw new Error("Use --packaged --packaged-dir <directory>.");
 }
+const defaultPackagedDirectory = {
+  win32: "release/win-unpacked",
+  darwin: `release/mac${process.arch === "arm64" ? "-arm64" : ""}`,
+  linux: "release/linux-unpacked",
+}[process.platform];
 const packagedDirectory = resolve(
   appDirectory,
   packagedDirectoryOption === -1
-    ? "release/win-unpacked"
+    ? defaultPackagedDirectory
     : process.argv[packagedDirectoryOption + 1],
 );
+const packagedExecutable = {
+  win32: join(packagedDirectory, "Multiplayer AI.exe"),
+  darwin: join(
+    packagedDirectory,
+    "Multiplayer AI.app/Contents/MacOS/Multiplayer AI",
+  ),
+  linux: join(packagedDirectory, "multiplayer-ai-desktop"),
+}[process.platform];
 const output = join(
   appDirectory,
   "../../output/playwright",
@@ -50,7 +64,22 @@ git(
   "-m",
   "Local validation fixture",
 );
-const environment = { ...process.env };
+// Unpackaged runs use harness fixtures and a loopback download server; a packaged app ignores them.
+const programs = packaged
+  ? undefined
+  : await startProgramServer(join(output, "manifest.json"));
+const environment = {
+  ...process.env,
+  ...(packaged
+    ? {}
+    : {
+        MP_TEST_CODEX_FIXTURE: join(appDirectory, "scripts/codex-fixture.mjs"),
+        MP_TEST_CLAUDE_FIXTURE: join(output, "claude-fixture.json"),
+        MP_TEST_HARNESS_MANIFEST: join(output, "manifest.json"),
+        MP_FIXTURE_SIGNED_IN: "1",
+        MP_FIXTURE_STATE: join(output, "codex-threads.json"),
+      }),
+};
 delete environment.ELECTRON_RUN_AS_NODE;
 delete environment.ELECTRON_RENDERER_URL;
 const errors = [];
@@ -62,9 +91,7 @@ let expectedConsoleErrors = false;
 
 async function launch() {
   application = await electron.launch({
-    executablePath: packaged
-      ? join(packagedDirectory, "Multiplayer AI.exe")
-      : require("electron"),
+    executablePath: packaged ? packagedExecutable : require("electron"),
     args: packaged ? [`--user-data-dir=${userData}`] : [appDirectory],
     cwd: appDirectory,
     env: { ...environment, MP_E2E: "1", MP_TEST_USER_DATA: userData },
@@ -151,24 +178,33 @@ try {
       "getSnapshot",
       "onHealth",
       "onSnapshot",
+      "onTranscript",
       "protocolVersion",
       "selectWorkspace",
       "sendMessage",
-      "startExecution",
-      "stopExecution",
-      "refreshProvider",
-      "connectProvider",
-      "cancelProviderLogin",
-      "disconnectProvider",
-      "respondToApproval",
+      "openTab",
+      "renameTab",
+      "closeTab",
+      "setLoadout",
+      "sendToTab",
+      "stopTab",
+      "loadTranscript",
+      "resetTabSession",
+      "respondToTabApproval",
+      "answerQuestion",
+      "refreshHarness",
+      "signInHarness",
+      "chooseHarnessExecutable",
+      "useManagedHarness",
+      "acknowledgeHarnessNotice",
     ].sort(),
   );
   const malformed = await page.evaluate(async () => {
     const state = await window.desktop.getSnapshot();
-    return window.desktop.startExecution({
+    return window.desktop.sendToTab({
       roomId: state.snapshot.rooms[0].id,
-      prompt: "Invalid",
-      scenario: "success",
+      tabId: state.snapshot.rooms[0].id,
+      text: "Invalid",
       command: "whoami",
     });
   });
@@ -213,74 +249,60 @@ try {
     .getByRole("textbox", { name: "Edit suggested prompt", exact: true })
     .fill("Preserve the panel architecture and verify keyboard navigation.");
   await page.getByRole("button", { name: "Save edit", exact: true }).click();
+  let state = await snapshot();
+  assert.equal(state.rooms[1].suggestions[0].sources[0].authorName, "You");
+  assert.equal(state.rooms[1].suggestions[0].revision, 2);
+
+  if (packaged) {
+    // The Claude Code harness state exists only once the supervisor has loaded the Claude Agent
+    // SDK, so reaching it proves the SDK loads from the packaged build.
+    await page.getByRole("button", { name: "New tab", exact: true }).click();
+    await page
+      .getByRole("menuitem", { name: "Claude Code", exact: true })
+      .click();
+    await page.getByRole("tab", { name: /Claude Code 1/ }).waitFor();
+    state = await snapshot();
+    assert.equal(state.rooms[1].tabs[0].status, "unavailable");
+    assert.ok(
+      ["missing", "downloading"].includes(
+        state.harnesses.find((harness) => harness.id === "claude").program
+          .state,
+      ),
+    );
+    await checkpoint(
+      "A packaged Claude Code tab without a managed binary needs setup",
+    );
+    await writeFile(
+      join(output, "report.json"),
+      JSON.stringify({ passed: true, checkpoints, security, errors }, null, 2),
+    );
+    console.log(`Artifacts: ${output}`);
+    process.exit(0);
+  }
+
+  await page.getByRole("button", { name: "New tab", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Codex", exact: true }).click();
+  await page.getByRole("tab", { name: /Codex 1/ }).waitFor();
+  for (let attempt = 0; attempt < 100; attempt++) {
+    if ((await snapshot()).rooms[1].tabs[0].status === "idle") break;
+    await page.waitForTimeout(100);
+  }
   await page.getByRole("button", { name: "Use prompt", exact: true }).click();
   assert.equal(
     await page
-      .getByRole("textbox", { name: "Agent direction", exact: true })
+      .getByRole("textbox", { name: "Message", exact: true })
       .inputValue(),
     "Preserve the panel architecture and verify keyboard navigation.",
   );
-  let state = await snapshot();
+  state = await snapshot();
   assert.equal(
-    state.rooms[1].executions.length,
-    0,
-    "Selecting a suggestion must not dispatch work",
+    state.rooms[1].suggestions[0].status,
+    "draft",
+    "Using a suggestion must not dispatch work",
   );
-  assert.equal(state.rooms[1].suggestions[0].sources[0].authorName, "You");
-  assert.equal(state.rooms[1].suggestions[0].revision, 2);
   await checkpoint(
     "Chat selection, persisted suggestion editing, attribution, and draft-only use",
   );
-
-  await page
-    .getByRole("button", { name: "Run simulation", exact: true })
-    .click();
-  await page
-    .getByText("Simulated validation passed", { exact: true })
-    .waitFor();
-  await page.getByRole("button", { name: /^lead completed /i }).waitFor();
-  state = await snapshot();
-  assert.equal(state.rooms[1].executions[0].tasks.length, 4);
-  assert.equal(state.rooms[1].executions[0].sourceSuggestion.revision, 2);
-  assert.equal(state.rooms[1].summaries[0].version, 1);
-  await page.getByRole("button", { name: /validator completed/i }).click();
-  await page.getByText("Showing validator activity", { exact: true }).waitFor();
-  await page
-    .getByRole("button", { name: "Show all agent activity", exact: true })
-    .click();
-  await page.screenshot({ path: join(output, "02-completed-workflow.png") });
-  await checkpoint(
-    "Stream task progress, inspect an agent, and publish versioned context",
-  );
-
-  await page
-    .getByRole("combobox", { name: "Mock scenario", exact: true })
-    .selectOption("validation-failure");
-  await page
-    .getByRole("textbox", { name: "Agent direction", exact: true })
-    .fill("Demonstrate a failed validation.");
-  await page
-    .getByRole("button", { name: "Run simulation", exact: true })
-    .click();
-  await page
-    .getByText("Simulated validation failed", { exact: true })
-    .waitFor();
-  await page.getByRole("button", { name: /^lead failed /i }).waitFor();
-  await checkpoint(
-    "Failed validation stays visible and marks the execution failed",
-  );
-
-  await page
-    .getByRole("textbox", { name: "Agent direction", exact: true })
-    .fill("Stop this simulation.");
-  await page
-    .getByRole("button", { name: "Run simulation", exact: true })
-    .click();
-  await page.getByRole("button", { name: "Stop", exact: true }).click();
-  await page.getByRole("button", { name: /^lead cancelled /i }).waitFor();
-  state = await snapshot();
-  assert.equal(state.rooms[1].executions.at(-1).status, "cancelled");
-  await checkpoint("Stop cancels the active execution and retains its history");
 
   await page.keyboard.press("Control+b");
   assert.equal(
@@ -322,29 +344,12 @@ try {
   await page
     .getByRole("button", { name: "fixture-repo", exact: true })
     .waitFor();
-  assert.equal((await snapshot()).rooms[1].messages.length, 1);
-  await checkpoint(
-    "Reload reconciles persisted room, repository, chat, suggestions, and executions",
-  );
-
-  await page
-    .getByRole("textbox", { name: "Agent direction", exact: true })
-    .fill("Recover this interrupted simulation.");
-  await page
-    .getByRole("button", { name: "Run simulation", exact: true })
-    .click();
-  await page.getByRole("button", { name: "Stop", exact: true }).waitFor();
-  await application.close();
-  await launch();
-  await page
-    .getByText("This execution was interrupted.", { exact: false })
-    .waitFor();
   state = await snapshot();
-  assert.equal(state.rooms[1].executions.at(-1).status, "blocked");
   assert.equal(state.rooms[1].messages.length, 1);
-  assert.equal(state.rooms[1].suggestions[0].revision, 2);
+  assert.equal(state.rooms[1].tabs[0].title, "Codex 1");
+  await page.getByRole("tab", { name: /Codex 1/ }).waitFor();
   await checkpoint(
-    "Restart recovers interrupted work as blocked without replay",
+    "Reload reconciles persisted room, repository, chat, suggestions, and tabs",
   );
 
   // Killing only this application's utility process exercises stale state in the visible product.
@@ -362,7 +367,7 @@ try {
     .waitFor();
   assert.equal(
     await page
-      .getByRole("button", { name: "Run simulation", exact: true })
+      .getByRole("textbox", { name: "Message", exact: true })
       .isDisabled(),
     true,
   );
@@ -376,7 +381,7 @@ try {
   assert.equal(
     git("status", "--porcelain"),
     "",
-    "Simulation must not alter the selected repository",
+    "The desktop must not alter the selected repository",
   );
   const remoteRequests = network.filter(
     (url) => !url.startsWith("multiplayer://desktop/"),
@@ -423,4 +428,5 @@ try {
   process.exitCode = 1;
 } finally {
   await application?.close().catch(() => {});
+  await programs?.close();
 }

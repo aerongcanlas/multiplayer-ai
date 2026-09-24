@@ -152,10 +152,13 @@ else {
             window.webContents.send(TRANSCRIPT_CHANNEL, batches);
         },
         openLogin: (harness, url) => {
-          if (testing && process.env.MP_TEST_CODEX_FIXTURE) return;
           if (loginAllowed(harness, url)) void shell.openExternal(url);
         },
+        // Test fixtures and a local download manifest apply only to unpackaged E2E runs.
         claudeFixture: testing ? process.env.MP_TEST_CLAUDE_FIXTURE : undefined,
+        harnessManifest: testing
+          ? process.env.MP_TEST_HARNESS_MANIFEST
+          : undefined,
       },
     );
     // Harnesses launch with the host's login-shell environment; the supervisor strips provider

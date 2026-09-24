@@ -1,4 +1,4 @@
-import { Pencil, Sparkles } from "lucide-react";
+import { Pencil, Radio, Sparkles } from "lucide-react";
 import { useState } from "react";
 import type { Room, Suggestion } from "../../shared/contracts";
 import { Button } from "./ui/Button";
@@ -121,8 +121,8 @@ export function MissionControlPanel({
     <section className="mission-panel" aria-label="Mission Control">
       <header className="panel-header">
         <h2>
-          <Sparkles size={16} />
-          Prompt suggestions
+          <Radio size={16} />
+          Mission Control
         </h2>
         <span className="subtle">
           Use a suggestion to fill the active tab&apos;s composer.

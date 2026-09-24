@@ -1,5 +1,7 @@
 # Electron migration notes
 
+> The lead/specialist execution, mock runner, and Codex runner described below were replaced by chat tabs. This page records the original migration and its validation; see [desktop-harnesses.md](desktop-harnesses.md) for how agents run now.
+
 The standalone Electron port was integrated into `apps/desktop` in the existing pnpm/Turborepo workspace. The current web app, worker and shared runtime packages remain authoritative.
 
 ## Scope and reuse

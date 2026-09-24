@@ -74,6 +74,13 @@ export class SupervisorService {
       harnesses.stopTimeoutMs,
     );
     this.host.recover();
+    // Restored tabs need their harness's sign-in and models before they can send again.
+    for (const harness of new Set(
+      this.state.rooms.flatMap((room) =>
+        room.tabs.map((tab) => tab.loadout.harness),
+      ),
+    ))
+      void harnesses.registry.refresh(harness);
   }
 
   snapshot(): Snapshot {

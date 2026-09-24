@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { Journal } from "./journal";
 import { SupervisorService } from "./service";
 import { HarnessRegistry } from "./harnesses/registry";
@@ -8,6 +8,7 @@ import { ClaudeAdapter } from "./harnesses/claude/adapter";
 import { claudeFixture } from "./harnesses/claude/fixture";
 import { ProgramManager } from "./programs/manager";
 import { HARNESS_MANIFEST } from "./programs/manifest";
+import type { ProgramManifest } from "./programs/types";
 import type { SupervisorMessage, SupervisorRequest } from "../shared/contracts";
 
 // Electron utilityProcess exposes parentPort, never a renderer-facing Node connection.
@@ -25,6 +26,10 @@ const parent = (
 const directory = process.argv[2];
 const fixture = process.argv[3];
 const claudeFixturePath = process.argv[4];
+// An E2E run may point managed downloads at a local server.
+const manifest = process.argv[5]
+  ? (JSON.parse(readFileSync(process.argv[5], "utf8")) as ProgramManifest)
+  : HARNESS_MANIFEST;
 if (!parent || !directory)
   throw new Error("Supervisor must be launched by the desktop host.");
 mkdirSync(directory, { recursive: true });
@@ -46,7 +51,7 @@ const registry = new HarnessRegistry({
       claudeFixturePath ? claudeFixture(claudeFixturePath).options : {},
     ),
   ],
-  programs: new ProgramManager({ root: directory, manifest: HARNESS_MANIFEST }),
+  programs: new ProgramManager({ root: directory, manifest }),
   settings: journal,
   changed: () => harnessesChanged(),
   openLogin: (harness, url) =>

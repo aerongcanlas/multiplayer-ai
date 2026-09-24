@@ -1474,3 +1474,19 @@ summary:focus-visible {
   border-color: #4a4a52;
   background: #222228;
 }
+/* Harness settings scroll inside the sidebar so the footer stays in place. */
+.sidebar {
+  overflow: hidden;
+}
+.room-list {
+  min-height: 72px;
+}
+.harness-settings {
+  flex-shrink: 1;
+  min-height: 90px;
+  overflow-y: auto;
+  flex-wrap: nowrap;
+}
+.harness-settings > * {
+  flex-shrink: 0;
+}

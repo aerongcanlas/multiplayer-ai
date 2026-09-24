@@ -25,7 +25,8 @@
     "test:codex": "node scripts/codex-e2e.mjs",
     "test:packaged": "node scripts/e2e.mjs --packaged",
     "package": "pnpm run build && electron-builder --dir --publish never",
-    "dist": "pnpm run build && electron-builder --win nsis --publish never"
+    "dist": "pnpm run build && electron-builder --win nsis --publish never",
+    "test:tabs": "node scripts/tabs-e2e.mjs"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.280",
@@ -66,7 +67,8 @@
     },
     "files": [
       "out/**/*",
-      "package.json"
+      "package.json",
+      "!**/node_modules/@anthropic-ai/claude-agent-sdk-*{,/**/*}"
     ],
     "asar": true,
     "win": {

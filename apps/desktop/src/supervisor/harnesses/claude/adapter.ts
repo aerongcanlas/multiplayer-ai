@@ -1,4 +1,5 @@
 import { homedir } from "node:os";
+import { query } from "@anthropic-ai/claude-agent-sdk";
 import type {
   AccountInfo,
   CanUseTool,
@@ -39,39 +40,10 @@ export type StartQuery = (params: {
   options: Options;
 }) => ClaudeQuery;
 
-// The SDK is ESM-only; it loads on first use so a missing or broken install only affects Claude
-// Code tabs.
-const sdkQuery: StartQuery = (params) => {
-  const loaded = import("@anthropic-ai/claude-agent-sdk");
-  let query: ClaudeQuery | undefined;
-  const ready = loaded.then(({ query: start }) => {
-    query = start(params) as unknown as ClaudeQuery;
-    return query;
-  });
-  const call =
-    <K extends keyof ClaudeQuery>(name: K) =>
-    async (...args: unknown[]) =>
-      ((await ready)[name] as (...values: unknown[]) => unknown)(...args);
-  return {
-    accountInfo: call("accountInfo") as ClaudeQuery["accountInfo"],
-    supportedModels: call("supportedModels") as ClaudeQuery["supportedModels"],
-    interrupt: call("interrupt"),
-    setPermissionMode: call(
-      "setPermissionMode",
-    ) as ClaudeQuery["setPermissionMode"],
-    setModel: call("setModel") as ClaudeQuery["setModel"],
-    applyFlagSettings: call(
-      "applyFlagSettings",
-    ) as ClaudeQuery["applyFlagSettings"],
-    close: () => {
-      if (query) query.close();
-      else void ready.then((started) => started.close()).catch(() => {});
-    },
-    async *[Symbol.asyncIterator]() {
-      yield* await ready;
-    },
-  };
-};
+// The supervisor bundle loads the SDK's ESM entry at startup (KTD13), so a broken package shows up
+// before any tab opens. The SDK's own platform binary is not packaged; tabs use the managed CLI.
+const sdkQuery: StartQuery = (params) =>
+  query(params) as unknown as ClaudeQuery;
 
 export interface ClaudeOptions {
   /** Test fixtures replace the SDK query and the auth status check. */

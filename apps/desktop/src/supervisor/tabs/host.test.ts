@@ -728,3 +728,23 @@ test("a shared-room import keeps local tabs for the same account and project", a
     setup.close();
   }
 });
+
+test("restored tabs become ready again without a manual refresh", async () => {
+  const fake = new FakeHarness();
+  const first = await start(fake);
+  const tab = await first.open();
+  first.close();
+  const before = fake.calls.filter((call) =>
+    call.startsWith("inspect:"),
+  ).length;
+  // `start` refreshes on its own; count only the refresh the service triggers.
+  const second = await start(fake, first);
+  try {
+    await second.until(() => second.tab(tab.id).status === "idle", "ready tab");
+    assert.ok(
+      fake.calls.filter((call) => call.startsWith("inspect:")).length > before,
+    );
+  } finally {
+    second.close();
+  }
+});
