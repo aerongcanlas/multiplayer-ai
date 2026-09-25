@@ -168,11 +168,17 @@ class CodexProcess {
   }
 }
 
+// A form field's type, and for enums the value behind each shown label.
+interface ElicitationField {
+  type: string;
+  values?: Record<string, unknown>;
+}
+
 interface PendingRequest {
   rpc: RpcRequest;
   // Elicitation answers are converted back to the requested schema's types.
-  fields?: Record<string, string>;
-  // The sub-agent thread that asked; its requests outlive the lead's turn (KTD5).
+  fields?: Record<string, ElicitationField>;
+  // The sub-agent thread that asked; its requests outlive the lead's turn.
   agent?: string;
 }
 
@@ -209,6 +215,8 @@ class CodexSession implements HarnessSession {
   private process: CodexProcess;
   private queue?: EventQueue<HarnessEvent>;
   private turnId = "";
+  // Stop pressed before the lead turn's ID was known; the turn is skipped or interrupted on start.
+  private stopRequested = false;
   private pending = new Map<string, PendingRequest>();
   private failure?: HarnessError;
   private changes = new Map<string, string>();
@@ -333,7 +341,9 @@ class CodexSession implements HarnessSession {
   }
 
   async *send(prompt: string, loadout: Loadout): AsyncIterable<HarnessEvent> {
+    this.stopRequested = false;
     await this.ensureProcess();
+    if (this.stopRequested) return;
     const queue = new EventQueue<HarnessEvent>();
     this.queue = queue;
     if (!this.announced) {
@@ -367,6 +377,14 @@ class CodexSession implements HarnessSession {
       .request("turn/start", params as unknown as Record<string, unknown>)
       .then((response) => {
         this.turnId ||= string(object(object(response).turn).id);
+        if (this.stopRequested && this.turnId && this.active)
+          void this.process.transport
+            .request(
+              "turn/interrupt",
+              { threadId: this.sessionId!, turnId: this.turnId },
+              8_000,
+            )
+            .catch(() => {});
       })
       .catch((error) =>
         queue.fail(
@@ -698,7 +716,7 @@ class CodexSession implements HarnessSession {
       );
       return;
     }
-    const hold = (fields?: Record<string, string>) =>
+    const hold = (fields?: Record<string, ElicitationField>) =>
       this.pending.set(key, {
         rpc,
         ...(fields ? { fields } : {}),
@@ -835,7 +853,11 @@ class CodexSession implements HarnessSession {
     if (rpc.method === "mcpServer/elicitation/request")
       this.process.transport.respond(rpc.id, {
         action: "accept",
-        content: elicitationContent(answers, fields ?? {}),
+        // Enum values come from the server's own schema, so they are valid JSON.
+        content: elicitationContent(
+          answers,
+          fields ?? {},
+        ) as McpServerElicitationRequestResponse["content"],
         _meta: null,
       } satisfies McpServerElicitationRequestResponse);
     else
@@ -879,6 +901,7 @@ class CodexSession implements HarnessSession {
     ];
     if (this.turnId && (this.active || this.harnessTurn))
       turns.unshift([this.sessionId!, this.turnId]);
+    else this.stopRequested = true;
     await Promise.all(
       turns.map(([threadId, turnId]) =>
         transport.request("turn/interrupt", { threadId, turnId }, 8_000),
@@ -916,6 +939,8 @@ class CodexSession implements HarnessSession {
       [...this.agents.values()].some((agent) => agent.running)
     )
       void this.stop().catch(() => {});
+    // The turn's events no longer reach this session, so its send() ends here.
+    if (this.active) this.queue!.end();
     this.process.sessions.delete(this);
     this.process.touch();
   }
@@ -927,20 +952,26 @@ function elicitationQuestions(params: Record<string, unknown>) {
   const schema = object(params.requestedSchema);
   const properties = Object.entries(object(schema.properties));
   if (!properties.length || properties.length > 10) return null;
-  const fields: Record<string, string> = {};
+  const fields: Record<string, ElicitationField> = {};
   const questions: HarnessQuestion[] = [];
   for (const [id, value] of properties) {
     const property = object(value);
-    const options = Array.isArray(property.enum)
-      ? property.enum.map((option, index) => ({
-          label:
-            string(
-              Array.isArray(property.enumNames)
-                ? property.enumNames[index]
-                : "",
-            ) || String(option),
-          description: "",
-        }))
+    // Enums come as `enum` (optionally titled by `enumNames`) or as titled `oneOf` constants.
+    const choices: [string, unknown][] = Array.isArray(property.enum)
+      ? property.enum.map((option, index) => [
+          string(
+            Array.isArray(property.enumNames) ? property.enumNames[index] : "",
+          ) || String(option),
+          option,
+        ])
+      : Array.isArray(property.oneOf)
+        ? property.oneOf.map((raw) => {
+            const option = object(raw);
+            return [string(option.title) || String(option.const), option.const];
+          })
+        : [];
+    const options = choices.length
+      ? choices.map(([label]) => ({ label, description: "" }))
       : property.type === "boolean"
         ? [
             { label: "true", description: "Yes" },
@@ -953,7 +984,10 @@ function elicitationQuestions(params: Record<string, unknown>) {
       )
     )
       return null;
-    fields[id] = string(property.type);
+    fields[id] = {
+      type: string(property.type),
+      ...(choices.length ? { values: Object.fromEntries(choices) } : {}),
+    };
     questions.push({
       id,
       header: string(property.title) || id,
@@ -973,17 +1007,23 @@ function elicitationQuestions(params: Record<string, unknown>) {
 
 function elicitationContent(
   answers: Record<string, string[]>,
-  fields: Record<string, string>,
+  fields: Record<string, ElicitationField>,
 ) {
   return Object.fromEntries(
-    Object.entries(answers).map(([id, [value = ""]]) => [
-      id,
-      fields[id] === "boolean"
-        ? value === "true"
-        : ["number", "integer"].includes(fields[id])
-          ? Number(value)
-          : value,
-    ]),
+    Object.entries(answers).map(([id, [value = ""]]) => {
+      const field = fields[id];
+      const values = field?.values;
+      return [
+        id,
+        values && Object.hasOwn(values, value)
+          ? values[value]
+          : field?.type === "boolean"
+            ? value === "true"
+            : ["number", "integer"].includes(field?.type ?? "")
+              ? Number(value)
+              : value,
+      ];
+    }),
   );
 }
 

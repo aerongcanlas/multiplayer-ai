@@ -48,7 +48,8 @@ async function serve(
       },
       () => {
         response.writeHead(200, { "content-length": binary.length });
-        response.write(binary.subarray(0, 100));
+        // A prefix smaller than every served asset, so only the drop can fail it.
+        response.write(binary.subarray(0, 10));
         setTimeout(() => response.socket?.destroy(), 20);
       },
     );

@@ -201,6 +201,9 @@ class ClaudeSession implements HarnessSession {
   private pending = new Map<string, Pending>();
   private tools = new Map<string, string>();
   private messageId = "";
+  // Blocks already completed per message id: the CLI sends one complete message per block, so a
+  // block's stream index is its count within that id, matching the streamed delta's item.
+  private blocks = new Map<string, number>();
   private idle?: ReturnType<typeof setTimeout>;
   private initialized = false;
   private resumeSession: string | undefined;
@@ -472,33 +475,38 @@ class ClaudeSession implements HarnessSession {
         clearTimeout(this.idle);
         this.harness({ type: "turn.started" });
       }
-      (Array.isArray(body.content) ? body.content : []).forEach(
-        (raw, index) => {
-          const block = record(raw);
-          if (block.type === "tool_use") {
-            const tool = text(block.id);
-            const input = record(block.input);
-            const summary = toolSummary(text(block.name), input);
-            this.tools.set(tool, summary);
-            if (parent) this.parents.set(tool, parent);
-            emit({ type: "tool", item: tool, summary });
-            if (!agent) this.plan(text(block.name), input, tool);
-          } else if (block.type === "text")
-            emit({
-              type: "message",
-              item: `${id}:${index}`,
-              kind: "assistant",
-              text: text(block.text),
-            });
-          else if (block.type === "thinking")
-            emit({
-              type: "message",
-              item: `${id}:${index}`,
-              kind: "reasoning",
-              text: text(block.thinking),
-            });
-        },
-      );
+      const content = Array.isArray(body.content) ? body.content : [];
+      const base = this.blocks.get(id) ?? 0;
+      this.blocks.delete(id);
+      this.blocks.set(id, base + content.length);
+      if (this.blocks.size > 64)
+        this.blocks.delete(this.blocks.keys().next().value!);
+      content.forEach((raw, offset) => {
+        const index = base + offset;
+        const block = record(raw);
+        if (block.type === "tool_use") {
+          const tool = text(block.id);
+          const input = record(block.input);
+          const summary = toolSummary(text(block.name), input);
+          this.tools.set(tool, summary);
+          if (parent) this.parents.set(tool, parent);
+          emit({ type: "tool", item: tool, summary });
+          if (!agent) this.plan(text(block.name), input, tool);
+        } else if (block.type === "text")
+          emit({
+            type: "message",
+            item: `${id}:${index}`,
+            kind: "assistant",
+            text: text(block.text),
+          });
+        else if (block.type === "thinking")
+          emit({
+            type: "message",
+            item: `${id}:${index}`,
+            kind: "reasoning",
+            text: text(block.thinking),
+          });
+      });
       return;
     }
     if (value.type === "user") {
@@ -729,17 +737,17 @@ class ClaudeSession implements HarnessSession {
     this.turn = turn;
     this.failure = undefined;
     this.owner = randomUUID();
-    if (!this.query) this.start();
-    else {
-      // Streaming input keeps the loadout adjustable between turns (KTD8).
-      await this.query.setModel(loadout.model || undefined);
-      await this.query.applyFlagSettings({
-        effortLevel: loadout.effort ?? null,
-      });
-      await this.query.setPermissionMode(permissionMode(loadout));
-    }
-    this.channel!.push(prompt, this.owner);
     try {
+      if (!this.query) this.start();
+      else {
+        // Streaming input keeps the loadout adjustable between turns.
+        await this.query.setModel(loadout.model || undefined);
+        await this.query.applyFlagSettings({
+          effortLevel: loadout.effort ?? null,
+        });
+        await this.query.setPermissionMode(permissionMode(loadout));
+      }
+      this.channel!.push(prompt, this.owner);
       yield* turn;
       this.resumeSession = this.sessionId;
     } finally {
@@ -785,11 +793,14 @@ class ClaudeSession implements HarnessSession {
       if (decision === "accept") {
         // Continuing into execution switches to the tab's access mode.
         this.loadout = { ...this.loadout, planMode: false };
-        void this.query
-          ?.setPermissionMode(permissionMode(this.loadout))
-          .finally(() =>
-            pending.resolve({ behavior: "allow", updatedInput: pending.input }),
-          );
+        const allow = () =>
+          pending.resolve({ behavior: "allow", updatedInput: pending.input });
+        if (this.query)
+          void this.query
+            .setPermissionMode(permissionMode(this.loadout))
+            .catch(() => {})
+            .finally(allow);
+        else allow();
       } else
         pending.resolve({
           behavior: "deny",
