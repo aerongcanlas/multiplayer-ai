@@ -14,6 +14,7 @@ import {
 import type { Room, Suggestion } from "../shared/contracts";
 import { tabBusy, type HarnessState } from "../shared/tabs";
 import { dismissError, perform, useDesktop } from "./lib/desktop-store";
+import { getStored, setStored } from "./lib/storage";
 import { Button } from "./components/ui/Button";
 import { Input } from "./components/ui/Input";
 import { RoomWorkspace } from "@multiplayer-ai/ui/layouts/room-workspace";
@@ -26,13 +27,6 @@ import { TabsPanel } from "./components/tabs/TabsPanel";
 
 const roomBusy = (room: Room) => room.tabs.some((tab) => tabBusy(tab.status));
 const tabKey = (roomId: string) => `multiplayer:tab:${roomId}`;
-const rememberedTab = (roomId: string) => {
-  try {
-    return localStorage.getItem(tabKey(roomId));
-  } catch {
-    return null;
-  }
-};
 
 function RoomView({
   room,
@@ -51,7 +45,7 @@ function RoomView({
   const [invite, setInvite] = useState<string | null>(null);
   // Mission Control and the main area both follow the active tab.
   const [selectedTab, setSelectedTab] = useState<string | null>(() =>
-    rememberedTab(room.id),
+    getStored(tabKey(room.id)),
   );
   const [viewing, setViewing] = useState<{
     tabId: string;
@@ -63,11 +57,7 @@ function RoomView({
   function selectTab(id: string) {
     setSelectedTab(id);
     setViewing(null);
-    try {
-      localStorage.setItem(tabKey(room.id), id);
-    } catch {
-      /* The selection is a convenience only. */
-    }
+    setStored(tabKey(room.id), id);
   }
   function leaveAgent() {
     const key = agentKey;
@@ -219,10 +209,10 @@ function RoomView({
 export default function App() {
   const { snapshot, health, pending, error } = useDesktop();
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(() =>
-    localStorage.getItem("multiplayer:room"),
+    getStored("multiplayer:room"),
   );
   const [sidebarOpen, setSidebarOpen] = useState(
-    () => localStorage.getItem("multiplayer:sidebar") !== "closed",
+    () => getStored("multiplayer:sidebar") !== "closed",
   );
   const [creating, setCreating] = useState(false);
   const [roomName, setRoomName] = useState("");
@@ -233,7 +223,7 @@ export default function App() {
   const disabled = pending > 0 || health.status !== "live";
   function toggleSidebar() {
     setSidebarOpen((current) => {
-      localStorage.setItem("multiplayer:sidebar", current ? "closed" : "open");
+      setStored("multiplayer:sidebar", current ? "closed" : "open");
       return !current;
     });
   }
@@ -249,7 +239,7 @@ export default function App() {
   }, []);
   function selectRoom(id: string) {
     setSelectedRoomId(id);
-    localStorage.setItem("multiplayer:room", id);
+    setStored("multiplayer:room", id);
   }
   async function createRoom() {
     const result = await perform(

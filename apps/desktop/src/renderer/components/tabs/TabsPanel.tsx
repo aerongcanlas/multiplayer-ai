@@ -5,22 +5,24 @@ import {
   HARNESS_IDS,
   HARNESS_LABELS,
   tabBusy,
+  type ApprovalDecision,
   type HarnessId,
   type HarnessState,
+  type QuestionAnswers,
   type Tab,
   type TranscriptEntry,
 } from "../../../shared/tabs";
 import { perform } from "../../lib/desktop-store";
-import { useAgents } from "../../lib/agents-store";
+import { programLabel } from "../../lib/harness-status";
+import { useAgents } from "../../lib/transcript-store";
+import { plural } from "../../lib/utils";
 import { HarnessStatus } from "../HarnessSettings";
 import { HarnessPicker } from "./HarnessPicker";
 import { PromptInput } from "../PromptInput";
 import { Button } from "../ui/Button";
 import { LoadoutBar } from "./LoadoutBar";
-import { TranscriptView } from "./TranscriptView";
+import { TranscriptView, type Actions } from "./TranscriptView";
 import { AGENT_STATUS_LABELS, STATUS_LABELS } from "./labels";
-
-type Actions = Parameters<typeof TranscriptView>[0]["actions"];
 
 /** One sub-agent's transcript in the main area, read-only, with a way back to the lead. */
 function AgentDrillIn({
@@ -39,7 +41,7 @@ function AgentDrillIn({
   onBack: () => void;
 }) {
   const { cards } = useAgents(roomId, tab.id);
-  const card = cards.find((item) => item.agent?.key === agentKey);
+  const card = cards.find((item) => item.agent.key === agentKey);
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => heading.current?.focus(), [agentKey]);
   return (
@@ -52,7 +54,7 @@ function AgentDrillIn({
         <h3 ref={heading} tabIndex={-1}>
           {card?.summary ?? "Sub-agent"}
         </h3>
-        {card?.agent && (
+        {card && (
           <span className={`agent-status status-${card.agent.status}`}>
             {AGENT_STATUS_LABELS[card.agent.status]}
           </span>
@@ -64,6 +66,7 @@ function AgentDrillIn({
         roomId={roomId}
         tab={tab}
         agentKey={agentKey}
+        agent={card}
         disabled={disabled}
         actions={actions}
       />
@@ -149,8 +152,8 @@ export function TabsPanel({
     onSent(`Sent to ${tab.title}.`);
     return true;
   }
-  const actions = {
-    onRespond: (entry: TranscriptEntry, decision: "accept" | "decline") =>
+  const actions: Actions = {
+    onRespond: (entry: TranscriptEntry, decision: ApprovalDecision) =>
       tab &&
       void perform(() =>
         window.desktop.respondToTabApproval(
@@ -160,7 +163,7 @@ export function TabsPanel({
           decision,
         ),
       ),
-    onAnswer: (entry: TranscriptEntry, answers: Record<string, string[]>) =>
+    onAnswer: (entry: TranscriptEntry, answers: QuestionAnswers) =>
       tab &&
       void perform(() =>
         window.desktop.answerQuestion(room.id, tab.id, entry.id, answers),
@@ -336,8 +339,7 @@ export function TabsPanel({
             tab.status === "unavailable" &&
             harness.program.state === "downloading" && (
               <p className="harness-downloading" role="status">
-                Downloading {harness.label} {harness.program.pinned}…{" "}
-                {Math.round((harness.program.progress ?? 0) * 100)}%
+                {harness.label} · {programLabel(harness)}
               </p>
             )}
           {agentKey ? (
@@ -372,8 +374,7 @@ export function TabsPanel({
             {source && (
               <div className="source-chip">
                 <span>
-                  {source.sources.length} source{" "}
-                  {source.sources.length === 1 ? "message" : "messages"} · room
+                  {plural(source.sources.length, "source message")} · room
                   suggestion
                 </span>
                 <Button

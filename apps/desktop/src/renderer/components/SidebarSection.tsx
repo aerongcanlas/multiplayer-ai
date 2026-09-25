@@ -1,5 +1,6 @@
 import { ChevronDown } from "lucide-react";
 import { useId, useState, type ReactNode } from "react";
+import { getStored, setStored } from "../lib/storage";
 
 const sectionKey = (id: string) => `multiplayer:section:${id}`;
 
@@ -20,11 +21,11 @@ export function SidebarSection({
 }) {
   const bodyId = useId();
   const [open, setOpen] = useState(
-    () => localStorage.getItem(sectionKey(id)) !== "closed",
+    () => getStored(sectionKey(id)) !== "closed",
   );
   function toggle() {
     setOpen((current) => {
-      localStorage.setItem(sectionKey(id), current ? "closed" : "open");
+      setStored(sectionKey(id), current ? "closed" : "open");
       return !current;
     });
   }

@@ -1,7 +1,8 @@
-import { Bot, MessageCircleQuestion } from "lucide-react";
+import { MessageCircleQuestion } from "lucide-react";
 import { useState } from "react";
-import type { TranscriptEntry } from "../../../shared/tabs";
+import type { QuestionAnswers, TranscriptEntry } from "../../../shared/tabs";
 import { Button } from "../ui/Button";
+import { SubAgentBadge } from "./SubAgentBadge";
 
 /** A harness question (a skill's multiple choice or a plan-mode clarification). */
 export function QuestionCard({
@@ -14,10 +15,10 @@ export function QuestionCard({
   // The sub-agent that asked, when it was not the lead.
   agent?: string;
   disabled: boolean;
-  onAnswer: (answers: Record<string, string[]>) => void;
+  onAnswer: (answers: QuestionAnswers) => void;
 }) {
   const questions = entry.questions ?? [];
-  const [chosen, setChosen] = useState<Record<string, string[]>>({});
+  const [chosen, setChosen] = useState<QuestionAnswers>({});
   const [other, setOther] = useState<Record<string, string>>({});
   const pending = entry.state === "pending";
   const answers = Object.fromEntries(
@@ -54,12 +55,7 @@ export function QuestionCard({
         if (complete) onAnswer(answers);
       }}
     >
-      {agent && (
-        <span className="card-agent">
-          <Bot size={12} />
-          Sub-agent · {agent}
-        </span>
-      )}
+      {agent && <SubAgentBadge name={agent} />}
       {questions.map((question) => (
         <fieldset key={question.id} disabled={!pending || disabled}>
           <legend>

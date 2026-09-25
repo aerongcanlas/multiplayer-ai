@@ -1,39 +1,9 @@
 import { FolderOpen, LogIn, RefreshCw, RotateCcw } from "lucide-react";
 import type { HarnessState } from "../../shared/tabs";
 import { perform } from "../lib/desktop-store";
+import { authLabel, programFailed, programLabel } from "../lib/harness-status";
+import { plural } from "../lib/utils";
 import { Button } from "./ui/Button";
-
-function programLabel(harness: HarnessState) {
-  const { program } = harness;
-  switch (program.state) {
-    case "ready":
-      return `Managed ${program.version ?? program.pinned}`;
-    case "custom":
-      return `Custom executable${program.version ? ` · ${program.version}` : ""}`;
-    case "downloading":
-      return `Downloading ${program.pinned}… ${Math.round((program.progress ?? 0) * 100)}%`;
-    case "missing":
-      return `Downloads ${program.pinned} on first use`;
-    case "failed":
-      return "Download failed";
-    case "custom_invalid":
-      return "Custom executable unusable";
-    case "unsupported":
-      return "No managed build for this platform";
-    default:
-      return "Checking program…";
-  }
-}
-
-function authLabel(harness: HarnessState) {
-  const { auth } = harness;
-  if (auth.state === "signed_in")
-    return `${auth.account ?? "Signed in"}${auth.plan ? ` · ${auth.plan}` : ""}`;
-  if (auth.state === "signed_out") return "Not signed in";
-  if (auth.state === "signing_in") return "Finish signing in in your browser";
-  if (auth.state === "checking") return "Checking sign-in…";
-  return "Sign-in not checked yet";
-}
 
 /** Setup a harness still needs: program problems, sign-in, and the Claude policy notice. */
 export function HarnessStatus({
@@ -46,20 +16,18 @@ export function HarnessStatus({
   compact?: boolean;
 }) {
   const { program, auth } = harness;
-  const programFailed = ["failed", "custom_invalid", "unsupported"].includes(
-    program.state,
-  );
+  const failed = programFailed(program);
   return (
     <div
       className={`harness-status ${compact ? "harness-status-compact" : ""}`}
     >
-      {program.message && programFailed && (
+      {program.message && failed && (
         <p className="harness-problem" role="alert">
           {program.message}
         </p>
       )}
       {program.warning && <p className="subtle">{program.warning}</p>}
-      {programFailed && program.state !== "unsupported" && (
+      {failed && program.state !== "unsupported" && (
         <Button
           size="xs"
           variant="outline"
@@ -169,8 +137,7 @@ export function HarnessSettings({
           <span className="harness-line">{authLabel(harness)}</span>
           {harness.models.length > 0 && (
             <span className="harness-line">
-              {harness.models.length} model
-              {harness.models.length === 1 ? "" : "s"}
+              {plural(harness.models.length, "model")}
             </span>
           )}
           {harness.limits.map((limit) => (

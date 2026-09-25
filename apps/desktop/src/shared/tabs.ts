@@ -154,7 +154,6 @@ const suggestionSourceSchema = z
     ),
   })
   .strict();
-export type SuggestionSource = z.infer<typeof suggestionSourceSchema>;
 
 export const AGENT_STATUSES = [
   "running",
@@ -382,3 +381,8 @@ export const DEFAULT_LOADOUT = (harness: HarnessId): Loadout => ({
 
 export const tabBusy = (status: TabStatus) =>
   status === "running" || status === "awaiting_host";
+
+export type ApprovalDecision = "accept" | "decline";
+export type QuestionAnswers = Record<string, z.infer<typeof answerValues>>;
+// A sub-agent card entry, with its card present.
+export type AgentEntry = TranscriptEntry & { agent: AgentCard };

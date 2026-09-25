@@ -1,12 +1,14 @@
-import { Bot, ShieldQuestion } from "lucide-react";
-import type { TranscriptEntry } from "../../../shared/tabs";
+import { ShieldQuestion } from "lucide-react";
+import type { ApprovalDecision, TranscriptEntry } from "../../../shared/tabs";
 import { Button } from "../ui/Button";
+import { SubAgentBadge } from "./SubAgentBadge";
 
-const outcome: Record<string, string> = {
-  accepted: "Approved",
-  declined: "Declined",
-  cancelled: "Cancelled",
-};
+const outcome: Partial<Record<NonNullable<TranscriptEntry["state"]>, string>> =
+  {
+    accepted: "Approved",
+    declined: "Declined",
+    cancelled: "Cancelled",
+  };
 
 export function ApprovalCard({
   entry,
@@ -18,7 +20,7 @@ export function ApprovalCard({
   // The sub-agent that asked, when it was not the lead.
   agent?: string;
   disabled: boolean;
-  onRespond: (decision: "accept" | "decline") => void;
+  onRespond: (decision: ApprovalDecision) => void;
 }) {
   const pending = entry.state === "pending";
   return (
@@ -27,12 +29,7 @@ export function ApprovalCard({
       role="region"
       aria-label={agent ? `Approval for sub-agent ${agent}` : "Agent approval"}
     >
-      {agent && (
-        <span className="card-agent">
-          <Bot size={12} />
-          Sub-agent · {agent}
-        </span>
-      )}
+      {agent && <SubAgentBadge name={agent} />}
       <strong>
         <ShieldQuestion size={13} />
         {entry.summary}
@@ -57,7 +54,9 @@ export function ApprovalCard({
           </Button>
         </div>
       ) : (
-        <span className="subtle">{outcome[entry.state ?? ""] ?? ""}</span>
+        <span className="subtle">
+          {(entry.state && outcome[entry.state]) ?? ""}
+        </span>
       )}
     </div>
   );
