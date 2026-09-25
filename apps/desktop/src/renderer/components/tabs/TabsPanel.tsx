@@ -1,5 +1,5 @@
-import { Bot, CircleStop, Plus, X } from "lucide-react";
-import { useState } from "react";
+import { ArrowLeft, Bot, CircleStop, Plus, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import type { Room, Suggestion } from "../../../shared/contracts";
 import {
   HARNESS_IDS,
@@ -11,32 +11,71 @@ import {
   type TranscriptEntry,
 } from "../../../shared/tabs";
 import { perform } from "../../lib/desktop-store";
+import { useAgents } from "../../lib/agents-store";
 import { HarnessStatus } from "../HarnessSettings";
 import { PromptInput } from "../PromptInput";
 import { Button } from "../ui/Button";
 import { LoadoutBar } from "./LoadoutBar";
 import { TranscriptView } from "./TranscriptView";
+import { AGENT_STATUS_LABELS, STATUS_LABELS } from "./labels";
 
-const STATUS_LABELS: Record<Tab["status"], string> = {
-  unavailable: "Needs setup",
-  idle: "Ready",
-  running: "Running",
-  awaiting_host: "Waiting for you",
-  error: "Error",
-  interrupted: "Interrupted",
-  resume_failed: "Session lost",
-};
-const storageKey = (roomId: string) => `multiplayer:tab:${roomId}`;
-const remembered = (roomId: string) => {
-  try {
-    return localStorage.getItem(storageKey(roomId));
-  } catch {
-    return null;
-  }
-};
+type Actions = Parameters<typeof TranscriptView>[0]["actions"];
+
+/** One sub-agent's transcript in the main area, read-only, with a way back to the lead (R10). */
+function AgentDrillIn({
+  roomId,
+  tab,
+  agentKey,
+  disabled,
+  actions,
+  onBack,
+}: {
+  roomId: string;
+  tab: Tab;
+  agentKey: string;
+  disabled: boolean;
+  actions: Actions;
+  onBack: () => void;
+}) {
+  const { cards } = useAgents(roomId, tab.id);
+  const card = cards.find((item) => item.agent?.key === agentKey);
+  const heading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => heading.current?.focus(), [agentKey]);
+  return (
+    <>
+      <div className="drill-header">
+        <Button size="xs" variant="ghost" onClick={onBack}>
+          <ArrowLeft size={12} />
+          Back to {tab.title}
+        </Button>
+        <h3 ref={heading} tabIndex={-1}>
+          {card?.summary ?? "Sub-agent"}
+        </h3>
+        {card?.agent && (
+          <span className={`agent-status status-${card.agent.status}`}>
+            {AGENT_STATUS_LABELS[card.agent.status]}
+          </span>
+        )}
+        <span className="subtle">Sub-agent transcript · read-only</span>
+      </div>
+      <TranscriptView
+        key={`${tab.id}:${agentKey}`}
+        roomId={roomId}
+        tab={tab}
+        agentKey={agentKey}
+        disabled={disabled}
+        actions={actions}
+      />
+    </>
+  );
+}
 
 export function TabsPanel({
   room,
+  tab,
+  agentKey,
+  onSelect,
+  onAgentBack,
   harnesses,
   disabled,
   stale,
@@ -47,6 +86,11 @@ export function TabsPanel({
   onSent,
 }: {
   room: Room;
+  // The active tab and the sub-agent open in the main area, owned by the room view (KTD13).
+  tab: Tab | undefined;
+  agentKey: string | null;
+  onSelect: (tabId: string) => void;
+  onAgentBack: () => void;
   harnesses: HarnessState[];
   disabled: boolean;
   stale: boolean;
@@ -56,16 +100,15 @@ export function TabsPanel({
   onSourceClear: () => void;
   onSent: (message: string) => void;
 }) {
-  const [selected, setSelected] = useState<string | null>(() =>
-    remembered(room.id),
-  );
   const [picking, setPicking] = useState(false);
   const [closing, setClosing] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [title, setTitle] = useState("");
-  const tab = room.tabs.find((item) => item.id === selected) ?? room.tabs[0];
+  const closingTab = room.tabs.find((item) => item.id === closing);
   const harness = harnesses.find((item) => item.id === tab?.loadout.harness);
   const busy = tab ? tabBusy(tab.status) : false;
+  // Stop also covers sub-agents still running after the turn (R13).
+  const stoppable = busy || Boolean(tab?.runningAgents);
   const models = harness?.models ?? [];
   const modelMissing = Boolean(
     tab &&
@@ -73,14 +116,6 @@ export function TabsPanel({
       (models.length && !models.some((item) => item.id === tab.loadout.model))),
   );
 
-  function select(id: string) {
-    setSelected(id);
-    try {
-      localStorage.setItem(storageKey(room.id), id);
-    } catch {
-      /* The selection is a convenience only. */
-    }
-  }
   async function open(id: HarnessId) {
     setPicking(false);
     const known = new Set(room.tabs.map((item) => item.id));
@@ -88,10 +123,10 @@ export function TabsPanel({
     const created = snapshot?.rooms
       .find((item) => item.id === room.id)
       ?.tabs.find((item) => !known.has(item.id));
-    if (created) select(created.id);
+    if (created) onSelect(created.id);
   }
   async function close(target: Tab, confirm: boolean) {
-    if (tabBusy(target.status) && !confirm) {
+    if ((tabBusy(target.status) || target.runningAgents) && !confirm) {
       setClosing(target.id);
       return;
     }
@@ -185,7 +220,7 @@ export function TabsPanel({
                 role="tab"
                 aria-selected={item.id === tab?.id}
                 title={`${item.title} · ${STATUS_LABELS[item.status]} · double-click to rename`}
-                onClick={() => select(item.id)}
+                onClick={() => onSelect(item.id)}
                 onDoubleClick={() => {
                   setTitle(item.title);
                   setRenaming(item.id);
@@ -196,6 +231,22 @@ export function TabsPanel({
                   aria-label={STATUS_LABELS[item.status]}
                 />
                 <span className="tab-title">{item.title}</span>
+                {Boolean(item.runningAgents) && (
+                  <span
+                    className="tab-agents"
+                    title="Sub-agents still running in this tab"
+                  >
+                    {item.runningAgents} running
+                  </span>
+                )}
+                {Boolean(item.agentRequests) && (
+                  <span
+                    className="tab-needs"
+                    role="img"
+                    aria-label="A sub-agent needs you"
+                    title="A sub-agent is waiting for you"
+                  />
+                )}
               </button>
               <Button
                 size="icon-xs"
@@ -239,7 +290,7 @@ export function TabsPanel({
             </div>
           )}
         </div>
-        {tab && busy && (
+        {tab && stoppable && (
           <Button
             size="xs"
             variant="outline"
@@ -254,20 +305,18 @@ export function TabsPanel({
           </Button>
         )}
       </header>
-      {closing && (
+      {closingTab && (
         <div
           className="tab-confirm"
           role="alertdialog"
           aria-label="Close running tab"
         >
-          <p>This tab is running a turn. Stop it and close the tab?</p>
-          <Button
-            size="xs"
-            onClick={() => {
-              const target = room.tabs.find((item) => item.id === closing);
-              if (target) void close(target, true);
-            }}
-          >
+          <p>
+            {tabBusy(closingTab.status)
+              ? "This tab is running a turn. Stop it and close the tab?"
+              : "This tab has running sub-agents. Stop them and close the tab?"}
+          </p>
+          <Button size="xs" onClick={() => void close(closingTab, true)}>
             Stop and close
           </Button>
           <Button size="xs" variant="ghost" onClick={() => setClosing(null)}>
@@ -315,14 +364,25 @@ export function TabsPanel({
                 {Math.round((harness.program.progress ?? 0) * 100)}%
               </p>
             )}
-          <TranscriptView
-            key={tab.id}
-            roomId={room.id}
-            tab={tab}
-            disabled={disabled || stale}
-            actions={actions}
-          />
-          <div className="panel-composer">
+          {agentKey ? (
+            <AgentDrillIn
+              roomId={room.id}
+              tab={tab}
+              agentKey={agentKey}
+              disabled={disabled || stale}
+              actions={actions}
+              onBack={onAgentBack}
+            />
+          ) : (
+            <TranscriptView
+              key={tab.id}
+              roomId={room.id}
+              tab={tab}
+              disabled={disabled || stale}
+              actions={actions}
+            />
+          )}
+          <div className="panel-composer" hidden={Boolean(agentKey)}>
             <LoadoutBar
               loadout={tab.loadout}
               harness={harness}

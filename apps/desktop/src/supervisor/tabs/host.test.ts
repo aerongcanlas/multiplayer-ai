@@ -800,9 +800,15 @@ test("sub-agents get cards under their turn, and a background one outlives the t
     assert.equal(idle.runningAgents, 1);
     assert.equal(idle.agentRequests, 1);
     const lead = await setup.transcript(tab.id);
+    // The background sub-agent's pending approval waits in the lead's view too.
     assert.deepEqual(
-      lead.map((entry) => entry.kind),
-      ["user", "assistant", "turn"],
+      lead.map((entry) => [entry.kind, entry.agentKey]),
+      [
+        ["user", undefined],
+        ["approval", "tests"],
+        ["assistant", undefined],
+        ["turn", undefined],
+      ],
     );
     const turnId = lead[0].turnId;
     assert.deepEqual(

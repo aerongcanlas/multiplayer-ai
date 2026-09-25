@@ -1076,9 +1076,6 @@ summary:focus-visible {
   max-height: 180px;
   overflow: auto;
 }
-.mission-grid-single {
-  grid-template-columns: 1fr;
-}
 
 /* Chat tabs */
 .tab-strip {
@@ -1489,4 +1486,187 @@ summary:focus-visible {
 }
 .harness-settings > * {
   flex-shrink: 0;
+}
+
+/* Mission Control: lead context and sub-agent cards */
+.lead-facts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 10px;
+  margin-bottom: 4px;
+}
+.lead-facts dt {
+  font-size: 10px;
+  color: #85858f;
+}
+.lead-facts dd {
+  color: #d4d4dc;
+  overflow-wrap: anywhere;
+}
+.lead-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.lead-steps li {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+.lead-steps svg {
+  flex-shrink: 0;
+  margin-top: 3px;
+}
+.lead-steps .step-active {
+  color: #d4d4dc;
+}
+.lead-steps .step-active svg {
+  color: #7fa6e0;
+}
+.lead-steps .step-done {
+  color: #8a8a96;
+}
+.lead-steps .step-done svg {
+  color: #7ea88a;
+}
+.agent-turn {
+  margin-bottom: 8px;
+}
+.agent-turn > summary {
+  display: flex;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 10px;
+  color: #93939f;
+  padding: 4px 0;
+}
+.agent-turn > summary span {
+  margin-left: auto;
+}
+.agent-card {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 6px;
+  padding: 8px 9px;
+  text-align: left;
+  color: #aaaab8;
+  font-size: 11px;
+  background: #242428;
+  border: 1px solid #35353b;
+  border-radius: 7px;
+}
+.agent-card:hover {
+  border-color: #4a4a53;
+}
+.agent-card.agent-selected {
+  border-color: #7fa6e0;
+  background: #262a33;
+}
+.agent-card:focus-visible {
+  outline: 2px solid #7fa6e0;
+  outline-offset: 1px;
+}
+.agent-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.agent-heading strong {
+  color: #d4d4dc;
+  font-weight: 550;
+  overflow-wrap: anywhere;
+}
+.agent-status {
+  flex-shrink: 0;
+  margin-left: auto;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  color: #c0c0cc;
+  background: #33333a;
+}
+.agent-status.status-running {
+  color: #b9d0f3;
+  background: #7fa6e022;
+}
+.agent-status.status-completed {
+  color: #a9cdb2;
+  background: #7ea88a22;
+}
+.agent-status.status-failed {
+  color: #eba3a3;
+  background: #e06c6c22;
+}
+.agent-status.status-stopped,
+.agent-status.status-interrupted {
+  color: #d6b98f;
+  background: #b38c5a22;
+}
+.agent-meta {
+  font-size: 10px;
+  color: #85858f;
+  overflow-wrap: anywhere;
+}
+.agent-summary {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Sub-agent drill-in and marks */
+.drill-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid #ffffff07;
+}
+.drill-header h3 {
+  min-width: 0;
+  font-size: 13px;
+  color: #ececf1;
+  overflow-wrap: anywhere;
+}
+.drill-header h3:focus {
+  outline: none;
+}
+.drill-header .agent-status {
+  margin-left: 0;
+}
+.drill-header .subtle {
+  margin-left: auto;
+  font-size: 11px;
+}
+.transcript-empty {
+  padding: 16px 4px;
+  font-size: 12px;
+}
+.tab-agents {
+  flex-shrink: 0;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: 10px;
+  color: #b9d0f3;
+  background: #7fa6e022;
+}
+.tab-needs {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: #e0b15a;
+  box-shadow: 0 0 0 3px #e0b15a33;
+}
+.card-agent {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 4px;
+  font-size: 10px;
+  color: #b9d0f3;
 }

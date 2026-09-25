@@ -16,6 +16,7 @@ import {
   type TranscriptEntry,
 } from "../../../shared/tabs";
 import { loadOlder, useTranscript } from "../../lib/transcript-store";
+import { useAgents } from "../../lib/agents-store";
 import { Button } from "../ui/Button";
 import { timeLabel } from "../../lib/time";
 import { ApprovalCard } from "./ApprovalCard";
@@ -39,6 +40,7 @@ const resetLabel = (resetsAt: number | null | undefined) =>
 function Entry({
   entry,
   tab,
+  agent,
   latestPlan,
   disabled,
   streaming,
@@ -46,6 +48,7 @@ function Entry({
 }: {
   entry: TranscriptEntry;
   tab: Tab;
+  agent?: string;
   latestPlan: boolean;
   disabled: boolean;
   streaming: boolean;
@@ -141,6 +144,7 @@ function Entry({
       return (
         <ApprovalCard
           entry={entry}
+          agent={agent}
           disabled={disabled}
           onRespond={(decision) => actions.onRespond(entry, decision)}
         />
@@ -149,6 +153,7 @@ function Entry({
       return (
         <QuestionCard
           entry={entry}
+          agent={agent}
           disabled={disabled}
           onAnswer={(answers) => actions.onAnswer(entry, answers)}
         />
@@ -195,18 +200,23 @@ function Entry({
   }
 }
 
+/** The lead's transcript, or with `agentKey` one sub-agent's, read-only in the main area. */
 export function TranscriptView({
   roomId,
   tab,
+  agentKey = null,
   disabled,
   actions,
 }: {
   roomId: string;
   tab: Tab;
+  agentKey?: string | null;
   disabled: boolean;
   actions: Actions;
 }) {
-  const transcript = useTranscript(roomId, tab.id);
+  const transcript = useTranscript(roomId, tab.id, agentKey);
+  const { cards } = useAgents(roomId, tab.id);
+  const card = (key: string) => cards.find((item) => item.agent?.key === key);
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   // Scroll position lives in a ref and follows layout changes, not effects on state.
@@ -220,11 +230,15 @@ export function TranscriptView({
     });
     observer.observe(content);
     return () => observer.disconnect();
-  }, [tab.id]);
+  }, [tab.id, agentKey]);
   const entries = transcript.entries;
-  const latestPlan = entries.findLast((entry) => entry.kind === "plan");
+  const latestPlan = agentKey
+    ? undefined
+    : entries.findLast((entry) => entry.kind === "plan" && !entry.agentKey);
   const last = entries.at(-1);
-  const busy = tabBusy(tab.status);
+  const busy = agentKey
+    ? card(agentKey)?.agent?.status === "running"
+    : tabBusy(tab.status);
   return (
     <div
       className="panel-scroll transcript"
@@ -242,7 +256,7 @@ export function TranscriptView({
             variant="ghost"
             className="transcript-older"
             disabled={transcript.loading}
-            onClick={() => loadOlder(roomId, tab.id)}
+            onClick={() => loadOlder(roomId, tab.id, agentKey)}
           >
             <ChevronsUp size={12} />
             Load earlier messages
@@ -251,7 +265,11 @@ export function TranscriptView({
         {transcript.error && (
           <p className="inline-warning">{transcript.error}</p>
         )}
-        {transcript.loaded && entries.length === 0 ? (
+        {transcript.loaded && entries.length === 0 && agentKey ? (
+          <p className="subtle transcript-empty">
+            This sub-agent has not reported any messages yet.
+          </p>
+        ) : transcript.loaded && entries.length === 0 ? (
           <ThreadWelcome
             className="h-full py-6"
             description={`Send a message to start a ${HARNESS_LABELS[tab.loadout.harness]} session in this room's repository.`}
@@ -267,6 +285,11 @@ export function TranscriptView({
               key={entry.id}
               entry={entry}
               tab={tab}
+              agent={
+                entry.agentKey && !agentKey
+                  ? (card(entry.agentKey)?.summary ?? "a sub-agent")
+                  : undefined
+              }
               latestPlan={entry.id === latestPlan?.id}
               disabled={disabled}
               streaming={

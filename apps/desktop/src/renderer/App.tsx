@@ -24,6 +24,14 @@ import { HarnessSettings } from "./components/HarnessSettings";
 import { TabsPanel } from "./components/tabs/TabsPanel";
 
 const roomBusy = (room: Room) => room.tabs.some((tab) => tabBusy(tab.status));
+const tabKey = (roomId: string) => `multiplayer:tab:${roomId}`;
+const rememberedTab = (roomId: string) => {
+  try {
+    return localStorage.getItem(tabKey(roomId));
+  } catch {
+    return null;
+  }
+};
 
 function RoomView({
   room,
@@ -40,6 +48,37 @@ function RoomView({
   const [source, setSource] = useState<Suggestion | null>(null);
   const [announcement, setAnnouncement] = useState("");
   const [invite, setInvite] = useState<string | null>(null);
+  // Mission Control and the main area both follow the active tab (KTD13).
+  const [selectedTab, setSelectedTab] = useState<string | null>(() =>
+    rememberedTab(room.id),
+  );
+  const [viewing, setViewing] = useState<{
+    tabId: string;
+    key: string;
+  } | null>(null);
+  const tab = room.tabs.find((item) => item.id === selectedTab) ?? room.tabs[0];
+  const harness = harnesses.find((item) => item.id === tab?.loadout.harness);
+  const agentKey = viewing && viewing.tabId === tab?.id ? viewing.key : null;
+  function selectTab(id: string) {
+    setSelectedTab(id);
+    setViewing(null);
+    try {
+      localStorage.setItem(tabKey(room.id), id);
+    } catch {
+      /* The selection is a convenience only. */
+    }
+  }
+  function leaveAgent() {
+    const key = agentKey;
+    setViewing(null);
+    // Focus returns to the card that opened the drill-in.
+    if (key)
+      requestAnimationFrame(() =>
+        document
+          .querySelector<HTMLElement>(`[data-agent-card="${CSS.escape(key)}"]`)
+          ?.focus(),
+      );
+  }
   const active = roomBusy(room);
   return (
     <main className="room-view">
@@ -122,6 +161,10 @@ function RoomView({
           aiPanel={
             <TabsPanel
               room={room}
+              tab={tab}
+              agentKey={agentKey}
+              onSelect={selectTab}
+              onAgentBack={leaveAgent}
               harnesses={harnesses}
               disabled={disabled}
               stale={stale}
@@ -139,16 +182,27 @@ function RoomView({
           promptPanel={
             <MissionControlPanel
               room={room}
+              tab={tab}
+              harness={harness}
+              agentKey={agentKey}
+              onSelectAgent={(key) =>
+                key && tab ? setViewing({ tabId: tab.id, key }) : leaveAgent()
+              }
               disabled={disabled}
               onUseSuggestion={(suggestion) => {
                 setDraft(suggestion.prompt);
                 setSource(suggestion);
+                setViewing(null);
                 setAnnouncement(
                   "Prompt added to the active tab's composer. Review it, then send.",
                 );
-                document
-                  .querySelector<HTMLTextAreaElement>('[aria-label="Message"]')
-                  ?.focus();
+                requestAnimationFrame(() =>
+                  document
+                    .querySelector<HTMLTextAreaElement>(
+                      '[aria-label="Message"]',
+                    )
+                    ?.focus(),
+                );
               }}
             />
           }

@@ -1,4 +1,4 @@
-import { ShieldQuestion } from "lucide-react";
+import { Bot, ShieldQuestion } from "lucide-react";
 import type { TranscriptEntry } from "../../../shared/tabs";
 import { Button } from "../ui/Button";
 
@@ -10,10 +10,13 @@ const outcome: Record<string, string> = {
 
 export function ApprovalCard({
   entry,
+  agent,
   disabled,
   onRespond,
 }: {
   entry: TranscriptEntry;
+  // The sub-agent that asked, when it was not the lead.
+  agent?: string;
   disabled: boolean;
   onRespond: (decision: "accept" | "decline") => void;
 }) {
@@ -22,8 +25,14 @@ export function ApprovalCard({
     <div
       className={`approval-card ${pending ? "" : "approval-settled"}`}
       role="region"
-      aria-label="Agent approval"
+      aria-label={agent ? `Approval for sub-agent ${agent}` : "Agent approval"}
     >
+      {agent && (
+        <span className="card-agent">
+          <Bot size={12} />
+          Sub-agent · {agent}
+        </span>
+      )}
       <strong>
         <ShieldQuestion size={13} />
         {entry.summary}

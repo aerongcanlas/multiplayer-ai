@@ -388,16 +388,23 @@ test("sub-agent entries page by agent key and cards load apart from both", async
     lead(tabId, 3, { agentKey: "task-1", summary: "sub one" }),
     lead(tabId, 4, { kind: "tool", agentKey: "task-1", summary: "sub two" }),
     lead(tabId, 5),
+    lead(tabId, 6, {
+      kind: "approval",
+      agentKey: "task-1",
+      state: "pending",
+      summary: "sub asks",
+    }),
   ]);
+  // A sub-agent's request also waits in the lead's view.
   assert.deepEqual(
     journal.transcriptPage(tabId).entries.map((entry) => entry.seq),
-    [1, 5],
+    [1, 5, 6],
   );
   assert.deepEqual(
     journal
       .transcriptPage(tabId, undefined, 200, "task-1")
       .entries.map((entry) => entry.summary),
-    ["sub one", "sub two"],
+    ["sub one", "sub two", "sub asks"],
   );
   assert.deepEqual(
     journal.agentCards(tabId).map((entry) => entry.id),
@@ -413,6 +420,6 @@ test("sub-agent entries page by agent key and cards load apart from both", async
   const [saved] = journal.agentCards(tabId);
   assert.equal(saved.agent?.status, "completed");
   assert.equal(saved.detail, "Found it");
-  assert.equal(journal.lastSeq(tabId), 5);
+  assert.equal(journal.lastSeq(tabId), 6);
   journal.close();
 });

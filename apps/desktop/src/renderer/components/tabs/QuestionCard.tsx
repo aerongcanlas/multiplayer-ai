@@ -1,4 +1,4 @@
-import { MessageCircleQuestion } from "lucide-react";
+import { Bot, MessageCircleQuestion } from "lucide-react";
 import { useState } from "react";
 import type { TranscriptEntry } from "../../../shared/tabs";
 import { Button } from "../ui/Button";
@@ -6,10 +6,13 @@ import { Button } from "../ui/Button";
 /** A harness question (a skill's multiple choice or a plan-mode clarification). */
 export function QuestionCard({
   entry,
+  agent,
   disabled,
   onAnswer,
 }: {
   entry: TranscriptEntry;
+  // The sub-agent that asked, when it was not the lead.
+  agent?: string;
   disabled: boolean;
   onAnswer: (answers: Record<string, string[]>) => void;
 }) {
@@ -43,12 +46,20 @@ export function QuestionCard({
   return (
     <form
       className={`question-card ${pending ? "" : "question-settled"}`}
-      aria-label="Harness question"
+      aria-label={
+        agent ? `Question from sub-agent ${agent}` : "Harness question"
+      }
       onSubmit={(event) => {
         event.preventDefault();
         if (complete) onAnswer(answers);
       }}
     >
+      {agent && (
+        <span className="card-agent">
+          <Bot size={12} />
+          Sub-agent · {agent}
+        </span>
+      )}
       {questions.map((question) => (
         <fieldset key={question.id} disabled={!pending || disabled}>
           <legend>

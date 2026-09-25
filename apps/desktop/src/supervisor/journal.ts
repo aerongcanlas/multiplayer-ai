@@ -125,7 +125,11 @@ export class Journal {
     });
   }
 
-  /** The lead's entries, or one sub-agent's with `agentKey`. Cards page through `agentCards`. */
+  /**
+   * The lead's entries, or one sub-agent's with `agentKey`. Sub-agent approvals and questions
+   * appear on both, since they wait on the owner in the tab (R18). Cards load through
+   * `agentCards`.
+   */
   transcriptPage(
     tabId: string,
     beforeSeq?: number,
@@ -134,12 +138,16 @@ export class Journal {
   ): TranscriptPage {
     const rows = this.db
       .prepare(
-        "SELECT body FROM transcript_entries WHERE tab_id = ? AND agent_key IS ? AND kind <> 'agent' AND seq < ? ORDER BY seq DESC LIMIT ?",
+        `SELECT body FROM transcript_entries WHERE tab_id = ? AND kind <> 'agent' AND seq < ? AND ${
+          agentKey
+            ? "agent_key = ?"
+            : "(agent_key IS NULL OR kind IN ('approval', 'question'))"
+        } ORDER BY seq DESC LIMIT ?`,
       )
       .all(
         tabId,
-        agentKey ?? null,
         beforeSeq ?? Number.MAX_SAFE_INTEGER,
+        ...(agentKey ? [agentKey] : []),
         limit + 1,
       );
     const entries = rows
