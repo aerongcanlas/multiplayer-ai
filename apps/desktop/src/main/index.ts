@@ -10,6 +10,7 @@ import {
   safeStorage,
   shell,
 } from "electron";
+import { createHash } from "node:crypto";
 import { join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
@@ -40,6 +41,18 @@ protocol.registerSchemesAsPrivileged([
 
 const testing = !app.isPackaged && process.env.MP_E2E === "1";
 const profileDirectory = app.commandLine.getSwitchValue("user-data-dir");
+// Each dev checkout (main, worktrees) gets its own profile so a branch with a newer
+// journal protocol cannot migrate data another checkout still reads.
+if (!app.isPackaged && !profileDirectory) {
+  const checkout = createHash("sha256")
+    .update(app.getAppPath())
+    .digest("hex")
+    .slice(0, 12);
+  app.setPath(
+    "userData",
+    join(app.getPath("appData"), "Multiplayer AI Dev", checkout),
+  );
+}
 if (profileDirectory) app.setPath("userData", resolve(profileDirectory));
 if (testing && process.env.MP_TEST_USER_DATA)
   app.setPath("userData", resolve(process.env.MP_TEST_USER_DATA));
