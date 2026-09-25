@@ -282,6 +282,15 @@ try {
   }
 
   await page.getByRole("button", { name: "New tab", exact: true }).click();
+  const picker = page.getByRole("menu", { name: "Open a new tab with" });
+  // The menu must render outside the tab list's scroll box, not clipped by it.
+  const box = await picker.boundingBox();
+  assert.ok(box && box.height > 90, "New tab menu must be fully visible");
+  await page.waitForTimeout(200); // Let the menu finish its fade-in.
+  await page.screenshot({ path: join(output, "02-new-tab-menu.png") });
+  await page.keyboard.press("Escape");
+  assert.equal(await picker.count(), 0);
+  await page.getByRole("button", { name: "New tab", exact: true }).click();
   await page.getByRole("menuitem", { name: "Codex", exact: true }).click();
   await page.getByRole("tab", { name: /Codex 1/ }).waitFor();
   for (let attempt = 0; attempt < 100; attempt++) {
@@ -304,6 +313,35 @@ try {
   await checkpoint(
     "Chat selection, persisted suggestion editing, attribution, and draft-only use",
   );
+
+  const suggestions = page.getByRole("region", { name: "Prompt suggestions" });
+  await suggestions
+    .getByRole("button", { name: "Dismiss", exact: true })
+    .click();
+  assert.equal(
+    await suggestions.getByRole("button", { name: "Use prompt" }).count(),
+    0,
+  );
+  await suggestions.getByRole("button", { name: "Show 1 dismissed" }).click();
+  await suggestions
+    .getByRole("button", { name: "Restore", exact: true })
+    .click();
+  await suggestions.getByRole("button", { name: "Use prompt" }).waitFor();
+  assert.equal((await snapshot()).rooms[1].suggestions.length, 1);
+  await checkpoint("Suggestions dismiss and restore on this desktop only");
+
+  const harnessToggle = page.getByRole("button", {
+    name: /^Harnesses/,
+  });
+  await harnessToggle.click();
+  assert.equal(await harnessToggle.getAttribute("aria-expanded"), "false");
+  assert.equal(
+    await page.getByRole("region", { name: "Harness settings" }).count(),
+    0,
+  );
+  await harnessToggle.click();
+  await page.getByRole("region", { name: "Harness settings" }).waitFor();
+  await checkpoint("Sidebar sections collapse and expand");
 
   await page.keyboard.press("Control+b");
   assert.equal(

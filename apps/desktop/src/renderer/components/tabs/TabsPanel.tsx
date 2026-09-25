@@ -13,6 +13,7 @@ import {
 import { perform } from "../../lib/desktop-store";
 import { useAgents } from "../../lib/agents-store";
 import { HarnessStatus } from "../HarnessSettings";
+import { HarnessPicker } from "./HarnessPicker";
 import { PromptInput } from "../PromptInput";
 import { Button } from "../ui/Button";
 import { LoadoutBar } from "./LoadoutBar";
@@ -100,7 +101,6 @@ export function TabsPanel({
   onSourceClear: () => void;
   onSent: (message: string) => void;
 }) {
-  const [picking, setPicking] = useState(false);
   const [closing, setClosing] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [title, setTitle] = useState("");
@@ -117,7 +117,6 @@ export function TabsPanel({
   );
 
   async function open(id: HarnessId) {
-    setPicking(false);
     const known = new Set(room.tabs.map((item) => item.id));
     const snapshot = await perform(() => window.desktop.openTab(room.id, id));
     const created = snapshot?.rooms
@@ -183,113 +182,90 @@ export function TabsPanel({
 
   return (
     <section className="panel activity-panel tabs-panel" aria-label="AI tabs">
-      <header className="tab-strip" role="tablist" aria-label="Chat tabs">
-        {room.tabs.map((item) =>
-          renaming === item.id ? (
-            <form
-              key={item.id}
-              className="tab-rename"
-              onSubmit={(event) => {
-                event.preventDefault();
-                setRenaming(null);
-                if (title.trim() && title.trim() !== item.title)
-                  void perform(() =>
-                    window.desktop.renameTab(room.id, item.id, title.trim()),
-                  );
-              }}
-            >
-              <input
-                autoFocus
-                aria-label="Tab name"
-                maxLength={80}
-                value={title}
-                onChange={(event) => setTitle(event.target.value)}
-                onBlur={() => setRenaming(null)}
-                onKeyDown={(event) => {
-                  if (event.key === "Escape") setRenaming(null);
-                }}
-              />
-            </form>
-          ) : (
-            <div
-              key={item.id}
-              className={`tab-chip ${item.id === tab?.id ? "tab-active" : ""}`}
-            >
-              <button
-                type="button"
-                role="tab"
-                aria-selected={item.id === tab?.id}
-                title={`${item.title} · ${STATUS_LABELS[item.status]} · double-click to rename`}
-                onClick={() => onSelect(item.id)}
-                onDoubleClick={() => {
-                  setTitle(item.title);
-                  setRenaming(item.id);
+      <header className="tab-strip">
+        <div className="tab-list" role="tablist" aria-label="Chat tabs">
+          {room.tabs.map((item) =>
+            renaming === item.id ? (
+              <form
+                key={item.id}
+                className="tab-rename"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  setRenaming(null);
+                  if (title.trim() && title.trim() !== item.title)
+                    void perform(() =>
+                      window.desktop.renameTab(room.id, item.id, title.trim()),
+                    );
                 }}
               >
-                <span
-                  className={`tab-dot status-${item.status}`}
-                  aria-label={STATUS_LABELS[item.status]}
+                <input
+                  autoFocus
+                  aria-label="Tab name"
+                  maxLength={80}
+                  value={title}
+                  onChange={(event) => setTitle(event.target.value)}
+                  onBlur={() => setRenaming(null)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") setRenaming(null);
+                  }}
                 />
-                <span className="tab-title">{item.title}</span>
-                {Boolean(item.runningAgents) && (
-                  <span
-                    className="tab-agents"
-                    title="Sub-agents still running in this tab"
-                  >
-                    {item.runningAgents} running
-                  </span>
-                )}
-                {Boolean(item.agentRequests) && (
-                  <span
-                    className="tab-needs"
-                    role="img"
-                    aria-label="A sub-agent needs you"
-                    title="A sub-agent is waiting for you"
-                  />
-                )}
-              </button>
-              <Button
-                size="icon-xs"
-                variant="ghost"
-                aria-label={`Close ${item.title}`}
-                disabled={disabled}
-                onClick={() => void close(item, false)}
+              </form>
+            ) : (
+              <div
+                key={item.id}
+                className={`tab-chip ${item.id === tab?.id ? "tab-active" : ""}`}
               >
-                <X size={11} />
-              </Button>
-            </div>
-          ),
-        )}
-        <div className="tab-new">
-          <Button
-            size="icon-xs"
-            variant="ghost"
-            aria-label="New tab"
-            aria-expanded={picking}
-            disabled={disabled}
-            onClick={() => setPicking(!picking)}
-          >
-            <Plus size={14} />
-          </Button>
-          {picking && (
-            <div
-              className="tab-picker"
-              role="menu"
-              aria-label="Choose a harness"
-            >
-              {HARNESS_IDS.map((id) => (
                 <button
                   type="button"
-                  role="menuitem"
-                  key={id}
-                  onClick={() => void open(id)}
+                  role="tab"
+                  aria-selected={item.id === tab?.id}
+                  title={`${item.title} · ${STATUS_LABELS[item.status]} · double-click to rename`}
+                  onClick={() => onSelect(item.id)}
+                  onDoubleClick={() => {
+                    setTitle(item.title);
+                    setRenaming(item.id);
+                  }}
                 >
-                  {HARNESS_LABELS[id]}
+                  <span
+                    className={`tab-dot status-${item.status}`}
+                    aria-label={STATUS_LABELS[item.status]}
+                  />
+                  <span className="tab-title">{item.title}</span>
+                  {Boolean(item.runningAgents) && (
+                    <span
+                      className="tab-agents"
+                      title="Sub-agents still running in this tab"
+                    >
+                      {item.runningAgents} running
+                    </span>
+                  )}
+                  {Boolean(item.agentRequests) && (
+                    <span
+                      className="tab-needs"
+                      role="img"
+                      aria-label="A sub-agent needs you"
+                      title="A sub-agent is waiting for you"
+                    />
+                  )}
                 </button>
-              ))}
-            </div>
+                <Button
+                  size="icon-xs"
+                  variant="ghost"
+                  aria-label={`Close ${item.title}`}
+                  disabled={disabled}
+                  onClick={() => void close(item, false)}
+                >
+                  <X size={11} />
+                </Button>
+              </div>
+            ),
           )}
         </div>
+        <HarnessPicker
+          harnesses={harnesses}
+          disabled={disabled}
+          onPick={(id) => void open(id)}
+        />
         {tab && stoppable && (
           <Button
             size="xs"

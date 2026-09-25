@@ -142,22 +142,98 @@ summary:focus-visible {
 .sidebar-collapsed {
   width: 38px;
 }
-.sidebar-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 14px 10px 18px;
-  color: #92929e;
-  font-size: 10px;
-  font-weight: 650;
-  letter-spacing: 1px;
-}
-.room-list {
+/* Sidebar groups: each one a divided, collapsible block; the stack scrolls above the footer. */
+.sidebar-sections {
   display: flex;
   flex: 1;
   min-height: 0;
   flex-direction: column;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+.sidebar-section {
+  flex-shrink: 0;
+  padding-bottom: 6px;
+}
+.sidebar-section + .sidebar-section {
+  border-top: 1px solid #34343a;
+}
+/* Account and harnesses sit at the bottom; rooms take the space above. */
+.sidebar-section[data-section="account"] {
+  margin-top: auto;
+}
+.sidebar-section-closed {
+  padding-bottom: 0;
+}
+.sidebar-section-heading {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
   gap: 4px;
+  padding: 8px 10px 4px 8px;
+  background: #1b1b1d;
+}
+.sidebar-section-heading h2 {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font: inherit;
+}
+.sidebar-section-heading h2 button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 28px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 6px;
+  color: #a6a6b1;
+  background: none;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+.sidebar-section-heading h2 button:hover {
+  color: #e4e4ea;
+  background: #26262b;
+}
+.sidebar-section-heading h2 button svg {
+  flex-shrink: 0;
+  transition: transform 140ms ease;
+}
+.sidebar-section-heading h2 button[aria-expanded="false"] svg {
+  transform: rotate(-90deg);
+}
+.sidebar-section-count {
+  min-width: 18px;
+  padding: 1px 6px;
+  border-radius: 9px;
+  color: #c9c9d2;
+  background: #2c2c33;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-align: center;
+}
+.sidebar-section .shared-connection {
+  margin: 0;
+  padding: 4px 14px 8px;
+  border: 0;
+  border-radius: 0;
+}
+.sidebar-section .harness-row:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+.room-list {
+  display: flex;
+  max-height: 45vh;
+  flex-direction: column;
+  gap: 2px;
   padding: 0 9px;
   overflow: auto;
 }
@@ -745,11 +821,26 @@ summary:focus-visible {
 }
 .card-meta {
   display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 6px;
-  color: #aaa3bb;
-  font-size: 9px;
+  color: #b3adc3;
+  font-size: 10px;
   margin-bottom: 7px;
+}
+.suggestion-card .card-meta > span:nth-child(2) {
+  margin-left: auto;
+}
+.suggestion-dismissed {
+  border-style: dashed;
+  background: #222127;
+}
+.suggestion-dismissed .suggestion-prompt {
+  color: #aaa6b3;
+}
+.suggestion-toggle {
+  align-self: flex-start;
+  color: #c3bdd0;
 }
 .suggestion-prompt {
   white-space: pre-wrap;
@@ -1078,15 +1169,25 @@ summary:focus-visible {
 }
 
 /* Chat tabs */
+/* Only the tab list scrolls; the new-tab menu sits outside it so it is never clipped. */
 .tab-strip {
+  position: relative;
+  z-index: 5;
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
   height: 45px;
   flex-shrink: 0;
   padding: 0 10px;
-  border-bottom: 1px solid #ffffff07;
+  border-bottom: 1px solid #ffffff14;
+}
+.tab-list {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
   overflow-x: auto;
+  scrollbar-width: thin;
 }
 .tab-chip {
   display: flex;
@@ -1160,34 +1261,111 @@ summary:focus-visible {
 }
 .tab-new {
   position: relative;
-  margin-left: 4px;
+  flex-shrink: 0;
+}
+.tab-new-trigger {
+  color: #c4c4cc;
+}
+.tab-new-trigger[aria-expanded="true"] {
+  color: #f4f4f7;
+  background: #2f2f37;
 }
 .tab-picker {
   position: absolute;
-  z-index: 20;
-  top: calc(100% + 4px);
+  z-index: 30;
+  top: calc(100% + 6px);
   left: 0;
   display: flex;
   flex-direction: column;
-  min-width: 150px;
-  padding: 4px;
-  border: 1px solid #3e3e46;
+  gap: 2px;
+  width: 248px;
+  padding: 6px;
+  border: 1px solid #4a4a55;
+  border-radius: 10px;
+  background: #232329;
+  box-shadow:
+    0 12px 32px #000a,
+    0 0 0 1px #0006;
+  animation: tab-picker-in 120ms ease-out;
+}
+@keyframes tab-picker-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+.tab-picker-heading {
+  margin: 2px 8px 6px;
+  color: #a9a9b4;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+.tab-picker-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 7px 8px;
+  border: 1px solid transparent;
   border-radius: 7px;
-  background: #222227;
-  box-shadow: 0 8px 22px #0006;
-}
-.tab-picker button {
-  text-align: left;
-  padding: 6px 9px;
-  border: 0;
-  border-radius: 5px;
-  color: #dcdce2;
+  color: #ececf1;
   background: none;
-  font-size: 12px;
+  text-align: left;
 }
-.tab-picker button:hover,
-.tab-picker button:focus-visible {
-  background: #2f2f37;
+.tab-picker-item:hover {
+  background: #2f2f38;
+}
+.tab-picker-item:focus-visible {
+  outline: 2px solid #93b4e6;
+  outline-offset: -2px;
+  background: #2f2f38;
+}
+.tab-picker-mark {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: 7px;
+  font-size: 13px;
+  font-weight: 700;
+}
+.tab-picker-mark.harness-codex {
+  color: #dbe6fb;
+  background: #2f4466;
+}
+.tab-picker-mark.harness-claude {
+  color: #fbe3d6;
+  background: #6a3c2a;
+}
+.tab-picker-text {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+.tab-picker-label {
+  font-size: 13px;
+  font-weight: 550;
+}
+.tab-picker-state {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  line-height: 1.35;
+}
+.tab-picker-state.is-ready {
+  color: #9fd0ad;
+}
+.tab-picker-state.is-blocked {
+  color: #e8c27d;
+}
+.tab-picker-chevron {
+  color: #8c8c97;
 }
 .tab-stop {
   margin-left: auto;
@@ -1471,17 +1649,11 @@ summary:focus-visible {
   border-color: #4a4a52;
   background: #222228;
 }
-/* Harness settings scroll inside the sidebar so the footer stays in place. */
+/* Sidebar sections scroll inside the sidebar so the footer stays in place. */
 .sidebar {
   overflow: hidden;
 }
-.room-list {
-  min-height: 72px;
-}
 .harness-settings {
-  flex-shrink: 1;
-  min-height: 90px;
-  overflow-y: auto;
   flex-wrap: nowrap;
 }
 .harness-settings > * {

@@ -1,4 +1,4 @@
-import { Cpu, FolderOpen, LogIn, RefreshCw, RotateCcw } from "lucide-react";
+import { FolderOpen, LogIn, RefreshCw, RotateCcw } from "lucide-react";
 import type { HarnessState } from "../../shared/tabs";
 import { perform } from "../lib/desktop-store";
 import { Button } from "./ui/Button";
@@ -137,10 +137,6 @@ export function HarnessSettings({
       className="shared-connection harness-settings"
       aria-label="Harness settings"
     >
-      <div className="shared-account-heading">
-        <Cpu size={15} />
-        <strong>Harnesses</strong>
-      </div>
       {harnesses.map((harness) => (
         <div
           className="harness-row"

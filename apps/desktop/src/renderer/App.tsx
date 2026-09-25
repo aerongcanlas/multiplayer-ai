@@ -20,6 +20,7 @@ import { RoomWorkspace } from "@multiplayer-ai/ui/layouts/room-workspace";
 import { GroupChatPanel } from "./components/GroupChatPanel";
 import { MissionControlPanel } from "./components/MissionControlPanel";
 import { SharedConnection } from "./components/SharedConnection";
+import { SidebarSection } from "./components/SidebarSection";
 import { HarnessSettings } from "./components/HarnessSettings";
 import { TabsPanel } from "./components/tabs/TabsPanel";
 
@@ -322,99 +323,121 @@ export default function App() {
         >
           {sidebarOpen ? (
             <>
-              <div className="sidebar-heading">
-                <span>ROOMS</span>
-                <Button
-                  size="icon-xs"
-                  variant="ghost"
-                  aria-label="New room"
-                  disabled={disabled}
-                  onClick={() => {
-                    setCreating(!creating);
-                    setRoomScope(
-                      snapshot?.collaboration?.auth === "signed_in"
-                        ? "shared"
-                        : "local",
-                    );
-                  }}
-                >
-                  <Plus size={16} />
-                </Button>
-              </div>
-              {creating && (
-                <form
-                  className="create-room"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    void createRoom();
-                  }}
-                >
-                  <Input
-                    autoFocus
-                    aria-label="Room name"
-                    maxLength={80}
-                    placeholder="Room name"
-                    value={roomName}
-                    onChange={(event) => setRoomName(event.target.value)}
-                  />
-                  <select
-                    aria-label="Room visibility"
-                    value={roomScope}
-                    onChange={(event) =>
-                      setRoomScope(event.target.value as "local" | "shared")
-                    }
-                  >
-                    <option value="local">Local to this desktop</option>
-                    <option
-                      value="shared"
-                      disabled={snapshot?.collaboration?.auth !== "signed_in"}
-                    >
-                      Shared with members
-                    </option>
-                  </select>
-                  <div>
+              <div className="sidebar-sections">
+                <SidebarSection
+                  id="rooms"
+                  title="Rooms"
+                  count={snapshot?.rooms.length}
+                  action={
                     <Button
-                      size="xs"
-                      type="submit"
-                      disabled={disabled || !roomName.trim()}
-                    >
-                      Create room
-                    </Button>
-                    <Button
-                      size="xs"
+                      size="icon-xs"
                       variant="ghost"
-                      onClick={() => setCreating(false)}
+                      aria-label="New room"
+                      title="New room"
+                      aria-expanded={creating}
+                      disabled={disabled}
+                      onClick={() => {
+                        setCreating(!creating);
+                        setRoomScope(
+                          snapshot?.collaboration?.auth === "signed_in"
+                            ? "shared"
+                            : "local",
+                        );
+                      }}
                     >
-                      Cancel
+                      <Plus size={16} />
                     </Button>
-                  </div>
-                </form>
-              )}
-              <nav className="room-list" aria-label="Rooms">
-                {snapshot?.rooms.map((item) => (
-                  <button
-                    type="button"
-                    key={item.id}
-                    aria-current={item.id === room?.id ? "page" : undefined}
-                    onClick={() => selectRoom(item.id)}
-                  >
-                    {item.shared ? <Users size={15} /> : <Hash size={15} />}
-                    <span>{item.name}</span>
-                    {roomBusy(item) && (
-                      <span className="room-running" aria-label="Tab running" />
-                    )}
-                  </button>
-                ))}
-              </nav>
-              <SharedConnection
-                connection={snapshot?.collaboration}
-                disabled={disabled}
-                onRoom={selectRoom}
-              />
-              <HarnessSettings
-                harnesses={snapshot?.harnesses ?? []}
-                disabled={disabled}
-              />
+                  }
+                >
+                  {creating && (
+                    <form
+                      className="create-room"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        void createRoom();
+                      }}
+                    >
+                      <Input
+                        autoFocus
+                        aria-label="Room name"
+                        maxLength={80}
+                        placeholder="Room name"
+                        value={roomName}
+                        onChange={(event) => setRoomName(event.target.value)}
+                      />
+                      <select
+                        aria-label="Room visibility"
+                        value={roomScope}
+                        onChange={(event) =>
+                          setRoomScope(event.target.value as "local" | "shared")
+                        }
+                      >
+                        <option value="local">Local to this desktop</option>
+                        <option
+                          value="shared"
+                          disabled={
+                            snapshot?.collaboration?.auth !== "signed_in"
+                          }
+                        >
+                          Shared with members
+                        </option>
+                      </select>
+                      <div>
+                        <Button
+                          size="xs"
+                          type="submit"
+                          disabled={disabled || !roomName.trim()}
+                        >
+                          Create room
+                        </Button>
+                        <Button
+                          size="xs"
+                          variant="ghost"
+                          onClick={() => setCreating(false)}
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    </form>
+                  )}
+                  <nav className="room-list" aria-label="Rooms">
+                    {snapshot?.rooms.map((item) => (
+                      <button
+                        type="button"
+                        key={item.id}
+                        aria-current={item.id === room?.id ? "page" : undefined}
+                        onClick={() => selectRoom(item.id)}
+                      >
+                        {item.shared ? <Users size={15} /> : <Hash size={15} />}
+                        <span>{item.name}</span>
+                        {roomBusy(item) && (
+                          <span
+                            className="room-running"
+                            aria-label="Tab running"
+                          />
+                        )}
+                      </button>
+                    ))}
+                  </nav>
+                </SidebarSection>
+                <SidebarSection id="account" title="Account">
+                  <SharedConnection
+                    connection={snapshot?.collaboration}
+                    disabled={disabled}
+                    onRoom={selectRoom}
+                  />
+                </SidebarSection>
+                <SidebarSection
+                  id="harnesses"
+                  title="Harnesses"
+                  count={snapshot?.harnesses?.length}
+                >
+                  <HarnessSettings
+                    harnesses={snapshot?.harnesses ?? []}
+                    disabled={disabled}
+                  />
+                </SidebarSection>
+              </div>
               <div className="sidebar-footer">
                 <div className="local-avatar">Y</div>
                 <div>
