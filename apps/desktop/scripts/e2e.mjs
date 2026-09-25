@@ -189,6 +189,7 @@ try {
       "sendToTab",
       "stopTab",
       "loadTranscript",
+      "loadAgents",
       "resetTabSession",
       "respondToTabApproval",
       "answerQuestion",
