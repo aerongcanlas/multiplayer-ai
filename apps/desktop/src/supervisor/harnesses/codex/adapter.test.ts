@@ -10,6 +10,7 @@ import {
   HarnessError,
   type HarnessEvent,
   type HarnessSession,
+  type SessionEvent,
 } from "../contract";
 import { launchEnvironment } from "../environment";
 import type { Loadout } from "../../../shared/tabs";
@@ -81,6 +82,7 @@ async function setup(
     adapter: CodexAdapter,
     extra: Partial<Loadout> = {},
     sessionId?: string,
+    listener?: (event: SessionEvent) => void,
   ) =>
     adapter.open({
       ...context,
@@ -88,6 +90,7 @@ async function setup(
       cwd: dir,
       loadout: { ...loadout, ...extra },
       ...(sessionId ? { sessionId } : {}),
+      ...(listener ? { listener } : {}),
     });
   return { dir, make, context, log, requests, answers, open };
 }
@@ -491,4 +494,185 @@ test("the shared process closes when idle and stays closed after shutdown", asyn
     2,
   );
   adapter.close();
+});
+
+const agentEvents = (events: SessionEvent[], key?: string) =>
+  events.filter(
+    (event): event is Extract<SessionEvent, { type: "agent" }> =>
+      event.type === "agent" && (!key || event.key === key),
+  );
+const until = async (check: () => boolean, label: string) => {
+  for (let attempt = 0; attempt < 400; attempt++) {
+    if (check()) return;
+    await wait(10);
+  }
+  throw new Error(`Timed out waiting for ${label}.`);
+};
+
+test("sub-agent threads register under their parent, and their approvals outlive the lead's turn", async () => {
+  const setup_ = await setup();
+  const adapter = setup_.make();
+  const heard: SessionEvent[] = [];
+  try {
+    const session = await setup_.open(adapter, {}, undefined, (event) =>
+      heard.push(event),
+    );
+    const events = await run(session, "FIXTURE_AGENTS");
+    const lead = session.sessionId!;
+    const keys = [...new Set(agentEvents(heard).map((event) => event.key))];
+    // The scout and its nested reader; the stray thread is not this tab's.
+    assert.equal(keys.length, 2);
+    const [scout, reader] = keys;
+    assert.notEqual(scout, lead);
+    const scoutEvents = agentEvents(heard, scout);
+    assert.equal(scoutEvents[0].status, "running");
+    assert.equal(scoutEvents[0].parentKey, undefined);
+    assert.ok(scoutEvents.some((event) => event.name === "Scout"));
+    assert.ok(scoutEvents.some((event) => event.agentType === "explorer"));
+    assert.ok(
+      scoutEvents.some(
+        (event) =>
+          event.description === "Inspect the checkout" &&
+          event.model === "fixture-codex-mini",
+      ),
+    );
+    const readerEvents = agentEvents(heard, reader);
+    assert.equal(readerEvents[0].parentKey, scout);
+    assert.equal(readerEvents.at(-1)?.status, "completed");
+    assert.equal(readerEvents.at(-1)?.summary, "A short README.");
+    assert.ok(
+      heard.some(
+        (event) =>
+          event.type === "message" &&
+          event.agent === reader &&
+          event.text === "A short README.",
+      ),
+    );
+    // A request from an unknown thread is still rejected.
+    assert.ok(
+      (await setup_.answers("stray approval"))[0].result &&
+        "error" in
+          ((await setup_.answers("stray approval"))[0].result as object),
+    );
+    // The lead's turn ended while the scout's approval waits.
+    assert.match(text(events, "assistant"), /Fixture reply/);
+    const approval = heard.find((event) => event.type === "approval");
+    assert.equal(approval?.type === "approval" && approval.agent, scout);
+    session.respond(
+      approval?.type === "approval" ? approval.request : "",
+      "accept",
+    );
+    await until(
+      () => agentEvents(heard, scout).at(-1)?.status === "completed",
+      "scout completion",
+    );
+    assert.equal(agentEvents(heard, scout).at(-1)?.summary, "Found README.md.");
+    assert.ok(
+      heard.some(
+        (event) =>
+          event.type === "tool" &&
+          event.agent === scout &&
+          /ls/.test(event.summary),
+      ),
+    );
+    // Codex then wakes the lead with a turn of its own.
+    await until(
+      () => heard.some((event) => event.type === "turn.completed"),
+      "harness turn",
+    );
+    const woke = heard.slice(
+      heard.findIndex((event) => event.type === "turn.started"),
+    );
+    assert.deepEqual(
+      woke.filter((event) => event.type !== "text").map((event) => event.type),
+      ["turn.started", "message", "turn.completed"],
+    );
+    // KTD15: a follow-up to the finished scout sets its card running again.
+    await run(session, "FIXTURE_FOLLOWUP");
+    const after = agentEvents(heard, scout)
+      .map((event) => event.status)
+      .filter(Boolean);
+    assert.deepEqual(after.slice(-3), ["completed", "running", "completed"]);
+    assert.equal(agentEvents(heard, scout).at(-1)?.summary, "Checked again.");
+  } finally {
+    adapter.close();
+  }
+});
+
+test("the lead's plan updates become steps, and a sub-agent's never do", async () => {
+  const setup_ = await setup();
+  const adapter = setup_.make();
+  const heard: SessionEvent[] = [];
+  try {
+    const session = await setup_.open(
+      adapter,
+      { planMode: true },
+      undefined,
+      (event) => heard.push(event),
+    );
+    const events = await run(session, "Plan", { ...loadout, planMode: true });
+    const steps = events.find((event) => event.type === "steps");
+    assert.deepEqual(steps?.type === "steps" && steps, {
+      type: "steps",
+      steps: [{ text: "Inspect the repository", status: "pending" }],
+      explanation: "Fixture plan",
+    });
+    assert.equal(
+      heard.some((event) => event.type === "steps"),
+      false,
+    );
+  } finally {
+    adapter.close();
+  }
+});
+
+test("Stop interrupts the lead turn and each running sub-agent turn", async () => {
+  const setup_ = await setup();
+  const adapter = setup_.make();
+  const heard: SessionEvent[] = [];
+  try {
+    const session = await setup_.open(adapter, {}, undefined, (event) =>
+      heard.push(event),
+    );
+    const turn = run(session, "FIXTURE_AGENTS FIXTURE_SLOW");
+    await until(
+      () => heard.some((event) => event.type === "approval"),
+      "scout approval",
+    );
+    await session.stop();
+    await turn;
+    const interrupts = await setup_.requests("turn/interrupt");
+    const scout = agentEvents(heard)[0].key;
+    assert.deepEqual(
+      interrupts.map((entry) => entry.params?.threadId).sort(),
+      [session.sessionId, scout].sort(),
+    );
+    assert.deepEqual((await setup_.answers("sub-agent approval"))[0].result, {
+      decision: "cancel",
+    });
+    await until(
+      () => agentEvents(heard, scout).at(-1)?.status === "stopped",
+      "stopped scout",
+    );
+  } finally {
+    adapter.close();
+  }
+});
+
+test("a process exit with no turn reports a crash for the tab", async () => {
+  const setup_ = await setup();
+  const adapter = setup_.make();
+  const heard: SessionEvent[] = [];
+  try {
+    const session = await setup_.open(adapter, {}, undefined, (event) =>
+      heard.push(event),
+    );
+    await run(session, "FIXTURE_AGENTS FIXTURE_EXIT_LATER");
+    await until(
+      () => heard.some((event) => event.type === "crashed"),
+      "crash report",
+    );
+  } finally {
+    adapter.close();
+  }
 });

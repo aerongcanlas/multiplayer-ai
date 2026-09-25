@@ -1,7 +1,9 @@
 // Local Codex app-server fixture speaking the 0.155.1 method names. It never makes network requests
 // or runs model commands. Prompt markers select behavior: FIXTURE_APPROVAL, FIXTURE_QUESTION,
-// FIXTURE_PERMISSIONS, FIXTURE_ELICIT, FIXTURE_USAGE, FIXTURE_CRASH, FIXTURE_SLOW, and
-// FIXTURE_UNKNOWN_REQUEST.
+// FIXTURE_PERMISSIONS, FIXTURE_ELICIT, FIXTURE_USAGE, FIXTURE_CRASH, FIXTURE_SLOW,
+// FIXTURE_UNKNOWN_REQUEST, FIXTURE_AGENTS (a sub-agent with a nested one whose command approval
+// outlives the lead's turn; once it finishes Codex wakes the lead on its own), FIXTURE_FOLLOWUP (more
+// work for that sub-agent), and FIXTURE_EXIT_LATER (the process exits after the turn).
 // MP_FIXTURE_STATE persists threads so a restarted fixture can resume them; MP_FIXTURE_LOG records
 // every request, the launch arguments, and the environment for tests to inspect.
 import { createInterface } from "node:readline";
@@ -95,10 +97,142 @@ function command(threadId, turnId, text) {
   });
 }
 
+// Sub-agent threads by the lead thread that spawned them.
+const subAgents = new Map();
+const started = (threadId, turnId) =>
+  notify("turn/started", {
+    threadId,
+    turn: { id: turnId, status: "inProgress", items: [] },
+  });
+const collab = (tool, sender, receivers, prompt, extra = {}) => ({
+  type: "collabAgentToolCall",
+  id: randomUUID(),
+  tool,
+  status: "inProgress",
+  senderThreadId: sender,
+  receiverThreadIds: receivers,
+  prompt,
+  model: null,
+  reasoningEffort: null,
+  agentsStates: {},
+  ...extra,
+});
+
+async function spawnAgents(lead, leadTurn) {
+  const sub = randomUUID();
+  subAgents.set(lead, sub);
+  const spawn = collab("spawnAgent", lead, [], "Inspect the checkout", {
+    model: "fixture-codex-mini",
+  });
+  notify("item/started", { threadId: lead, turnId: leadTurn, item: spawn });
+  notify("thread/started", {
+    thread: {
+      id: sub,
+      parentThreadId: lead,
+      agentNickname: "Scout",
+      agentRole: "explorer",
+    },
+  });
+  // A thread spawned elsewhere never reaches this tab.
+  notify("thread/started", {
+    thread: {
+      id: randomUUID(),
+      parentThreadId: "unrelated-thread",
+      agentNickname: "Stray",
+      agentRole: null,
+    },
+  });
+  notify("item/completed", {
+    threadId: lead,
+    turnId: leadTurn,
+    item: { ...spawn, status: "completed", receiverThreadIds: [sub] },
+  });
+  const subTurn = randomUUID();
+  running.set(sub, subTurn);
+  started(sub, subTurn);
+  const nested = randomUUID();
+  notify("thread/started", {
+    thread: {
+      id: nested,
+      parentThreadId: sub,
+      agentNickname: "Reader",
+      agentRole: null,
+    },
+  });
+  const nestedTurn = randomUUID();
+  started(nested, nestedTurn);
+  message(nested, nestedTurn, "A short README.");
+  complete(nested, nestedTurn);
+  const stray = await ask("item/commandExecution/requestApproval", {
+    threadId: "stray-thread",
+    turnId: randomUUID(),
+    itemId: randomUUID(),
+    command: "ls",
+  });
+  log({ type: "answer", method: "stray approval", result: stray });
+  // The sub-agent's approval does not hold the lead's turn.
+  void (async () => {
+    const result = await ask("item/commandExecution/requestApproval", {
+      threadId: sub,
+      turnId: subTurn,
+      itemId: randomUUID(),
+      command: "ls",
+      reason: "Sub-agent approval",
+    });
+    log({ type: "answer", method: "sub-agent approval", result });
+    if (result?.decision === "cancel") return;
+    command(sub, subTurn, "ls");
+    message(sub, subTurn, "Found README.md.");
+    complete(sub, subTurn);
+    notify("item/completed", {
+      threadId: lead,
+      turnId: running.get(lead) ?? "",
+      item: {
+        type: "subAgentActivity",
+        id: randomUUID(),
+        kind: "completed",
+        agentThreadId: sub,
+        agentPath: "/scout",
+      },
+    });
+    if (running.has(lead)) return;
+    const wake = randomUUID();
+    running.set(lead, wake);
+    started(lead, wake);
+    message(lead, wake, "The scout reported back.");
+    complete(lead, wake);
+  })();
+}
+
+function followUp(lead, leadTurn) {
+  const sub = subAgents.get(lead);
+  if (!sub) return;
+  const call = collab("followupTask", lead, [sub], "Check again");
+  notify("item/started", { threadId: lead, turnId: leadTurn, item: call });
+  const subTurn = randomUUID();
+  running.set(sub, subTurn);
+  started(sub, subTurn);
+  message(sub, subTurn, "Checked again.");
+  complete(sub, subTurn);
+  notify("item/completed", {
+    threadId: lead,
+    turnId: leadTurn,
+    item: {
+      ...call,
+      status: "completed",
+      agentsStates: {
+        [sub]: { status: "completed", message: "Checked again." },
+      },
+    },
+  });
+}
+
 async function turn(threadId, turnId, prompt, params) {
   const thread = threads.get(threadId) ?? { turns: 0 };
   const planMode = params.collaborationMode?.mode === "plan";
   if (prompt.includes("FIXTURE_CRASH")) process.exit(1);
+  if (prompt.includes("FIXTURE_AGENTS")) await spawnAgents(threadId, turnId);
+  if (prompt.includes("FIXTURE_FOLLOWUP")) followUp(threadId, turnId);
   if (prompt.includes("FIXTURE_SLOW") || prompt.includes("FIXTURE_CANCEL"))
     return;
   if (prompt.includes("FIXTURE_USAGE")) {
@@ -235,6 +369,8 @@ async function turn(threadId, turnId, prompt, params) {
   thread.turns += 1;
   saveThreads();
   complete(threadId, turnId);
+  if (prompt.includes("FIXTURE_EXIT_LATER"))
+    setTimeout(() => process.exit(1), 50);
 }
 
 createInterface({ input: process.stdin })

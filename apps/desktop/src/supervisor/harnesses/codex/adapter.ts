@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import type { HarnessQuestion, Loadout } from "../../../shared/tabs";
+import type { HarnessQuestion, Loadout, PlanStep } from "../../../shared/tabs";
 import {
   HarnessError,
   type HarnessAdapter,
@@ -8,6 +8,7 @@ import {
   type Inspection,
   type LaunchContext,
   type OpenRequest,
+  type SessionEvent,
 } from "../contract";
 import { EventQueue } from "../queue";
 import type { InitializeParams } from "./generated/InitializeParams";
@@ -171,7 +172,37 @@ interface PendingRequest {
   rpc: RpcRequest;
   // Elicitation answers are converted back to the requested schema's types.
   fields?: Record<string, string>;
+  // The sub-agent thread that asked; its requests outlive the lead's turn (KTD5).
+  agent?: string;
 }
+
+/** A sub-agent thread spawned from the tab's thread or from another sub-agent (KTD11). */
+interface SubAgent {
+  parentKey?: string;
+  turnId: string;
+  running: boolean;
+  // Its latest agent message, reported as the card's summary when it finishes.
+  last: string;
+}
+
+const STEP_STATUS: Record<string, PlanStep["status"]> = {
+  pending: "pending",
+  inProgress: "active",
+  completed: "done",
+};
+// Collab calls that send a finished sub-agent more work (KTD15).
+const REENGAGE = new Set([
+  "sendInput",
+  "followupTask",
+  "resumeAgent",
+  "sendMessage",
+]);
+const AGENT_STATE: Record<string, "completed" | "failed" | "stopped"> = {
+  completed: "completed",
+  errored: "failed",
+  interrupted: "stopped",
+  shutdown: "stopped",
+};
 
 class CodexSession implements HarnessSession {
   sessionId: string | undefined;
@@ -184,6 +215,12 @@ class CodexSession implements HarnessSession {
   private closed = false;
   // A new thread's ID is reported on the first turn so the tab can resume it later.
   private announced: boolean;
+  private agents = new Map<string, SubAgent>();
+  // A lead turn Codex started by itself (KTD14), and its events held until the owner's turn has
+  // fully ended on the host.
+  private harnessTurn = false;
+  private backlog: SessionEvent[] = [];
+  private flushing = false;
 
   constructor(
     private adapter: CodexAdapter,
@@ -200,6 +237,89 @@ class CodexSession implements HarnessSession {
 
   get active() {
     return Boolean(this.queue && !this.queue.ended);
+  }
+
+  /** Whether a thread's notifications and requests belong to this tab. */
+  owns(threadId: string) {
+    return threadId === this.sessionId || this.agents.has(threadId);
+  }
+
+  private listen(event: SessionEvent) {
+    if (!this.closed) this.request.listener?.(event);
+  }
+
+  private harness(event: SessionEvent) {
+    if (this.queue || this.flushing) this.backlog.push(event);
+    else this.listen(event);
+  }
+
+  private flush() {
+    if (!this.backlog.length || this.flushing) return;
+    this.flushing = true;
+    setImmediate(() => {
+      this.flushing = false;
+      for (const event of this.backlog.splice(0)) this.listen(event);
+    });
+  }
+
+  /** Where a thread's events go: a sub-agent's card, the owner's turn, or a harness turn. */
+  private out(threadId: string): ((event: HarnessEvent) => void) | undefined {
+    if (threadId !== this.sessionId)
+      return this.agents.has(threadId)
+        ? (event) => this.listen({ ...event, agent: threadId } as HarnessEvent)
+        : undefined;
+    const queue = this.active ? this.queue! : undefined;
+    if (queue) return (event) => queue.push(event);
+    if (this.harnessTurn) return (event) => this.harness(event);
+    return undefined;
+  }
+
+  /** Registers a sub-agent thread under the thread that spawned it (KTD11). */
+  register(
+    threadId: string,
+    parent: string,
+    details: { name?: string; role?: string } = {},
+  ) {
+    if (!threadId || threadId === this.sessionId) return;
+    const known = this.agents.get(threadId);
+    if (!known) {
+      const parentKey = parent !== this.sessionId ? parent : undefined;
+      this.agents.set(threadId, {
+        ...(parentKey ? { parentKey } : {}),
+        turnId: "",
+        running: true,
+        last: "",
+      });
+      this.listen({
+        type: "agent",
+        key: threadId,
+        ...(parentKey ? { parentKey } : {}),
+        status: "running",
+      });
+    }
+    if (details.name || details.role)
+      this.listen({
+        type: "agent",
+        key: threadId,
+        ...(details.name ? { name: details.name } : {}),
+        ...(details.role ? { agentType: details.role } : {}),
+      });
+  }
+
+  private agentStatus(
+    threadId: string,
+    status: "running" | "completed" | "failed" | "stopped",
+    summary?: string,
+  ) {
+    const agent = this.agents.get(threadId);
+    if (!agent || agent.running === (status === "running")) return;
+    agent.running = status === "running";
+    this.listen({
+      type: "agent",
+      key: threadId,
+      status,
+      ...(summary ? { summary } : {}),
+    });
   }
 
   private async ensureProcess() {
@@ -260,46 +380,103 @@ class CodexSession implements HarnessSession {
       yield* queue;
     } finally {
       this.queue = undefined;
-      this.pending.clear();
+      // Sub-agent requests stay answerable after the lead's turn (KTD5).
+      for (const [key, pending] of this.pending)
+        if (!pending.agent) this.pending.delete(key);
+      this.flush();
     }
   }
 
   notification({ method, params }: RpcNotification) {
-    const queue = this.queue;
-    if (!queue) return;
+    const threadId = string(params.threadId);
+    const lead = threadId === this.sessionId;
+    const agent = this.agents.get(threadId);
+    if (method === "turn/started") {
+      const turnId = string(object(params.turn).id);
+      if (agent) {
+        agent.turnId = turnId;
+        return this.agentStatus(threadId, "running");
+      }
+      if (this.active) this.turnId = turnId;
+      else if (!this.harnessTurn) {
+        // Codex started a lead turn by itself (KTD14).
+        this.harnessTurn = true;
+        this.turnId = turnId;
+        this.harness({ type: "turn.started" });
+      }
+      return;
+    }
+    if (method === "turn/completed") {
+      const turn = object(params.turn);
+      if (agent)
+        return this.agentStatus(
+          threadId,
+          turn.status === "failed"
+            ? "failed"
+            : turn.status === "interrupted"
+              ? "stopped"
+              : "completed",
+          turn.status === "failed"
+            ? string(object(turn.error).message) || agent.last
+            : agent.last,
+        );
+      const failure =
+        turn.status === "failed"
+          ? (this.failure ?? this.adapter.error(object(turn.error)))
+          : undefined;
+      if (this.active) {
+        if (failure) this.queue!.fail(failure);
+        else this.queue!.end();
+      } else if (this.harnessTurn) {
+        this.harnessTurn = false;
+        this.harness(
+          failure
+            ? { type: "turn.failed", error: failure }
+            : { type: "turn.completed" },
+        );
+      }
+      return;
+    }
+    if (method === "error") {
+      if (!lead || params.willRetry === true) return;
+      this.failure = this.adapter.error(object(params.error));
+      return;
+    }
     const item = object(params.item);
+    if (method === "item/started" || method === "item/completed")
+      this.agentItem(threadId, method === "item/completed", item);
+    const emit = this.out(threadId);
+    if (!emit) return;
     const itemId = string(params.itemId) || string(item.id);
     switch (method) {
-      case "turn/started":
-        this.turnId = string(object(params.turn).id);
-        return;
       case "item/agentMessage/delta":
-        return queue.push({
+        return emit({
           type: "text",
           item: itemId,
           kind: "assistant",
           delta: string(params.delta),
         });
       case "item/reasoning/summaryTextDelta":
-        return queue.push({
+        return emit({
           type: "text",
           item: itemId,
           kind: "reasoning",
           delta: string(params.delta),
         });
       case "item/plan/delta":
-        return queue.push({
+        return emit({
           type: "text",
           item: itemId,
           kind: "plan",
           delta: string(params.delta),
         });
       case "turn/plan/updated": {
-        const steps = Array.isArray(params.plan) ? params.plan : [];
+        const steps = (Array.isArray(params.plan) ? params.plan : []).map(
+          object,
+        );
         const text = [
           string(params.explanation),
-          ...steps.map((value) => {
-            const step = object(value);
+          ...steps.map((step) => {
             const mark =
               step.status === "completed"
                 ? "x"
@@ -311,38 +488,119 @@ class CodexSession implements HarnessSession {
         ]
           .filter(Boolean)
           .join("\n");
-        return queue.push({
+        emit({
           type: "message",
           item: `steps-${string(params.turnId)}`,
           kind: "plan",
           text,
         });
+        // Only the lead's own plan becomes the tab's plan (KTD9).
+        if (lead)
+          emit({
+            type: "steps",
+            steps: steps.map((step) => ({
+              text: string(step.step),
+              status: STEP_STATUS[string(step.status)] ?? "pending",
+            })),
+            ...(string(params.explanation)
+              ? { explanation: string(params.explanation) }
+              : {}),
+          });
+        return;
       }
       case "item/started":
       case "item/completed":
-        return this.item(method === "item/completed", item);
-      case "error": {
-        if (params.willRetry === true) return;
-        this.failure = this.adapter.error(object(params.error));
-        return;
-      }
-      case "turn/completed": {
-        const turn = object(params.turn);
-        if (turn.status === "failed")
-          queue.fail(this.failure ?? this.adapter.error(object(turn.error)));
-        else queue.end();
-        return;
-      }
+        return this.item(method === "item/completed", item, emit);
     }
   }
 
-  private item(completed: boolean, item: Record<string, unknown>) {
-    const queue = this.queue!;
+  /** Collab calls and sub-agent activity drive cards whether or not a lead turn runs. */
+  private agentItem(
+    threadId: string,
+    completed: boolean,
+    item: Record<string, unknown>,
+  ) {
+    if (item.type === "collabAgentToolCall") {
+      const receivers = (
+        Array.isArray(item.receiverThreadIds) ? item.receiverThreadIds : []
+      ).map(string);
+      const sender = string(item.senderThreadId) || threadId;
+      if (item.tool === "spawnAgent")
+        for (const receiver of receivers) {
+          this.register(receiver, sender);
+          this.listen({
+            type: "agent",
+            key: receiver,
+            ...(string(item.prompt)
+              ? { description: clip(string(item.prompt), 2_000) }
+              : {}),
+            ...(string(item.model) ? { model: string(item.model) } : {}),
+          });
+        }
+      if (REENGAGE.has(string(item.tool)) && !completed)
+        for (const receiver of receivers) this.agentStatus(receiver, "running");
+      if (completed)
+        for (const [receiver, value] of Object.entries(
+          object(item.agentsStates),
+        )) {
+          const state = object(value);
+          const status = AGENT_STATE[string(state.status)];
+          if (status)
+            this.agentStatus(
+              receiver,
+              status,
+              string(state.message) || this.agents.get(receiver)?.last,
+            );
+        }
+      return;
+    }
+    if (item.type === "subAgentActivity") {
+      const key = string(item.agentThreadId);
+      const last = this.agents.get(key)?.last;
+      if (item.kind === "started" || item.kind === "interacted")
+        this.agentStatus(key, "running");
+      else if (item.kind === "completed")
+        this.agentStatus(key, "completed", last);
+      else if (item.kind === "interrupted")
+        this.agentStatus(key, "stopped", last);
+      return;
+    }
+    const agent = this.agents.get(threadId);
+    if (agent && completed && item.type === "agentMessage")
+      agent.last = string(item.text);
+  }
+
+  private item(
+    completed: boolean,
+    item: Record<string, unknown>,
+    emit: (event: HarnessEvent) => void,
+  ) {
     const id = string(item.id);
     switch (item.type) {
+      case "collabAgentToolCall": {
+        const receivers = Array.isArray(item.receiverThreadIds)
+          ? item.receiverThreadIds.length
+          : 0;
+        const label: Record<string, string> = {
+          spawnAgent: "Spawn a sub-agent",
+          sendInput: "Message a sub-agent",
+          sendMessage: "Message a sub-agent",
+          followupTask: "Follow up with a sub-agent",
+          resumeAgent: "Resume a sub-agent",
+          wait: "Wait for sub-agents",
+          closeAgent: "Close a sub-agent",
+          interruptAgent: "Interrupt a sub-agent",
+          listAgents: "List sub-agents",
+        };
+        return emit({
+          type: "tool",
+          item: id,
+          summary: `${label[string(item.tool)] ?? "Coordinate sub-agents"}${receivers > 1 ? ` (${receivers})` : ""}${string(item.prompt) ? `: ${clip(string(item.prompt), 200)}` : ""}`,
+        });
+      }
       case "agentMessage":
         if (completed)
-          queue.push({
+          emit({
             type: "message",
             item: id,
             kind: "assistant",
@@ -351,7 +609,7 @@ class CodexSession implements HarnessSession {
         return;
       case "plan":
         if (completed)
-          queue.push({
+          emit({
             type: "message",
             item: id,
             kind: "plan",
@@ -363,7 +621,7 @@ class CodexSession implements HarnessSession {
           .map(string)
           .join("\n\n");
         if (completed && summary)
-          queue.push({
+          emit({
             type: "message",
             item: id,
             kind: "reasoning",
@@ -374,7 +632,7 @@ class CodexSession implements HarnessSession {
       case "commandExecution": {
         const exit =
           typeof item.exitCode === "number" ? ` (exit ${item.exitCode})` : "";
-        return queue.push({
+        return emit({
           type: "tool",
           item: id,
           summary: `${string(item.command)}${completed ? exit : ""}`,
@@ -390,7 +648,7 @@ class CodexSession implements HarnessSession {
           .map((change) => `${string(change.path)}\n${string(change.diff)}`)
           .join("\n\n");
         this.changes.set(id, diff);
-        return queue.push({
+        return emit({
           type: "tool",
           item: id,
           summary: `${completed ? "Edited" : "Editing"} ${paths.length === 1 ? paths[0] : `${paths.length} files`}`,
@@ -398,7 +656,7 @@ class CodexSession implements HarnessSession {
         });
       }
       case "mcpToolCall":
-        return queue.push({
+        return emit({
           type: "tool",
           item: id,
           summary: `MCP ${string(item.server)}.${string(item.tool)}`,
@@ -412,13 +670,13 @@ class CodexSession implements HarnessSession {
             : {}),
         });
       case "webSearch":
-        return queue.push({
+        return emit({
           type: "tool",
           item: id,
           summary: `Web search: ${string(item.query)}`,
         });
       case "dynamicToolCall":
-        return queue.push({
+        return emit({
           type: "tool",
           item: id,
           summary: `Tool ${string(item.tool)}`,
@@ -427,20 +685,29 @@ class CodexSession implements HarnessSession {
   }
 
   serverRequest(rpc: RpcRequest) {
-    const queue = this.queue;
     const params = rpc.params;
     const key = String(rpc.id);
-    if (!queue) {
+    const threadId = string(params.threadId);
+    const agent = threadId !== this.sessionId ? threadId : undefined;
+    // A sub-agent thread's requests reach the owner with or without a lead turn (KTD5).
+    const emit = this.out(threadId);
+    if (!emit) {
       this.process.transport.reject(
         rpc.id,
         "No turn is running for this request.",
       );
       return;
     }
+    const hold = (fields?: Record<string, string>) =>
+      this.pending.set(key, {
+        rpc,
+        ...(fields ? { fields } : {}),
+        ...(agent ? { agent } : {}),
+      });
     switch (rpc.method) {
       case "item/commandExecution/requestApproval":
-        this.pending.set(key, { rpc });
-        return queue.push({
+        hold();
+        return emit({
           type: "approval",
           request: key,
           summary: `Run command: ${clip(string(params.command) || "a command")}`,
@@ -452,8 +719,8 @@ class CodexSession implements HarnessSession {
             .join("\n"),
         });
       case "item/fileChange/requestApproval":
-        this.pending.set(key, { rpc });
-        return queue.push({
+        hold();
+        return emit({
           type: "approval",
           request: key,
           summary: "Apply file changes",
@@ -465,7 +732,7 @@ class CodexSession implements HarnessSession {
             .join("\n\n"),
         });
       case "item/permissions/requestApproval": {
-        this.pending.set(key, { rpc });
+        hold();
         const permissions = object(params.permissions);
         const kinds = [
           permissions.network && "network access",
@@ -473,7 +740,7 @@ class CodexSession implements HarnessSession {
         ]
           .filter(Boolean)
           .join(" and ");
-        return queue.push({
+        return emit({
           type: "approval",
           request: key,
           summary: `Grant ${kinds || "additional permissions"} for this turn`,
@@ -502,8 +769,8 @@ class CodexSession implements HarnessSession {
             secret: question.isSecret === true,
           };
         });
-        this.pending.set(key, { rpc });
-        return queue.push({ type: "question", request: key, questions });
+        hold();
+        return emit({ type: "question", request: key, questions });
       }
       case "mcpServer/elicitation/request": {
         const mapped = elicitationQuestions(params);
@@ -513,14 +780,14 @@ class CodexSession implements HarnessSession {
             content: null,
             _meta: null,
           } satisfies McpServerElicitationRequestResponse);
-          return queue.push({
+          return emit({
             type: "notice",
             notice: "unsupported_request",
             summary: `Declined a request from the ${string(params.serverName) || "MCP"} server that this app cannot show.`,
           });
         }
-        this.pending.set(key, { rpc, fields: mapped.fields });
-        return queue.push({
+        hold(mapped.fields);
+        return emit({
           type: "question",
           request: key,
           questions: mapped.questions,
@@ -531,7 +798,7 @@ class CodexSession implements HarnessSession {
           rpc.id,
           "This app does not support that request.",
         );
-        return queue.push({
+        return emit({
           type: "notice",
           notice: "unsupported_request",
           summary: `Codex asked for an unsupported operation (${rpc.method}); it was declined.`,
@@ -604,28 +871,51 @@ class CodexSession implements HarnessSession {
       else transport.respond(rpc.id, { decision: "cancel" });
     }
     this.pending.clear();
-    if (!this.turnId || !this.active) return;
-    await transport.request(
-      "turn/interrupt",
-      { threadId: this.sessionId, turnId: this.turnId },
-      8_000,
+    // The lead's turn and each running sub-agent thread's turn are interrupted (KTD7).
+    const turns: [string, string][] = [
+      ...[...this.agents]
+        .filter(([, agent]) => agent.running && agent.turnId)
+        .map(([threadId, agent]): [string, string] => [threadId, agent.turnId]),
+    ];
+    if (this.turnId && (this.active || this.harnessTurn))
+      turns.unshift([this.sessionId!, this.turnId]);
+    await Promise.all(
+      turns.map(([threadId, turnId]) =>
+        transport.request("turn/interrupt", { threadId, turnId }, 8_000),
+      ),
     );
   }
 
   crashed(message: string) {
     this.pending.clear();
-    this.queue?.fail(
-      new HarnessError(
-        "crashed",
-        `Codex stopped during this turn. ${message} The next message restarts it.`,
-      ),
-    );
+    for (const agent of this.agents.values()) agent.running = false;
+    const summary = `Codex stopped. ${message} The next message restarts it.`;
+    if (this.active)
+      return this.queue!.fail(
+        new HarnessError(
+          "crashed",
+          `Codex stopped during this turn. ${message} The next message restarts it.`,
+        ),
+      );
+    if (this.harnessTurn) {
+      this.harnessTurn = false;
+      return this.harness({
+        type: "turn.failed",
+        error: new HarnessError("crashed", summary),
+      });
+    }
+    this.harness({ type: "crashed", message: summary });
   }
 
   close() {
     if (this.closed) return;
     this.closed = true;
-    if (this.active) void this.stop().catch(() => {});
+    if (
+      this.active ||
+      this.harnessTurn ||
+      [...this.agents.values()].some((agent) => agent.running)
+    )
+      void this.stop().catch(() => {});
     this.process.sessions.delete(this);
     this.process.touch();
   }
@@ -726,8 +1016,8 @@ export class CodexAdapter implements HarnessAdapter {
       const current = process;
       process.transport.on("request", (rpc: RpcRequest) => {
         const threadId = string(rpc.params.threadId);
-        const session = [...current.sessions].find(
-          (item) => item.sessionId === threadId,
+        const session = [...current.sessions].find((item) =>
+          item.owns(threadId),
         );
         if (session) session.serverRequest(rpc);
         else
@@ -774,11 +1064,28 @@ export class CodexAdapter implements HarnessAdapter {
       this.readResets(message.params);
       return;
     }
+    // A spawned thread names its parent in a thread object, not a top-level thread ID (KTD11).
+    if (message.method === "thread/started") {
+      const thread = object(message.params.thread);
+      const parent = string(thread.parentThreadId);
+      if (!parent) return;
+      for (const session of this.sessionsOwning(parent))
+        session.register(string(thread.id), parent, {
+          name: string(thread.agentNickname),
+          role: string(thread.agentRole),
+        });
+      return;
+    }
     const threadId = string(message.params.threadId);
     if (!threadId) return;
-    for (const process of this.processes.values())
-      for (const session of process.sessions)
-        if (session.sessionId === threadId) session.notification(message);
+    for (const session of this.sessionsOwning(threadId))
+      session.notification(message);
+  }
+
+  private sessionsOwning(threadId: string) {
+    return [...this.processes.values()].flatMap((process) =>
+      [...process.sessions].filter((session) => session.owns(threadId)),
+    );
   }
 
   private readResets(params: Record<string, unknown>) {
