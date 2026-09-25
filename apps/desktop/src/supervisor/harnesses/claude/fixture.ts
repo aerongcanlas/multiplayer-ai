@@ -16,9 +16,9 @@ import { EventQueue } from "../queue";
 // FIXTURE_USAGE (a usage limit), FIXTURE_SLOW (waits for an interrupt), FIXTURE_CRASH,
 // FIXTURE_AGENTS (a sub-agent with a nested one, an approval from inside it, and a to-do list), and
 // FIXTURE_BACKGROUND (a background sub-agent and a background shell command that outlive the
-// turn; `finishBackground` completes the sub-agent and has Claude Code reply on its own, and
-// `finishShell` ends the shell command). Sessions persist in the state file so a restarted app can
-// resume them.
+// turn; after the turn the sub-agent asks to run a command, then completes and Claude Code replies
+// on its own, and `finishShell` ends the shell command). Sessions persist in the state file so a
+// restarted app can resume them.
 
 export interface FixtureState {
   signedIn: boolean;
@@ -111,8 +111,8 @@ export function claudeFixture(
     const resumed = options.resume;
     const sessionId = resumed ?? randomUUID();
     const outbox = new EventQueue<SDKMessage>();
-    const background = new Map<string, string>();
-    current = { outbox, sessionId, background };
+    const backgroundTasks = new Map<string, string>();
+    current = { outbox, sessionId, background: backgroundTasks };
     const tool = (
       name: string,
       input: Record<string, unknown>,
@@ -124,6 +124,67 @@ export function claudeFixture(
         requestId: randomUUID(),
         ...extra,
       }) as Promise<PermissionResult>;
+
+    // FIXTURE_BACKGROUND's sub-agent after the turn: one approval, then its result and a reply
+    // Claude Code starts by itself. A Stop denies the approval and stops the task instead.
+    async function backgroundAgent() {
+      outbox.push(
+        frame(
+          "assistant",
+          "agent-3",
+          [
+            { type: "text", text: "Running the test suite." },
+            {
+              type: "tool_use",
+              id: "bg-bash",
+              name: "Bash",
+              input: { command: "pnpm test" },
+            },
+          ],
+          sessionId,
+        ),
+      );
+      const result = await tool(
+        "Bash",
+        { command: "pnpm test" },
+        { agentID: "t3", toolUseID: "bg-bash" },
+      );
+      record.calls.push(`bg-bash:${result.behavior}`);
+      if (closed || !backgroundTasks.has("t3")) return;
+      if (result.behavior === "deny" && result.interrupt) return;
+      const summary =
+        result.behavior === "allow"
+          ? "All tests passed."
+          : "Skipped the test run.";
+      backgroundTasks.delete("t3");
+      outbox.push(
+        task("task_notification", sessionId, {
+          task_id: "t3",
+          tool_use_id: "agent-3",
+          status: "completed",
+          summary,
+          output_file: "",
+        }),
+      );
+      changed();
+      outbox.push(
+        frame(
+          "assistant",
+          null,
+          [{ type: "text", text: `The background agent reports: ${summary}` }],
+          sessionId,
+        ),
+      );
+      outbox.push(
+        message({
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          result: summary,
+          session_id: sessionId,
+        }),
+      );
+    }
 
     async function* run(): AsyncGenerator<SDKMessage> {
       if (resumed && !(resumed in load().sessions))
@@ -364,7 +425,7 @@ export function claudeFixture(
             description: "pnpm dev",
             is_backgrounded: true,
           });
-          background.set("t3", "local_agent").set("t4", "local_bash");
+          backgroundTasks.set("t3", "local_agent").set("t4", "local_bash");
           changed();
           reply.push("The tests run in the background.");
         }
@@ -445,6 +506,8 @@ export function claudeFixture(
                 },
         );
         interrupted = undefined;
+        if (prompt.includes("FIXTURE_BACKGROUND"))
+          setTimeout(() => void backgroundAgent(), 150);
       }
     }
 
@@ -477,7 +540,7 @@ export function claudeFixture(
       },
       stopTask: async (taskId) => {
         record.calls.push(`stopTask:${taskId}`);
-        if (!background.delete(taskId)) return;
+        if (!backgroundTasks.delete(taskId)) return;
         outbox.push(
           task("task_notification", sessionId, {
             task_id: taskId,
@@ -509,38 +572,6 @@ export function claudeFixture(
 
   return {
     record,
-    /** Completes FIXTURE_BACKGROUND's sub-agent; Claude Code then replies on its own. */
-    finishBackground: () => {
-      const { outbox, sessionId, background } = current!;
-      background.delete("t3");
-      outbox.push(
-        task("task_notification", sessionId, {
-          task_id: "t3",
-          tool_use_id: "agent-3",
-          status: "completed",
-          summary: "All tests passed.",
-          output_file: "",
-        }),
-      );
-      changed();
-      outbox.push(
-        frame(
-          "assistant",
-          null,
-          [{ type: "text", text: "The background tests passed." }],
-          sessionId,
-        ),
-      );
-      outbox.push(
-        message({
-          type: "result",
-          subtype: "success",
-          is_error: false,
-          result: "The background tests passed.",
-          session_id: sessionId,
-        }),
-      );
-    },
     /** Ends FIXTURE_BACKGROUND's shell command. */
     finishShell: () => {
       current!.background.delete("t4");

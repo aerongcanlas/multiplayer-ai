@@ -1,6 +1,7 @@
 // Chat tabs end to end with harness fixtures: managed downloads from a loopback server, Codex and
-// Claude Code tabs, approvals, questions, plan mode, Stop, close, suggestions, restart resume, and
-// crash recovery. Nothing leaves the machine.
+// Claude Code tabs, approvals, questions, plan mode, Stop, close, suggestions, restart resume,
+// crash recovery, and Mission Control's lead context, sub-agent cards, and drill-in. Nothing leaves
+// the machine.
 import { _electron as electron } from "playwright";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
@@ -138,6 +139,14 @@ const tabsPanel = () => page.getByRole("region", { name: "AI tabs" });
 const settings = () => page.getByRole("region", { name: "Harness settings" });
 const harnessRow = (label) =>
   settings().locator(".harness-row").filter({ hasText: label });
+const mission = () => page.getByRole("region", { name: "Mission Control" });
+const leadContext = () =>
+  mission().getByRole("region", { name: "Lead context" });
+const agentTasks = () => mission().getByRole("region", { name: "Agent tasks" });
+const agentCard = (description) =>
+  agentTasks().locator(".agent-card").filter({ hasText: description });
+const tabChip = (title) =>
+  tabsPanel().getByRole("tab", { name: new RegExp(title) });
 
 async function selectTab(title) {
   await tabsPanel()
@@ -395,12 +404,137 @@ try {
     "Claude Code plan mode continues into execution from its card",
   );
 
+  // AE6: a tab whose harness kept no to-do list shows its state and a no-plan note.
+  await leadContext()
+    .getByText(/No plan in this tab/)
+    .waitFor();
+  await leadContext().getByText("Claude Code", { exact: true }).waitFor();
+  await leadContext().getByText("Act", { exact: true }).waitFor();
+  await agentTasks()
+    .getByText(/No sub-agents in this tab yet/)
+    .waitFor();
+  await checkpoint("Lead context shows the tab's state and a no-plan note");
+
+  // F1 / AE1: sub-agents get cards under the turn; a mid-turn sub-agent approval names its
+  // sub-agent and leaves the turn running; a background card outlives the turn.
+  await send("FIXTURE_AGENTS FIXTURE_BACKGROUND");
+  const inspectApproval = tabsPanel().getByRole("region", {
+    name: "Approval for sub-agent Inspect the checkout",
+  });
+  await inspectApproval.getByText("Sub-agent · Inspect the checkout").waitFor();
+  assert.equal((await tabNamed("Claude Code 1")).status, "running");
+  await inspectApproval
+    .getByRole("button", { name: "Approve once", exact: true })
+    .click();
+  await settled("Claude Code 1");
+  await agentCard("Inspect the checkout").getByText("Completed").waitFor();
+  await agentCard("Inspect the checkout")
+    .getByText("Found README.md.")
+    .waitFor();
+  await agentCard("Read the README").getByText("Completed").waitFor();
+  await agentCard("Run the tests").getByText("Running").waitFor();
+  await tabChip("Claude Code 1").getByText("1 running").waitFor();
+  assert.equal((await tabNamed("Claude Code 1")).runningAgents, 1);
+  await leadContext()
+    .getByRole("list", { name: "Lead plan" })
+    .getByText("Test")
+    .waitFor();
+  await page.screenshot({ path: join(output, "04-mission-control.png") });
+  await checkpoint(
+    "Sub-agent cards appear under the turn and a background card outlives it",
+  );
+
+  // F2: a card opens its sub-agent's own transcript, read-only, and back returns to the lead.
+  await agentCard("Inspect the checkout").click();
+  await tabsPanel()
+    .getByRole("heading", { name: "Inspect the checkout" })
+    .waitFor();
+  await tabsPanel().getByText("Looking around.").waitFor();
+  assert.equal(await tabsPanel().getByText("Inspection done.").count(), 0);
+  assert.equal(
+    await tabsPanel().getByRole("textbox", { name: "Message" }).count(),
+    0,
+  );
+  await page.screenshot({ path: join(output, "05-drill-in.png") });
+  await tabsPanel()
+    .getByRole("button", { name: "Back to Claude Code 1" })
+    .click();
+  await tabsPanel().getByText("Inspection done.").waitFor();
+  assert.equal(await tabsPanel().getByText("Looking around.").count(), 0);
+  await checkpoint("A card opens its sub-agent's transcript and back returns");
+
+  // F4 / AE7: the background sub-agent asks after the turn; the tab stays idle and usable.
+  const backgroundApproval = tabsPanel().getByRole("region", {
+    name: "Approval for sub-agent Run the tests",
+  });
+  await backgroundApproval.getByText("Run command: pnpm test").waitFor();
+  await tabChip("Claude Code 1")
+    .getByRole("img", { name: "A sub-agent needs you" })
+    .waitFor();
+  assert.equal((await tabNamed("Claude Code 1")).status, "idle");
+  await send("Hello while it waits");
+  await settled("Claude Code 1");
+  await backgroundApproval
+    .getByRole("button", { name: "Approve once", exact: true })
+    .click();
+  await until(
+    async () => !(await tabNamed("Claude Code 1")).agentRequests,
+    "the needs-you mark to clear",
+  );
+  // F3: the finished sub-agent wakes the lead in a turn of its own.
+  await tabsPanel()
+    .getByText("The background agent reports: All tests passed.")
+    .waitFor();
+  await settled("Claude Code 1");
+  await agentCard("Run the tests").getByText("All tests passed.").waitFor();
+  assert.equal((await tabNamed("Claude Code 1")).runningAgents, undefined);
+  assert.equal(
+    await tabChip("Claude Code 1")
+      .getByText(/running/)
+      .count(),
+    0,
+  );
+  await checkpoint(
+    "A background approval never blocks the tab and its reply lands as a new turn",
+  );
+
+  // F3 / AE2: Stop on an idle tab stops its background sub-agent.
+  await tabsPanel()
+    .getByRole("button", { name: "New tab", exact: true })
+    .click();
+  await page
+    .getByRole("menuitem", { name: "Claude Code", exact: true })
+    .click();
+  await until(
+    async () => (await tabNamed("Claude Code 2"))?.status === "idle",
+    "Claude Code 2",
+  );
+  await selectTab("Claude Code 2");
+  await send("FIXTURE_BACKGROUND");
+  await settled("Claude Code 2");
+  await tabsPanel()
+    .getByRole("region", { name: "Approval for sub-agent Run the tests" })
+    .waitFor();
+  await tabsPanel().getByRole("button", { name: "Stop", exact: true }).click();
+  await agentCard("Run the tests")
+    .getByText("Stopped", { exact: true })
+    .waitFor();
+  await agentCard("Run the tests")
+    .getByText("Stopped before finishing")
+    .waitFor();
+  assert.equal((await tabNamed("Claude Code 2")).runningAgents, undefined);
+  assert.equal((await tabNamed("Claude Code 2")).agentRequests, undefined);
+  await checkpoint("Stop on an idle tab stops its background sub-agent");
+
   // Two tabs in one room run turns concurrently.
+  await selectTab("Claude Code 1");
   await send("FIXTURE_SLOW");
   await selectTab("Codex 1");
   await send("FIXTURE_SLOW");
   await until(async () => {
-    const tabs = (await room()).tabs;
+    const tabs = (await room()).tabs.filter((tab) =>
+      ["Codex 1", "Claude Code 1"].includes(tab.title),
+    );
     return tabs.every((tab) => tab.status === "running");
   }, "both tabs to run");
   await tabsPanel().getByRole("button", { name: "Stop", exact: true }).click();
@@ -490,6 +624,23 @@ try {
   );
   await checkpoint("After a restart a follow-up continues the fixture session");
 
+  // AE3 setup: a background sub-agent is still running when the app dies.
+  await tabsPanel()
+    .getByRole("button", { name: "New tab", exact: true })
+    .click();
+  await page
+    .getByRole("menuitem", { name: "Claude Code", exact: true })
+    .click();
+  await until(
+    async () => (await tabNamed("Claude Code 3"))?.status === "idle",
+    "Claude Code 3",
+  );
+  await selectTab("Claude Code 3");
+  await send("FIXTURE_BACKGROUND");
+  await settled("Claude Code 3");
+  await agentCard("Run the tests").getByText("Running").waitFor();
+  await selectTab("Codex 1");
+
   // AE8: killing the app mid-turn leaves the turn interrupted with nothing pending.
   await send("FIXTURE_APPROVAL before the crash");
   await tabsPanel()
@@ -512,6 +663,23 @@ try {
   );
   await checkpoint(
     "Killing the app mid-turn shows the turn interrupted after relaunch",
+  );
+
+  // AE3: the sub-agent that was running reads interrupted, not running.
+  await selectTab("Claude Code 3");
+  await agentCard("Run the tests")
+    .getByText("Interrupted", { exact: true })
+    .waitFor();
+  await agentCard("Run the tests")
+    .getByText("Interrupted before finishing")
+    .waitFor();
+  assert.equal((await tabNamed("Claude Code 3")).status, "idle");
+  assert.equal(
+    await tabsPanel().getByRole("button", { name: "Approve once" }).count(),
+    0,
+  );
+  await checkpoint(
+    "A sub-agent running at a crash reads interrupted after relaunch",
   );
 
   // Nothing left the app: no browser, no terminal, no remote requests.

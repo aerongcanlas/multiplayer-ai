@@ -49,12 +49,32 @@ Transcript entries are marked for what they may share with a future read-along v
 
 If the app quits during a turn, the tab shows the turn as interrupted after restart and clears pending approvals and questions; send a follow-up to continue the same session. If a harness cannot resume a tab's session, the tab says so and offers **Start fresh session**.
 
+## Mission Control and sub-agents
+
+Mission Control follows the active tab. **Lead context** shows the tab's harness, model, mode, status, and the harness's own plan: Codex plan updates, or Claude Code's to-do list from `TodoWrite` or `TaskCreate`/`TaskUpdate`. A tab whose harness kept no plan says so. **Agent tasks** lists the sub-agents the tab's harness spawned, grouped by turn, newest first. Selecting a card opens that sub-agent's transcript read-only in the main area. Multiplayer AI tracks sub-agents; it does not start, message, or stop them individually.
+
+How each harness reports sub-agents:
+
+- **Claude Code:** `local_agent` tasks that are not ambient become cards keyed by task ID (`task_started`, `task_progress`, `task_updated`, `task_notification`). Messages tagged with the spawning tool call become that card's entries, and a sub-agent spawned inside another nests under it. Background shell commands and other tasks get no card but keep the query open and are stopped by Stop.
+- **Codex:** a thread whose `thread/started` names the tab's thread, or one of its sub-agents, as its parent becomes a card keyed by thread ID. That thread's notifications and server requests route to the tab. Spawn and follow-up collab calls, sub-agent activity items, and the thread's own turns drive the card, so a follow-up to a finished sub-agent sets it running again.
+
+Adapters report sub-agent events on a session listener, separate from the owner's turn. The same listener carries:
+
+- **Requests outside a turn.** A sub-agent's approval or question shows in the lead transcript naming the sub-agent, marks the tab header, and never blocks the next message. A turn's end cancels only the lead's own requests; Stop, close, session reset, a harness change, a crash, or a restart also cancel sub-agent requests.
+- **Harness-started turns.** When a harness wakes the lead by itself, for example after a background sub-agent finishes, the tab runs that turn like one you sent. Claude Code matches each result to its send by the user message ID, so such a turn never ends yours.
+- **Crashes outside a turn.** Running cards read interrupted.
+
+A turn can end while sub-agents keep running: the tab goes idle and its header shows the running count. Stop on that tab stops them, and their cards read stopped. A card still running when the app quits reads interrupted after restart. Closing a tab with running sub-agents asks first, and a session reset or harness change waits until they settle. Harnesses that do not report sub-agents show that in Agent tasks rather than cards built from tool calls.
+
+Cards and sub-agent entries are transcript entries. For read-along, cards share in full and sub-agent entries share at their own kind's level (messages in full, tool calls as one-line summaries, reasoning never), masked like the lead's entries. Read-along must publish `agent` entries and entries with an agent key.
+
 ## Release checks
 
 Before a release, run the live checks against disposable checkouts with a signed-in machine:
 
 - `node apps/desktop/scripts/codex-e2e.mjs --live --repository <checkout>`: managed download, models, a plan-mode turn, a declined approval, and Stop.
 - `node apps/desktop/scripts/claude-e2e.mjs --repository <checkout>`: managed download with the existing login, models, a project skill that asks a question, plan-mode continue, and resume after restart.
+- Sub-agents, by hand: in a Claude Code tab, ask for a background sub-agent and check its card, drill-in, the lead's own reply after it finishes, and Stop. In a Codex tab with multi-agent enabled in your Codex config, check a card, drill-in, a follow-up to a finished sub-agent, and a sub-agent approval in ask mode.
 
 A Claude Code tab on Windows without Git for Windows must also run a shell command; that check needs a Windows machine.
 

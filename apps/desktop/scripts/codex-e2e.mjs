@@ -233,37 +233,95 @@ try {
   assert.equal((await tab()).status, "idle");
   if (live) {
     // A real model may answer a simple question without a plan item.
-    await page.getByText(/^Turn completed\./).last().waitFor();
+    await page
+      .getByText(/^Turn completed\./)
+      .last()
+      .waitFor();
     checkpoint("A plan-mode turn completes");
   } else {
     await page.getByRole("region", { name: "Plan" }).last().waitFor();
     checkpoint("A plan-mode turn completes with a plan");
   }
 
+  if (!live) {
+    // A spawned sub-agent thread's approval reaches the tab and its card completes.
+    const tabs = page.getByRole("region", { name: "AI tabs" });
+    const cards = page
+      .getByRole("region", { name: "Agent tasks" })
+      .locator(".agent-card");
+    await page.getByRole("checkbox", { name: "Plan mode" }).uncheck();
+    await until(async () => !(await tab()).loadout.planMode, "plan mode off");
+    await page
+      .getByRole("textbox", { name: "Message", exact: true })
+      .fill("FIXTURE_AGENTS inspect the checkout");
+    await page.getByRole("button", { name: "Send", exact: true }).click();
+    await until(
+      async () => !["running", "awaiting_host"].includes((await tab()).status),
+      "the sub-agent turn",
+    );
+    const approval = tabs.getByRole("region", {
+      name: "Approval for sub-agent Inspect the checkout",
+    });
+    await approval
+      .getByRole("button", { name: "Approve once", exact: true })
+      .click();
+    await cards
+      .filter({ hasText: "Inspect the checkout" })
+      .getByText("Found README.md.")
+      .waitFor();
+    await cards.filter({ hasText: "A short README." }).waitFor();
+    await tabs.getByText("The scout reported back.").waitFor();
+    await until(
+      async () =>
+        (await tab()).status === "idle" && !(await tab()).runningAgents,
+      "the tab to settle",
+    );
+    checkpoint(
+      "A Codex sub-agent's approval is answerable after the turn and its card completes",
+    );
+  }
+
   if (live) {
     const idle = async (label) =>
-      until(async () => !["running", "awaiting_host"].includes((await tab()).status), label, 10 * 60_000);
+      until(
+        async () =>
+          !["running", "awaiting_host"].includes((await tab()).status),
+        label,
+        10 * 60_000,
+      );
     const send = async (text) => {
-      await page.getByRole("textbox", { name: "Message", exact: true }).fill(text);
+      await page
+        .getByRole("textbox", { name: "Message", exact: true })
+        .fill(text);
       await page.getByRole("button", { name: "Send", exact: true }).click();
     };
     // Ask mode routes a write to the tab; declining keeps the repository unchanged.
     await page.getByRole("checkbox", { name: "Plan mode" }).uncheck();
     await until(async () => !(await tab()).loadout.planMode, "plan mode off");
-    await send("Create a file named approval-check.txt containing the word hi. Do nothing else.");
+    await send(
+      "Create a file named approval-check.txt containing the word hi. Do nothing else.",
+    );
     await page
       .getByRole("region", { name: "Agent approval" })
       .last()
       .getByRole("button", { name: "Decline", exact: true })
       .click({ timeout: 5 * 60_000 });
     await idle("the declined turn");
-    checkpoint("A real write request appears as an approval and can be declined");
+    checkpoint(
+      "A real write request appears as an approval and can be declined",
+    );
     await send("Run `sleep 60` in the shell, then say done.");
-    await until(async () => (await tab()).status === "running", "the long turn");
+    await until(
+      async () => (await tab()).status === "running",
+      "the long turn",
+    );
     await wait(4_000);
     await page.getByRole("button", { name: "Stop", exact: true }).click();
     await idle("the stopped turn");
-    await page.getByText(/^Turn stopped by the host\./).last().waitFor();
+    await page
+      .getByText(/^Turn stopped by the host\./)
+      .last()
+      .waitFor();
     checkpoint("Stop interrupts a real running turn");
   }
 

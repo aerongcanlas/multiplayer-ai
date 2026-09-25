@@ -578,7 +578,7 @@ test("a sub-agent request waits for the owner outside a turn and after the turn 
   }
 });
 
-test("background work keeps the query, a finished sub-agent wakes the lead in its own turn, and the idle timer arms after", async () => {
+test("background work keeps the query, a sub-agent asks after the turn and then wakes the lead in its own turn, and the idle timer arms after", async () => {
   const { fixture, make, open } = await setup({ idleMs: 30 });
   const adapter = make();
   const heard: SessionEvent[] = [];
@@ -593,9 +593,28 @@ test("background work keeps the query, a finished sub-agent wakes the lead in it
       agentEvents(heard).map((event) => [event.key, event.background]),
       [["t3", true]],
     );
+    await until(
+      () => heard.some((event) => event.type === "approval"),
+      "the background approval",
+    );
+    const approval = heard.find((event) => event.type === "approval")!;
+    assert.equal(approval.type === "approval" && approval.agent, "t3");
+    await until(
+      () =>
+        heard.some(
+          (event) =>
+            event.type === "message" &&
+            event.agent === "t3" &&
+            event.text === "Running the test suite.",
+        ),
+      "the background agent's message",
+    );
     await wait(80);
     assert.equal(fixture.record.calls.includes("close"), false);
-    fixture.finishBackground();
+    session.respond(
+      approval.type === "approval" ? approval.request : "",
+      "accept",
+    );
     await until(
       () => heard.some((event) => event.type === "turn.completed"),
       "harness turn",
@@ -631,8 +650,16 @@ test("Stop interrupts and stops each background task, and cards settle from task
       heard.push(event),
     );
     await run(session, "FIXTURE_BACKGROUND");
+    await until(
+      () => heard.some((event) => event.type === "approval"),
+      "the background approval",
+    );
     await session.stop();
     assert.ok(fixture.record.calls.includes("interrupt"));
+    await until(
+      () => fixture.record.calls.includes("bg-bash:deny"),
+      "the denied approval",
+    );
     assert.ok(fixture.record.calls.includes("stopTask:t3"));
     assert.ok(fixture.record.calls.includes("stopTask:t4"));
     await until(
