@@ -95,6 +95,22 @@ async function setup(
   return { dir, make, context, log, requests, answers, open };
 }
 
+type Fixture = Awaited<ReturnType<typeof setup>>;
+type Body = (adapter: CodexAdapter, fixture: Fixture) => Promise<void>;
+type Options = Parameters<typeof setup>[0];
+async function withAdapter(body: Body): Promise<void>;
+async function withAdapter(options: Options, body: Body): Promise<void>;
+async function withAdapter(options: Options | Body, body?: Body) {
+  if (typeof options === "function") return withAdapter({}, options);
+  const fixture = await setup(options);
+  const adapter = fixture.make();
+  try {
+    await body!(adapter, fixture);
+  } finally {
+    adapter.close();
+  }
+}
+
 /** Runs a turn, letting a handler answer requests as they arrive. */
 async function run(
   session: HarnessSession,
@@ -126,10 +142,8 @@ const text = (events: HarnessEvent[], kind: string) =>
     )
     .join("|");
 
-test("inspect lists fixture models with their efforts and the account", async () => {
-  const setup_ = await setup();
-  const adapter = setup_.make();
-  try {
+test("inspect lists fixture models with their efforts and the account", () =>
+  withAdapter(async (adapter, setup_) => {
     const inspection = await adapter.inspect(setup_.context);
     assert.equal(inspection.auth.state, "signed_in");
     assert.equal(inspection.auth.account, "fixture@example.invalid");
@@ -145,15 +159,10 @@ test("inspect lists fixture models with their efforts and the account", async ()
     assert.equal(inspection.limits[0].usedPercent, 20);
     const { version } = await adapter.handshake(setup_.context);
     assert.equal(version, "0.155.1");
-  } finally {
-    adapter.close();
-  }
-});
+  }));
 
-test("a send streams an assistant message on a thread in the tab's checkout with the loadout", async () => {
-  const setup_ = await setup();
-  const adapter = setup_.make();
-  try {
+test("a send streams an assistant message on a thread in the tab's checkout with the loadout", () =>
+  withAdapter(async (adapter, setup_) => {
     const session = await setup_.open(adapter);
     const events = await run(session, "Hello");
     assert.equal(events[0].type, "session");
@@ -203,10 +212,7 @@ test("a send streams an assistant message on a thread in the tab's checkout with
     assert.equal(env.SSH_AUTH_SOCK, "/tmp/agent.sock");
     assert.equal(env.OPENAI_API_KEY, undefined);
     assert.equal(env.CODEX_API_KEY, undefined);
-  } finally {
-    adapter.close();
-  }
-});
+  }));
 
 test("a reopened tab resumes its thread, and a missing thread is a resume failure", async () => {
   const setup_ = await setup();
@@ -241,10 +247,8 @@ test("a reopened tab resumes its thread, and a missing thread is a resume failur
   }
 });
 
-test("plan mode uses Codex's native plan mode and continuing uses the default mode", async () => {
-  const setup_ = await setup();
-  const adapter = setup_.make();
-  try {
+test("plan mode uses Codex's native plan mode and continuing uses the default mode", () =>
+  withAdapter(async (adapter, setup_) => {
     const session = await setup_.open(adapter);
     const planned = await run(session, "Plan it", {
       ...loadout,
@@ -259,15 +263,10 @@ test("plan mode uses Codex's native plan mode and continuing uses the default mo
       ),
       ["plan", "default"],
     );
-  } finally {
-    adapter.close();
-  }
-});
+  }));
 
-test("ask mode surfaces approvals and auto mode lets Codex act without asking", async () => {
-  const setup_ = await setup();
-  const adapter = setup_.make();
-  try {
+test("ask mode surfaces approvals and auto mode lets Codex act without asking", () =>
+  withAdapter(async (adapter, setup_) => {
     const session = await setup_.open(adapter);
     const events = await run(session, "FIXTURE_APPROVAL", loadout, (event) => {
       if (event.type === "approval") session.respond(event.request, "accept");
@@ -300,15 +299,10 @@ test("ask mode surfaces approvals and auto mode lets Codex act without asking", 
       excludeTmpdirEnvVar: false,
       excludeSlashTmp: false,
     });
-  } finally {
-    adapter.close();
-  }
-});
+  }));
 
-test("user-input requests become questions and MCP forms map onto question cards", async () => {
-  const setup_ = await setup();
-  const adapter = setup_.make();
-  try {
+test("user-input requests become questions and MCP forms map onto question cards", () =>
+  withAdapter(async (adapter, setup_) => {
     const session = await setup_.open(adapter);
     const events = await run(session, "FIXTURE_QUESTION", loadout, (event) => {
       if (event.type === "question")
@@ -360,15 +354,10 @@ test("user-input requests become questions and MCP forms map onto question cards
       ).error.code,
       -32601,
     );
-  } finally {
-    adapter.close();
-  }
-});
+  }));
 
-test("Stop cancels pending requests the way Codex expects, then interrupts the turn", async () => {
-  const setup_ = await setup();
-  const adapter = setup_.make();
-  try {
+test("Stop cancels pending requests the way Codex expects, then interrupts the turn", () =>
+  withAdapter(async (adapter, setup_) => {
     const session = await setup_.open(adapter);
     for (const prompt of [
       "FIXTURE_APPROVAL",
@@ -402,15 +391,10 @@ test("Stop cancels pending requests the way Codex expects, then interrupts the t
     await session.stop();
     await slow;
     assert.equal((await setup_.requests("turn/interrupt")).length, 4);
-  } finally {
-    adapter.close();
-  }
-});
+  }));
 
-test("a usage limit carries its reset time, and a crashed process restarts on the next send", async () => {
-  const setup_ = await setup();
-  const adapter = setup_.make();
-  try {
+test("a usage limit carries its reset time, and a crashed process restarts on the next send", () =>
+  withAdapter(async (adapter, setup_) => {
     const session = await setup_.open(adapter);
     await assert.rejects(
       run(session, "FIXTURE_USAGE"),
@@ -437,17 +421,12 @@ test("a usage limit carries its reset time, and a crashed process restarts on th
       (await setup_.requests("thread/resume")).at(-1)?.params?.threadId,
       session.sessionId,
     );
-  } finally {
-    adapter.close();
-  }
-});
+  }));
 
 test("in-app sign-in returns only allowlisted URLs and reports completion", async () => {
-  const setup_ = await setup({ signedIn: false });
-  const adapter = setup_.make();
-  let changes = 0;
-  adapter.onChange(() => changes++);
-  try {
+  await withAdapter({ signedIn: false }, async (adapter, setup_) => {
+    let changes = 0;
+    adapter.onChange(() => changes++);
     assert.equal(
       (await adapter.inspect(setup_.context)).auth.state,
       "signed_out",
@@ -462,22 +441,16 @@ test("in-app sign-in returns only allowlisted URLs and reports completion", asyn
       (await adapter.inspect(setup_.context)).auth.state,
       "signed_in",
     );
-  } finally {
-    adapter.close();
-  }
-  const rogue = await setup({
-    signedIn: false,
-    loginUrl: "https://evil.example/login",
   });
-  const other = rogue.make();
-  try {
-    await assert.rejects(
-      other.startSignIn(rogue.context),
-      /unsupported sign-in URL/,
-    );
-  } finally {
-    other.close();
-  }
+  await withAdapter(
+    { signedIn: false, loginUrl: "https://evil.example/login" },
+    async (other, rogue) => {
+      await assert.rejects(
+        other.startSignIn(rogue.context),
+        /unsupported sign-in URL/,
+      );
+    },
+  );
 });
 
 test("the shared process closes when idle and stays closed after shutdown", async () => {
@@ -509,11 +482,9 @@ const until = async (check: () => boolean, label: string) => {
   throw new Error(`Timed out waiting for ${label}.`);
 };
 
-test("sub-agent threads register under their parent, and their approvals outlive the lead's turn", async () => {
-  const setup_ = await setup();
-  const adapter = setup_.make();
-  const heard: SessionEvent[] = [];
-  try {
+test("sub-agent threads register under their parent, and their approvals outlive the lead's turn", () =>
+  withAdapter(async (adapter, setup_) => {
+    const heard: SessionEvent[] = [];
     const session = await setup_.open(adapter, {}, undefined, (event) =>
       heard.push(event),
     );
@@ -594,16 +565,11 @@ test("sub-agent threads register under their parent, and their approvals outlive
       .filter(Boolean);
     assert.deepEqual(after.slice(-3), ["completed", "running", "completed"]);
     assert.equal(agentEvents(heard, scout).at(-1)?.summary, "Checked again.");
-  } finally {
-    adapter.close();
-  }
-});
+  }));
 
-test("the lead's plan updates become steps, and a sub-agent's never do", async () => {
-  const setup_ = await setup();
-  const adapter = setup_.make();
-  const heard: SessionEvent[] = [];
-  try {
+test("the lead's plan updates become steps, and a sub-agent's never do", () =>
+  withAdapter(async (adapter, setup_) => {
+    const heard: SessionEvent[] = [];
     const session = await setup_.open(
       adapter,
       { planMode: true },
@@ -621,16 +587,11 @@ test("the lead's plan updates become steps, and a sub-agent's never do", async (
       heard.some((event) => event.type === "steps"),
       false,
     );
-  } finally {
-    adapter.close();
-  }
-});
+  }));
 
-test("Stop interrupts the lead turn and each running sub-agent turn", async () => {
-  const setup_ = await setup();
-  const adapter = setup_.make();
-  const heard: SessionEvent[] = [];
-  try {
+test("Stop interrupts the lead turn and each running sub-agent turn", () =>
+  withAdapter(async (adapter, setup_) => {
+    const heard: SessionEvent[] = [];
     const session = await setup_.open(adapter, {}, undefined, (event) =>
       heard.push(event),
     );
@@ -654,16 +615,11 @@ test("Stop interrupts the lead turn and each running sub-agent turn", async () =
       () => agentEvents(heard, scout).at(-1)?.status === "stopped",
       "stopped scout",
     );
-  } finally {
-    adapter.close();
-  }
-});
+  }));
 
-test("a process exit with no turn reports a crash for the tab", async () => {
-  const setup_ = await setup();
-  const adapter = setup_.make();
-  const heard: SessionEvent[] = [];
-  try {
+test("a process exit with no turn reports a crash for the tab", () =>
+  withAdapter(async (adapter, setup_) => {
+    const heard: SessionEvent[] = [];
     const session = await setup_.open(adapter, {}, undefined, (event) =>
       heard.push(event),
     );
@@ -672,7 +628,4 @@ test("a process exit with no turn reports a crash for the tab", async () => {
       () => heard.some((event) => event.type === "crashed"),
       "crash report",
     );
-  } finally {
-    adapter.close();
-  }
-});
+  }));

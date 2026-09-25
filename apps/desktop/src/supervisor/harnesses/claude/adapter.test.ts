@@ -56,6 +56,22 @@ async function setup(options: { idleMs?: number } = {}) {
   return { dir, fixture, make, context, open };
 }
 
+type Fixture = Awaited<ReturnType<typeof setup>>;
+type Body = (adapter: ClaudeAdapter, fixture: Fixture) => Promise<void>;
+type Options = Parameters<typeof setup>[0];
+async function withAdapter(body: Body): Promise<void>;
+async function withAdapter(options: Options, body: Body): Promise<void>;
+async function withAdapter(options: Options | Body, body?: Body) {
+  if (typeof options === "function") return withAdapter({}, options);
+  const fixture = await setup(options);
+  const adapter = fixture.make();
+  try {
+    await body!(adapter, fixture);
+  } finally {
+    adapter.close();
+  }
+}
+
 async function run(
   session: HarnessSession,
   prompt: string,
@@ -75,10 +91,8 @@ const assistant = (events: HarnessEvent[]) =>
     .map((event) => (event.type === "message" ? event.text : ""))
     .join("|");
 
-test("a send streams assistant text with the host's setup and a scrubbed environment", async () => {
-  const { fixture, make, open, context } = await setup();
-  const adapter = make();
-  try {
+test("a send streams assistant text with the host's setup and a scrubbed environment", () =>
+  withAdapter(async (adapter, { fixture, open, context }) => {
     const session = await open(adapter);
     const events = await run(session, "Hello");
     assert.equal(events[0].type, "session");
@@ -110,10 +124,7 @@ test("a send streams assistant text with the host's setup and a scrubbed environ
     assert.ok(fixture.record.calls.includes("model:haiku"));
     assert.ok(fixture.record.calls.includes('flags:{"effortLevel":"low"}'));
     assert.ok(fixture.record.calls.includes("mode:default"));
-  } finally {
-    adapter.close();
-  }
-});
+  }));
 
 test("on Windows without Git Bash the launch neither requires nor sets a Git Bash path", async () => {
   const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
@@ -133,10 +144,8 @@ test("on Windows without Git Bash the launch neither requires nor sets a Git Bas
   }
 });
 
-test("an AskUserQuestion call becomes a question and the answer reaches the skill", async () => {
-  const { fixture, make, open } = await setup();
-  const adapter = make();
-  try {
+test("an AskUserQuestion call becomes a question and the answer reaches the skill", () =>
+  withAdapter(async (adapter, { fixture, open }) => {
     const session = await open(adapter);
     const events = await run(
       session,
@@ -166,15 +175,10 @@ test("an AskUserQuestion call becomes a question and the answer reaches the skil
         call.startsWith('ask:{"behavior":"allow"'),
       ),
     );
-  } finally {
-    adapter.close();
-  }
-});
+  }));
 
-test("plan mode is native, and continuing from ExitPlanMode switches to the tab's access mode", async () => {
-  const { fixture, make, open } = await setup();
-  const adapter = make();
-  try {
+test("plan mode is native, and continuing from ExitPlanMode switches to the tab's access mode", () =>
+  withAdapter(async (adapter, { fixture, open }) => {
     const plan = { ...loadout, planMode: true };
     const session = await open(adapter, { planMode: true });
     const events = await run(
@@ -193,15 +197,10 @@ test("plan mode is native, and continuing from ExitPlanMode switches to the tab'
     assert.ok(fixture.record.calls.includes("mode:default"));
     assert.ok(fixture.record.calls.includes("exit-plan:allow:default"));
     assert.match(assistant(events), /Implementing the plan/);
-  } finally {
-    adapter.close();
-  }
-});
+  }));
 
-test("ask mode waits on Bash approval and auto mode allows it without asking", async () => {
-  const { fixture, make, open } = await setup();
-  const adapter = make();
-  try {
+test("ask mode waits on Bash approval and auto mode allows it without asking", () =>
+  withAdapter(async (adapter, { fixture, open }) => {
     const session = await open(adapter);
     const asked = await run(session, "FIXTURE_BASH", loadout, (event) => {
       if (event.type === "approval") {
@@ -223,10 +222,7 @@ test("ask mode waits on Bash approval and auto mode allows it without asking", a
     assert.ok(fixture.record.calls.includes("mode:acceptEdits"));
     const tool = auto.filter((event) => event.type === "tool").at(-1);
     assert.equal(tool?.type === "tool" && tool.detail, "README.md");
-  } finally {
-    adapter.close();
-  }
-});
+  }));
 
 test("reopening passes the stored session to resume, and an unknown session is a resume failure", async () => {
   const { fixture, make, open } = await setup();
@@ -251,10 +247,8 @@ test("reopening passes the stored session to resume, and an unknown session is a
   }
 });
 
-test("inspect reuses the machine's login, and a signed-out machine gets guidance only", async () => {
-  const { fixture, make, context } = await setup();
-  const adapter = make();
-  try {
+test("inspect reuses the machine's login, and a signed-out machine gets guidance only", () =>
+  withAdapter(async (adapter, { fixture, context }) => {
     const signedIn = await adapter.inspect(context);
     assert.equal(signedIn.auth.state, "signed_in");
     assert.equal(signedIn.auth.account, "fixture@example.invalid");
@@ -267,10 +261,7 @@ test("inspect reuses the machine's login, and a signed-out machine gets guidance
     assert.equal(signedOut.auth.state, "signed_out");
     assert.match(signedOut.auth.message ?? "", /\/login/);
     assert.deepEqual(signedOut.models, []);
-  } finally {
-    adapter.close();
-  }
-});
+  }));
 
 test("a missing custom binary is reported as program state without a download", async () => {
   const { dir, fixture } = await setup();
@@ -306,10 +297,8 @@ test("a missing custom binary is reported as program state without a download", 
   }
 });
 
-test("Stop denies a pending approval and interrupts, and a usage limit carries its reset time", async () => {
-  const { fixture, make, open } = await setup();
-  const adapter = make();
-  try {
+test("Stop denies a pending approval and interrupts, and a usage limit carries its reset time", () =>
+  withAdapter(async (adapter, { fixture, open }) => {
     const session = await open(adapter);
     await run(session, "FIXTURE_BASH", loadout, async (event) => {
       if (event.type === "approval") await session.stop();
@@ -324,10 +313,7 @@ test("Stop denies a pending approval and interrupts, and a usage limit carries i
         return true;
       },
     );
-  } finally {
-    adapter.close();
-  }
-});
+  }));
 
 test("an idle query closes, does not re-arm after close, and the next send resumes", async () => {
   const { fixture, make, open } = await setup({ idleMs: 30 });
@@ -364,16 +350,18 @@ const until = async (check: () => boolean, label: string) => {
   throw new Error(`Timed out waiting for ${label}.`);
 };
 
-test("sub-agents report cards, their own entries, nesting, and requests on the listener", async () => {
-  const { fixture, make, open } = await setup();
-  const adapter = make();
-  const heard: SessionEvent[] = [];
-  let session: HarnessSession;
-  try {
-    session = await open(adapter, {}, undefined, (event) => {
-      heard.push(event);
-      if (event.type === "approval") session.respond(event.request, "accept");
-    });
+test("sub-agents report cards, their own entries, nesting, and requests on the listener", () =>
+  withAdapter(async (adapter, { fixture, open }) => {
+    const heard: SessionEvent[] = [];
+    const session: HarnessSession = await open(
+      adapter,
+      {},
+      undefined,
+      (event) => {
+        heard.push(event);
+        if (event.type === "approval") session.respond(event.request, "accept");
+      },
+    );
     const events = await run(session, "FIXTURE_AGENTS");
     const [started, progress, done] = agentEvents(heard, "t1");
     assert.deepEqual(started, {
@@ -437,15 +425,10 @@ test("sub-agents report cards, their own entries, nesting, and requests on the l
       { text: "Ship", status: "pending" },
     ]);
     assert.match(assistant(events), /Inspection done/);
-  } finally {
-    adapter.close();
-  }
-});
+  }));
 
-test("the lead's TaskCreate and TaskUpdate calls become its plan, and a sub-agent's list does not", async () => {
-  const { fixture, make, open } = await setup();
-  const adapter = make();
-  try {
+test("the lead's TaskCreate and TaskUpdate calls become its plan, and a sub-agent's list does not", () =>
+  withAdapter(async (adapter, { fixture, open }) => {
     const session = await open(adapter, {}, undefined, () => {});
     const lead = (content: Record<string, unknown>[], parent?: string) =>
       fixture.inject({
@@ -517,16 +500,11 @@ test("the lead's TaskCreate and TaskUpdate calls become its plan, and a sub-agen
       ],
       [{ text: "Write tests", status: "done" }],
     ]);
-  } finally {
-    adapter.close();
-  }
-});
+  }));
 
-test("a sub-agent request waits for the owner outside a turn and after the turn ends", async () => {
-  const { fixture, make, open } = await setup();
-  const adapter = make();
-  const heard: SessionEvent[] = [];
-  try {
+test("a sub-agent request waits for the owner outside a turn and after the turn ends", () =>
+  withAdapter(async (adapter, { fixture, open }) => {
+    const heard: SessionEvent[] = [];
     const session = await open(adapter, {}, undefined, (event) =>
       heard.push(event),
     );
@@ -573,16 +551,11 @@ test("a sub-agent request waits for the owner outside a turn and after the turn 
       "decline",
     );
     assert.equal(((await idle) as { behavior: string }).behavior, "deny");
-  } finally {
-    adapter.close();
-  }
-});
+  }));
 
-test("background work keeps the query, a sub-agent asks after the turn and then wakes the lead in its own turn, and the idle timer arms after", async () => {
-  const { fixture, make, open } = await setup({ idleMs: 30 });
-  const adapter = make();
-  const heard: SessionEvent[] = [];
-  try {
+test("background work keeps the query, a sub-agent asks after the turn and then wakes the lead in its own turn, and the idle timer arms after", () =>
+  withAdapter({ idleMs: 30 }, async (adapter, { fixture, open }) => {
+    const heard: SessionEvent[] = [];
     const session = await open(adapter, {}, undefined, (event) =>
       heard.push(event),
     );
@@ -636,16 +609,11 @@ test("background work keeps the query, a sub-agent asks after the turn and then 
     assert.equal(fixture.record.calls.includes("close"), false);
     fixture.finishShell();
     await until(() => fixture.record.calls.includes("close"), "idle release");
-  } finally {
-    adapter.close();
-  }
-});
+  }));
 
-test("Stop interrupts and stops each background task, and cards settle from task notifications", async () => {
-  const { fixture, make, open } = await setup();
-  const adapter = make();
-  const heard: SessionEvent[] = [];
-  try {
+test("Stop interrupts and stops each background task, and cards settle from task notifications", () =>
+  withAdapter(async (adapter, { fixture, open }) => {
+    const heard: SessionEvent[] = [];
     const session = await open(adapter, {}, undefined, (event) =>
       heard.push(event),
     );
@@ -691,16 +659,11 @@ test("Stop interrupts and stops each background task, and cards settle from task
     );
     assert.equal(agentEvents(heard, "t8").at(-1)?.status, "failed");
     assert.equal(agentEvents(heard, "t8").at(-1)?.summary, "It broke.");
-  } finally {
-    adapter.close();
-  }
-});
+  }));
 
-test("the query ending with background work and no turn reports a crash", async () => {
-  const { fixture, make, open } = await setup();
-  const adapter = make();
-  const heard: SessionEvent[] = [];
-  try {
+test("the query ending with background work and no turn reports a crash", () =>
+  withAdapter(async (adapter, { fixture, open }) => {
+    const heard: SessionEvent[] = [];
     const session = await open(adapter, {}, undefined, (event) =>
       heard.push(event),
     );
@@ -713,7 +676,4 @@ test("the query ending with background work and no turn reports a crash", async 
     // The next send starts a fresh query that resumes the session.
     const next = await run(session, "Hello");
     assert.match(assistant(next), /previous turns: 1/);
-  } finally {
-    adapter.close();
-  }
-});
+  }));

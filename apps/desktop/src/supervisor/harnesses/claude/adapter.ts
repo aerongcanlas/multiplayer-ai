@@ -84,9 +84,7 @@ export const permissionMode = (loadout: Loadout): PermissionMode =>
       : "default";
 
 /** The host's environment plus the flags every Claude Code launch needs. */
-function claudeEnvironment(
-  context: LaunchContext,
-): Record<string, string> {
+function claudeEnvironment(context: LaunchContext): Record<string, string> {
   return {
     ...context.env,
     CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1",

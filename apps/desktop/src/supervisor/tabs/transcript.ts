@@ -193,8 +193,7 @@ export class TranscriptWriter {
       [...this.live.values()]
         .map((live) => live.entry)
         .filter(
-          (entry) =>
-            entry.tabId === tabId && entry.agent?.status === "running",
+          (entry) => entry.tabId === tabId && entry.agent?.status === "running",
         )
         .map((entry) => entry.agent!.key),
     );

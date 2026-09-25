@@ -3,11 +3,17 @@
 import { readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { dirname, join, normalize, relative, resolve } from "node:path";
 
-const codexDir = resolve(import.meta.dirname, "../src/supervisor/harnesses/codex");
+const codexDir = resolve(
+  import.meta.dirname,
+  "../src/supervisor/harnesses/codex",
+);
 const generated = join(codexDir, "generated");
 const importsOf = (file) =>
-  [...readFileSync(file, "utf8").matchAll(/from\s+"(\.[^"]+)"/g)].map(([, spec]) =>
-    normalize(resolve(dirname(file), spec.endsWith(".ts") ? spec : `${spec}.ts`)),
+  [...readFileSync(file, "utf8").matchAll(/from\s+"(\.[^"]+)"/g)].map(
+    ([, spec]) =>
+      normalize(
+        resolve(dirname(file), spec.endsWith(".ts") ? spec : `${spec}.ts`),
+      ),
   );
 const walk = (dir) =>
   readdirSync(dir).flatMap((name) => {
@@ -32,8 +38,16 @@ for (const file of walk(generated))
     rmSync(file);
     removed++;
   }
-for (const dir of readdirSync(generated, { recursive: true, withFileTypes: true }))
+for (const dir of readdirSync(generated, {
+  recursive: true,
+  withFileTypes: true,
+}))
   if (dir.isDirectory() && !readdirSync(join(dir.parentPath, dir.name)).length)
     rmSync(join(dir.parentPath, dir.name), { recursive: true });
 console.log(`kept ${keep.size} generated types, removed ${removed}`);
-console.log([...keep].map((file) => relative(generated, file)).sort().join("\n"));
+console.log(
+  [...keep]
+    .map((file) => relative(generated, file))
+    .sort()
+    .join("\n"),
+);

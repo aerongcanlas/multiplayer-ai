@@ -3,32 +3,23 @@
 // models, a project skill that asks a question, continuing from native plan mode, and resuming the
 // session after an app restart. Writes are declined, so the repository must stay unchanged apart
 // from the skill this script adds under an ignored path.
-import { _electron as electron } from "playwright";
-import { createRequire } from "node:module";
-import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { mkdir, writeFile } from "node:fs/promises";
 import { setTimeout as wait } from "node:timers/promises";
 import assert from "node:assert/strict";
+import {
+  createRun,
+  fingerprint,
+  git,
+  outputDirectory,
+  testEnvironment,
+} from "./e2e-support.mjs";
 
-const require = createRequire(import.meta.url);
-const appDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const argument = process.argv.indexOf("--repository");
 if (argument < 0)
   throw new Error("Pass --repository <path> to a disposable checkout.");
 const repository = resolve(process.argv[argument + 1]);
-const output = resolve(
-  appDirectory,
-  "../../output/playwright",
-  `claude-live-${new Date().toISOString().replaceAll(":", "-")}`,
-);
-await mkdir(output, { recursive: true });
-const git = (...args) =>
-  execFileSync("git", ["-C", repository, ...args], {
-    stdio: "pipe",
-  }).toString();
+const output = await outputDirectory("claude-live-");
 
 // A project skill loads through Claude Code's project settings and asks through AskUserQuestion.
 const skill = join(repository, ".claude/skills/pick-color/SKILL.md");
@@ -44,120 +35,35 @@ Use the AskUserQuestion tool to ask "Which color should we use?" with exactly tw
 "Blue". Then reply with one sentence that names the chosen color. Do not use any other tool.
 `,
 );
-execFileSync("git", [
-  "-C",
-  repository,
-  "config",
-  "core.excludesFile",
-  "/dev/null",
-]);
+git(repository)("config", "core.excludesFile", "/dev/null");
 await writeFile(join(repository, ".git/info/exclude"), ".claude/\n", {
   flag: "a",
 });
-async function fingerprint() {
-  const files = git(
-    "ls-files",
-    "--cached",
-    "--others",
-    "--exclude-standard",
-    "-z",
-  )
-    .split("\0")
-    .filter(Boolean)
-    .sort();
-  const hashes = {};
-  for (const path of files)
-    hashes[path] = createHash("sha256")
-      .update(await readFile(join(repository, path)))
-      .digest("hex");
-  return {
-    revision: git("rev-parse", "HEAD").trim(),
-    status: git("status", "--porcelain"),
-    hashes,
-  };
-}
-const before = await fingerprint();
-const environment = {
-  ...process.env,
-  MP_E2E: "1",
-  MP_TEST_USER_DATA: join(output, "user-data"),
-};
-delete environment.ELECTRON_RUN_AS_NODE;
-delete environment.ELECTRON_RENDERER_URL;
-delete environment.ANTHROPIC_API_KEY;
+const before = await fingerprint(repository);
 
-const checkpoints = [];
-const errors = [];
-let application;
-let page;
-const checkpoint = (label) => {
-  checkpoints.push(label);
-  console.log(`PASS: ${label}`);
-};
-async function snapshot() {
-  const result = await page.evaluate(() => window.desktop.getSnapshot());
-  assert.equal(result.ok, true);
-  return result.snapshot;
-}
-async function until(check, label, timeout = 5 * 60_000) {
-  const end = Date.now() + timeout;
-  while (Date.now() < end) {
-    if (await check()) return;
-    await wait(500);
-  }
-  throw new Error(`Timed out waiting for ${label}.`);
-}
+const run = createRun({
+  output,
+  environment: testEnvironment(
+    { MP_TEST_USER_DATA: join(output, "user-data") },
+    ["ANTHROPIC_API_KEY"],
+  ),
+  timeout: 60_000,
+  untilTimeout: 5 * 60_000,
+  poll: 500,
+  consoleErrors: false,
+});
+const { launch, checkpoint, snapshot, until, send, selectRepository } = run;
 const claude = async () =>
   (await snapshot()).harnesses.find((item) => item.id === "claude");
 const tab = async () => (await snapshot()).rooms[0].tabs[0];
-const panel = () => page.getByRole("region", { name: "AI tabs" });
-const settled = () =>
-  until(
-    async () => !["running", "awaiting_host"].includes((await tab()).status),
-    "the turn to end",
-  );
-async function send(text) {
-  await panel()
-    .getByRole("textbox", { name: "Message", exact: true })
-    .fill(text);
-  await panel().getByRole("button", { name: "Send", exact: true }).click();
-}
-async function launch() {
-  application = await electron.launch({
-    executablePath: require("electron"),
-    args: [appDirectory],
-    cwd: appDirectory,
-    env: environment,
-    timeout: 30_000,
-  });
-  page = await application.firstWindow();
-  await application.evaluate(({ BrowserWindow }) =>
-    BrowserWindow.getAllWindows()[0].showInactive(),
-  );
-  page.setDefaultTimeout(60_000);
-  page.on("pageerror", (error) => errors.push(error.message));
-  await page
-    .getByRole("heading", { name: "My workspace", exact: true })
-    .waitFor();
-}
+const panel = () => run.page.getByRole("region", { name: "AI tabs" });
+const settled = () => run.settled(tab);
 
-try {
+await run.execute(async () => {
   await launch();
-  await application.evaluate(({ dialog }, path) => {
-    dialog.showOpenDialog = async () => ({
-      canceled: false,
-      filePaths: [path],
-    });
-  }, repository);
-  await page
-    .getByRole("button", { name: "Select repository", exact: true })
-    .click();
-  await until(
-    async () => Boolean((await snapshot()).rooms[0].workspace),
-    "the repository",
-  );
+  await selectRepository(repository);
   await panel().getByRole("button", { name: "New tab", exact: true }).click();
-  await page
+  await run.page
     .getByRole("menuitem", { name: "Claude Code", exact: true })
     .click();
   await until(
@@ -172,7 +78,7 @@ try {
   const harness = await claude();
   assert.equal(harness.auth.state, "signed_in");
   assert.ok(harness.models.length > 0);
-  checkpoint(
+  await checkpoint(
     `Managed Claude Code ${harness.program.version} is ready with the existing login (${harness.auth.plan ?? "subscription"}), ${harness.models.length} models`,
   );
 
@@ -192,7 +98,7 @@ try {
     .filter({ hasText: /Blue/i })
     .last()
     .waitFor();
-  checkpoint(
+  await checkpoint(
     "A project skill's question appears as a card and the answer reaches the skill",
   );
 
@@ -223,11 +129,11 @@ try {
     await wait(1_000);
   }
   assert.equal((await tab()).loadout.planMode, false);
-  checkpoint("Native plan mode continues into execution from its card");
+  await checkpoint("Native plan mode continues into execution from its card");
 
   const sessionId = (await tab()).sessionId;
   assert.ok(sessionId);
-  await application.close();
+  await run.application.close();
   await launch();
   await until(async () => (await tab())?.status === "idle", "the restored tab");
   await send(
@@ -240,36 +146,17 @@ try {
     .last()
     .waitFor();
   assert.equal((await tab()).sessionId, sessionId);
-  checkpoint("After a restart the tab resumes the same Claude Code session");
+  await checkpoint(
+    "After a restart the tab resumes the same Claude Code session",
+  );
 
   assert.deepEqual(
-    await fingerprint(),
+    await fingerprint(repository),
     before,
     "The repository must not change",
   );
-  assert.deepEqual(errors, []);
-  checkpoint("The repository is unchanged and the renderer reported no errors");
-  await writeFile(
-    join(output, "report.json"),
-    JSON.stringify({ passed: true, checkpoints }, null, 2),
+  assert.deepEqual(run.errors, []);
+  await checkpoint(
+    "The repository is unchanged and the renderer reported no errors",
   );
-  console.log(`Artifacts: ${output}`);
-} catch (error) {
-  console.error(error);
-  if (page && !page.isClosed())
-    await page
-      .screenshot({ path: join(output, "failure.png") })
-      .catch(() => {});
-  await writeFile(
-    join(output, "report.json"),
-    JSON.stringify(
-      { passed: false, checkpoints, errors, failure: String(error) },
-      null,
-      2,
-    ),
-  );
-  console.error(`Artifacts: ${output}`);
-  process.exitCode = 1;
-} finally {
-  await application?.close().catch(() => {});
-}
+});

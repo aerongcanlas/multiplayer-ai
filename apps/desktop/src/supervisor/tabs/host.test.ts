@@ -1,164 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { execFileSync } from "node:child_process";
-import { setTimeout as wait } from "node:timers/promises";
 import { randomUUID } from "node:crypto";
-import { Journal } from "../journal";
-import { SupervisorService } from "../service";
-import { inspectWorkspace } from "../workspace";
-import { HarnessRegistry } from "../harnesses/registry";
 import { FakeHarness } from "../harnesses/fake";
-import { ProgramManager } from "../programs/manager";
-import { HARNESS_MANIFEST } from "../programs/manifest";
-import type { SupervisorRequest } from "../../shared/contracts";
-import type { Tab, TranscriptBatch, TranscriptEntry } from "../../shared/tabs";
+import { start, withHost } from "../test-support";
+import type { Tab } from "../../shared/tabs";
 
-async function repository() {
-  const dir = await mkdtemp(join(tmpdir(), "multiplayer-tabs-"));
-  const repo = join(dir, "repo");
-  await mkdir(repo);
-  const git = (...args: string[]) =>
-    execFileSync("git", ["-C", repo, ...args], { stdio: "pipe" });
-  git("init");
-  git(
-    "-c",
-    "user.name=Test",
-    "-c",
-    "user.email=test@example.invalid",
-    "-c",
-    "core.hooksPath=/dev/null",
-    "commit",
-    "--allow-empty",
-    "-m",
-    "Fixture",
-  );
-  // The fake harness runs as a custom executable, so nothing is downloaded.
-  const executable = join(dir, "fake-harness");
-  await writeFile(executable, "#!/bin/sh\n");
-  await chmod(executable, 0o755);
-  return { dir, repo, executable };
-}
-
-type Setup = Awaited<ReturnType<typeof start>>;
-async function start(
-  fake: FakeHarness,
-  paths?: { dir: string; repo: string; executable: string },
-) {
-  const { dir, repo, executable } = paths ?? (await repository());
-  const journal = new Journal(join(dir, "journal.sqlite"));
-  journal.setSetting(`harness.${fake.id}.executable`, executable);
-  const batches: TranscriptBatch[] = [];
-  let changed = () => {};
-  const registry = new HarnessRegistry({
-    adapters: [fake],
-    programs: new ProgramManager({ root: dir, manifest: HARNESS_MANIFEST }),
-    settings: journal,
-    changed: () => changed(),
-    environmentTimeoutMs: 0,
-  });
-  registry.setEnvironment({ PATH: process.env.PATH ?? "" });
-  const service = new SupervisorService(journal, () => {}, {
-    registry,
-    publishTranscript: (items) => batches.push(...items),
-    transcriptInterval: 5,
-    stopTimeoutMs: 300,
-  });
-  changed = () => service.harnessesChanged();
-  await registry.refresh(fake.id);
-  const roomId = service.snapshot().rooms[0].id;
-  if (!paths)
-    await service.dispatch({
-      type: "workspace.register",
-      roomId,
-      workspace: await inspectWorkspace(repo),
-    });
-  const dispatch = (command: SupervisorRequest["command"]) =>
-    service.dispatchResult(command);
-  const tabs = () => service.snapshot().rooms[0].tabs;
-  const tab = (id: string) => tabs().find((tab) => tab.id === id)!;
-  const open = async () => {
-    await dispatch({ type: "tab.open", roomId, harness: fake.id });
-    return tabs().at(-1)!;
-  };
-  const transcript = async (tabId: string): Promise<TranscriptEntry[]> =>
-    (await dispatch({ type: "tab.transcript", roomId, tabId })).transcript!
-      .entries;
-  const agents = async (tabId: string): Promise<TranscriptEntry[]> =>
-    (await dispatch({ type: "tab.agents", roomId, tabId })).transcript!.entries;
-  const agentTranscript = async (
-    tabId: string,
-    agentKey: string,
-  ): Promise<TranscriptEntry[]> =>
-    (await dispatch({ type: "tab.transcript", roomId, tabId, agentKey }))
-      .transcript!.entries;
-  const until = async (
-    check: () => boolean | Promise<boolean>,
-    label: string,
-  ) => {
-    for (let attempt = 0; attempt < 200; attempt++) {
-      if (await check()) return;
-      await wait(10);
-    }
-    throw new Error(`Timed out waiting for ${label}.`);
-  };
-  const settled = (tabId: string) =>
-    until(
-      () => !["running", "awaiting_host"].includes(tab(tabId).status),
-      "turn end",
-    );
-  const send = (
-    tabId: string,
-    text: string,
-    extra: Record<string, unknown> = {},
-  ) =>
-    dispatch({
-      type: "tab.send",
-      roomId,
-      tabId,
-      text,
-      ...extra,
-    } as SupervisorRequest["command"]);
-  return {
-    dir,
-    repo,
-    executable,
-    journal,
-    service,
-    registry,
-    batches,
-    roomId,
-    dispatch,
-    tabs,
-    tab,
-    open,
-    transcript,
-    agents,
-    agentTranscript,
-    until,
-    settled,
-    send,
-    close: () => service.close(),
-  };
-}
-
-const pendingOf = async (setup: Setup, tabId: string, kind: string) => {
-  let found: TranscriptEntry | undefined;
-  await setup.until(async () => {
-    found = (await setup.transcript(tabId)).find(
-      (entry) => entry.kind === kind && entry.state === "pending",
-    );
-    return Boolean(found);
-  }, `pending ${kind}`);
-  return found!;
-};
-
-test("a send streams deltas into one assistant entry and ends the turn idle", async () => {
-  const fake = new FakeHarness();
-  const setup = await start(fake);
-  try {
+test("a send streams deltas into one assistant entry and ends the turn idle", () =>
+  withHost(async (setup) => {
     const tab = await setup.open();
     assert.equal(tab.status, "idle");
     assert.equal(tab.loadout.model, "fake-model");
@@ -183,27 +31,16 @@ test("a send streams deltas into one assistant entry and ends the turn idle", as
     // Share levels: reasoning is never shared.
     assert.equal(entries[1].share, "none");
     assert.equal(entries[2].share, "full");
-  } finally {
-    setup.close();
-  }
-});
+  }));
 
-test("an approval waits on the host and accepting it continues the turn", async () => {
-  const fake = new FakeHarness();
-  const setup = await start(fake);
-  try {
+test("an approval waits on the host and accepting it continues the turn", () =>
+  withHost(async (setup, fake) => {
     const tab = await setup.open();
     await setup.send(tab.id, "FAKE_APPROVAL please");
-    const approval = await pendingOf(setup, tab.id, "approval");
+    const approval = await setup.pending(tab.id, "approval");
     assert.equal(setup.tab(tab.id).status, "awaiting_host");
     assert.equal(approval.share, "summary");
-    await setup.dispatch({
-      type: "approval.respond",
-      roomId: setup.roomId,
-      tabId: tab.id,
-      approvalId: approval.id,
-      decision: "accept",
-    });
+    await setup.respond(tab.id, approval.id);
     await setup.settled(tab.id);
     const entries = await setup.transcript(tab.id);
     assert.equal(
@@ -217,45 +54,22 @@ test("an approval waits on the host and accepting it continues the turn", async 
     assert.equal(tool.share, "summary");
     assert.ok(fake.calls.includes("respond:approval-1:accept"));
     await assert.rejects(
-      setup.dispatch({
-        type: "approval.respond",
-        roomId: setup.roomId,
-        tabId: tab.id,
-        approvalId: approval.id,
-        decision: "accept",
-      }),
+      setup.respond(tab.id, approval.id),
       /no longer pending/,
     );
-  } finally {
-    setup.close();
-  }
-});
+  }));
 
-test("a question card's answer reaches the harness", async () => {
-  const fake = new FakeHarness("claude", { signIn: "guidance" });
-  const setup = await start(fake);
-  try {
+test("a question card's answer reaches the harness", () =>
+  withHost({ id: "claude", signIn: "guidance" }, async (setup, fake) => {
     const tab = await setup.open();
     await setup.send(tab.id, "FAKE_QUESTION run the skill");
-    const question = await pendingOf(setup, tab.id, "question");
+    const question = await setup.pending(tab.id, "question");
     assert.equal(question.questions?.[0].id, "scope");
     await assert.rejects(
-      setup.dispatch({
-        type: "question.answer",
-        roomId: setup.roomId,
-        tabId: tab.id,
-        questionId: question.id,
-        answers: { unknown: ["x"] },
-      }),
+      setup.answer(tab.id, question.id, { unknown: ["x"] }),
       /do not match/,
     );
-    await setup.dispatch({
-      type: "question.answer",
-      roomId: setup.roomId,
-      tabId: tab.id,
-      questionId: question.id,
-      answers: { scope: ["Small"] },
-    });
+    await setup.answer(tab.id, question.id, { scope: ["Small"] });
     await setup.settled(tab.id);
     const entries = await setup.transcript(tab.id);
     assert.equal(
@@ -267,23 +81,14 @@ test("a question card's answer reaches the harness", async () => {
       /Small/,
     );
     assert.ok(fake.calls.includes("answer:question-1"));
-  } finally {
-    setup.close();
-  }
-});
+  }));
 
-test("Stop during a pending approval cancels it before stopping, and the turn ends stopped", async () => {
-  const fake = new FakeHarness();
-  const setup = await start(fake);
-  try {
+test("Stop during a pending approval cancels it before stopping, and the turn ends stopped", () =>
+  withHost(async (setup, fake) => {
     const tab = await setup.open();
     await setup.send(tab.id, "FAKE_APPROVAL please");
-    const approval = await pendingOf(setup, tab.id, "approval");
-    await setup.dispatch({
-      type: "tab.stop",
-      roomId: setup.roomId,
-      tabId: tab.id,
-    });
+    const approval = await setup.pending(tab.id, "approval");
+    await setup.stopTab(tab.id);
     await setup.settled(tab.id);
     assert.equal(setup.tab(tab.id).status, "idle");
     assert.deepEqual(
@@ -296,10 +101,7 @@ test("Stop during a pending approval cancels it before stopping, and the turn en
       "cancelled",
     );
     assert.equal(entries.at(-1)?.outcome, "stopped");
-  } finally {
-    setup.close();
-  }
-});
+  }));
 
 test("after a restart a running turn is interrupted with no pending approval, and a follow-up resumes the session", async () => {
   const fake = new FakeHarness();
@@ -309,7 +111,7 @@ test("after a restart a running turn is interrupted with no pending approval, an
   await first.settled(tab.id);
   const sessionId = first.tab(tab.id).sessionId!;
   await first.send(tab.id, "FAKE_APPROVAL please");
-  await pendingOf(first, tab.id, "approval");
+  await first.pending(tab.id, "approval");
   first.close();
 
   const second = await start(fake, first);
@@ -337,10 +139,8 @@ test("after a restart a running turn is interrupted with no pending approval, an
   }
 });
 
-test("turns are one per tab, concurrent across tabs, and lock the loadout", async () => {
-  const fake = new FakeHarness();
-  const setup = await start(fake);
-  try {
+test("turns are one per tab, concurrent across tabs, and lock the loadout", () =>
+  withHost(async (setup) => {
     const one = await setup.open();
     const two = await setup.open();
     assert.equal(two.title, "Codex 2");
@@ -350,35 +150,17 @@ test("turns are one per tab, concurrent across tabs, and lock the loadout", asyn
     assert.equal(setup.tab(two.id).status, "running");
     await assert.rejects(setup.send(one.id, "Again"), /already running/);
     await assert.rejects(
-      setup.dispatch({
-        type: "tab.setLoadout",
-        roomId: setup.roomId,
-        tabId: one.id,
-        loadout: { ...one.loadout, planMode: true },
-      }),
+      setup.setLoadout(one.id, { ...one.loadout, planMode: true }),
       /after this turn ends/,
     );
-    await setup.dispatch({
-      type: "tab.stop",
-      roomId: setup.roomId,
-      tabId: one.id,
-    });
-    await setup.dispatch({
-      type: "tab.stop",
-      roomId: setup.roomId,
-      tabId: two.id,
-    });
+    await setup.stopTab(one.id);
+    await setup.stopTab(two.id);
     await setup.settled(one.id);
     await setup.settled(two.id);
-  } finally {
-    setup.close();
-  }
-});
+  }));
 
-test("a model missing from the latest list blocks send until reselected", async () => {
-  const fake = new FakeHarness();
-  const setup = await start(fake);
-  try {
+test("a model missing from the latest list blocks send until reselected", () =>
+  withHost(async (setup, fake) => {
     const tab = await setup.open();
     fake.models = [
       {
@@ -391,29 +173,19 @@ test("a model missing from the latest list blocks send until reselected", async 
     ];
     await setup.registry.refresh("codex");
     await assert.rejects(setup.send(tab.id, "Hello"), /Choose a model again/);
-    await setup.dispatch({
-      type: "tab.setLoadout",
-      roomId: setup.roomId,
-      tabId: tab.id,
-      loadout: {
-        harness: "codex",
-        model: "other",
-        planMode: false,
-        access: "ask",
-      },
+    await setup.setLoadout(tab.id, {
+      harness: "codex",
+      model: "other",
+      planMode: false,
+      access: "ask",
     });
     await setup.send(tab.id, "Hello");
     await setup.settled(tab.id);
     assert.equal(fake.loadouts.at(-1)?.model, "other");
-  } finally {
-    setup.close();
-  }
-});
+  }));
 
-test("a suggestion is validated, stored on the user entry, and marked submitted in a local room", async () => {
-  const fake = new FakeHarness();
-  const setup = await start(fake);
-  try {
+test("a suggestion is validated, stored on the user entry, and marked submitted in a local room", () =>
+  withHost(async (setup) => {
     const tab = await setup.open();
     await setup.dispatch({
       type: "message.send",
@@ -453,48 +225,26 @@ test("a suggestion is validated, stored on the user entry, and marked submitted 
       }),
       /already submitted/,
     );
-  } finally {
-    setup.close();
-  }
-});
+  }));
 
-test("closing a running tab needs confirmation, then stops the turn and removes the tab", async () => {
-  const fake = new FakeHarness();
-  const setup = await start(fake);
-  try {
+test("closing a running tab needs confirmation, then stops the turn and removes the tab", () =>
+  withHost(async (setup, fake) => {
     const tab = await setup.open();
     await setup.send(tab.id, "FAKE_SLOW");
     await setup.until(
       () => fake.calls.includes("send:FAKE_SLOW"),
       "turn start",
     );
-    await assert.rejects(
-      setup.dispatch({
-        type: "tab.close",
-        roomId: setup.roomId,
-        tabId: tab.id,
-      }),
-      /Confirm/,
-    );
-    await setup.dispatch({
-      type: "tab.close",
-      roomId: setup.roomId,
-      tabId: tab.id,
-      confirm: true,
-    });
+    await assert.rejects(setup.closeTab(tab.id), /Confirm/);
+    await setup.closeTab(tab.id, true);
     assert.equal(setup.tabs().length, 0);
     assert.ok(fake.calls.includes("stop"));
     assert.ok(fake.calls.includes("close"));
     assert.equal(setup.journal.lastSeq(tab.id), 0);
-  } finally {
-    setup.close();
-  }
-});
+  }));
 
-test("a harness failure mid-turn ends the turn with an error entry", async () => {
-  const fake = new FakeHarness();
-  const setup = await start(fake);
-  try {
+test("a harness failure mid-turn ends the turn with an error entry", () =>
+  withHost(async (setup) => {
     const tab = await setup.open();
     await setup.send(tab.id, "FAKE_THROW");
     await setup.settled(tab.id);
@@ -516,10 +266,7 @@ test("a harness failure mid-turn ends the turn with an error entry", async () =>
       (entry) => entry.notice === "usage_limit",
     );
     assert.equal(usage?.resetsAt, 2_000_000_000);
-  } finally {
-    setup.close();
-  }
-});
+  }));
 
 test("a session that cannot be resumed offers a fresh session", async () => {
   const fake = new FakeHarness();
@@ -539,11 +286,7 @@ test("a session that cannot be resumed offers a fresh session", async () => {
     );
     assert.equal(notice?.offerFreshSession, true);
     await assert.rejects(second.send(tab.id, "Again"), /Start a fresh session/);
-    await second.dispatch({
-      type: "tab.resetSession",
-      roomId: second.roomId,
-      tabId: tab.id,
-    });
+    await second.resetSession(tab.id);
     assert.equal(second.tab(tab.id).sessionId, undefined);
     await second.send(tab.id, "Fresh start");
     await second.settled(tab.id);
@@ -575,31 +318,20 @@ test("a failed first turn after a resume also offers a fresh session", async () 
   }
 });
 
-test("Stop answers while a slow harness refresh is still running", async () => {
-  const fake = new FakeHarness("codex", { inspectDelayMs: 1_000 });
-  const setup = await start(fake);
-  try {
+test("Stop answers while a slow harness refresh is still running", () =>
+  withHost({ inspectDelayMs: 1_000 }, async (setup) => {
     const tab = await setup.open();
     await setup.send(tab.id, "FAKE_SLOW");
     const began = Date.now();
     await setup.dispatch({ type: "harness.refresh", harness: "codex" });
-    await setup.dispatch({
-      type: "tab.stop",
-      roomId: setup.roomId,
-      tabId: tab.id,
-    });
+    await setup.stopTab(tab.id);
     assert.ok(Date.now() - began < 500);
     await setup.settled(tab.id);
     assert.equal(setup.tab(tab.id).status, "idle");
-  } finally {
-    setup.close();
-  }
-});
+  }));
 
-test("a sign-out mid-turn yields a sign-out notice and marks the harness not ready", async () => {
-  const fake = new FakeHarness();
-  const setup = await start(fake);
-  try {
+test("a sign-out mid-turn yields a sign-out notice and marks the harness not ready", () =>
+  withHost(async (setup) => {
     const tab = await setup.open();
     await setup.send(tab.id, "FAKE_SIGNOUT");
     await setup.settled(tab.id);
@@ -620,21 +352,14 @@ test("a sign-out mid-turn yields a sign-out notice and marks the harness not rea
       "signed_out",
     );
     await assert.rejects(setup.send(tab.id, "Hello"), /not ready/);
-  } finally {
-    setup.close();
-  }
-});
+  }));
 
-test("plan mode marks the plan continuable, and continuing turns plan mode off", async () => {
-  const fake = new FakeHarness();
-  const setup = await start(fake);
-  try {
+test("plan mode marks the plan continuable, and continuing turns plan mode off", () =>
+  withHost(async (setup, fake) => {
     const tab = await setup.open();
-    await setup.dispatch({
-      type: "tab.setLoadout",
-      roomId: setup.roomId,
-      tabId: tab.id,
-      loadout: { ...setup.tab(tab.id).loadout, planMode: true },
+    await setup.setLoadout(tab.id, {
+      ...setup.tab(tab.id).loadout,
+      planMode: true,
     });
     await setup.send(tab.id, "Plan the change");
     await setup.settled(tab.id);
@@ -648,42 +373,24 @@ test("plan mode marks the plan continuable, and continuing turns plan mode off",
     assert.equal(fake.loadouts.at(-1)?.planMode, false);
 
     // A harness that asks to leave plan mode gets a continue card instead.
-    await setup.dispatch({
-      type: "tab.setLoadout",
-      roomId: setup.roomId,
-      tabId: tab.id,
-      loadout: { ...setup.tab(tab.id).loadout, planMode: true },
+    await setup.setLoadout(tab.id, {
+      ...setup.tab(tab.id).loadout,
+      planMode: true,
     });
     await setup.send(tab.id, "FAKE_EXIT_PLAN");
-    const exit = await pendingOf(setup, tab.id, "plan");
-    await setup.dispatch({
-      type: "approval.respond",
-      roomId: setup.roomId,
-      tabId: tab.id,
-      approvalId: exit.id,
-      decision: "accept",
-    });
+    const exit = await setup.pending(tab.id, "plan");
+    await setup.respond(tab.id, exit.id);
     await setup.settled(tab.id);
     assert.equal(setup.tab(tab.id).loadout.planMode, false);
-  } finally {
-    setup.close();
-  }
-});
+  }));
 
-test("changing the harness between turns starts a new session", async () => {
-  const codex = new FakeHarness("codex");
-  const setup = await start(codex);
-  try {
+test("changing the harness between turns starts a new session", () =>
+  withHost(async (setup) => {
     const tab: Tab = await setup.open();
     await setup.send(tab.id, "Hello");
     await setup.settled(tab.id);
     await assert.rejects(
-      setup.dispatch({
-        type: "tab.setLoadout",
-        roomId: setup.roomId,
-        tabId: tab.id,
-        loadout: { ...tab.loadout, effort: "xhigh" },
-      }),
+      setup.setLoadout(tab.id, { ...tab.loadout, effort: "xhigh" }),
       /does not support/,
     );
     await setup.dispatch({
@@ -693,15 +400,10 @@ test("changing the harness between turns starts a new session", async () => {
       title: "Refactor",
     });
     assert.equal(setup.tab(tab.id).title, "Refactor");
-  } finally {
-    setup.close();
-  }
-});
+  }));
 
-test("a shared-room import keeps local tabs for the same account and project", async () => {
-  const fake = new FakeHarness();
-  const setup = await start(fake);
-  try {
+test("a shared-room import keeps local tabs for the same account and project", () =>
+  withHost(async (setup) => {
     const shared = {
       ...structuredClone(setup.service.snapshot().rooms[0]),
       id: randomUUID(),
@@ -734,10 +436,7 @@ test("a shared-room import keeps local tabs for the same account and project", a
       room: { ...shared, shared: { ...shared.shared, userId: randomUUID() } },
     });
     assert.deepEqual(room().tabs, []);
-  } finally {
-    setup.close();
-  }
-});
+  }));
 
 test("restored tabs become ready again without a manual refresh", async () => {
   const fake = new FakeHarness();
@@ -759,38 +458,8 @@ test("restored tabs become ready again without a manual refresh", async () => {
   }
 });
 
-const card = async (setup: Setup, tabId: string, key: string) =>
-  (await setup.agents(tabId)).find((entry) => entry.agent?.key === key);
-const pendingFrom = async (setup: Setup, tabId: string, agentKey: string) => {
-  let found: TranscriptEntry | undefined;
-  await setup.until(async () => {
-    found = (await setup.agentTranscript(tabId, agentKey)).find(
-      (entry) => entry.state === "pending",
-    );
-    return Boolean(found);
-  }, `pending request from ${agentKey}`);
-  return found!;
-};
-const respond = (
-  setup: Setup,
-  tabId: string,
-  approvalId: string,
-  decision: "accept" | "decline" = "accept",
-) =>
-  setup.dispatch({
-    type: "approval.respond",
-    roomId: setup.roomId,
-    tabId,
-    approvalId,
-    decision,
-  });
-const stopTab = (setup: Setup, tabId: string) =>
-  setup.dispatch({ type: "tab.stop", roomId: setup.roomId, tabId });
-
-test("sub-agents get cards under their turn, and a background one outlives the turn without blocking it", async () => {
-  const fake = new FakeHarness("claude", { signIn: "guidance" });
-  const setup = await start(fake);
-  try {
+test("sub-agents get cards under their turn, and a background one outlives the turn without blocking it", () =>
+  withHost({ id: "claude", signIn: "guidance" }, async (setup, fake) => {
     const tab = await setup.open();
     await setup.send(tab.id, "FAKE_AGENTS go");
     await setup.settled(tab.id);
@@ -850,32 +519,32 @@ test("sub-agents get cards under their turn, and a background one outlives the t
     );
     assert.equal(tests.agent?.background, true);
     // The approval raised mid-turn is still pending after the turn and names its sub-agent.
-    const first = await pendingFrom(setup, tab.id, "tests");
+    const first = await setup.pending(tab.id, "approval", "tests");
     assert.equal(first.agentKey, "tests");
     assert.equal(first.turnId, turnId);
     await setup.send(tab.id, "Hello");
     await setup.settled(tab.id);
     assert.equal(setup.tab(tab.id).status, "idle");
-    await respond(setup, tab.id, first.id);
+    await setup.respond(tab.id, first.id);
     assert.ok(fake.calls.includes("respond:tests-1:accept"));
     assert.equal(setup.tab(tab.id).agentRequests, undefined);
     assert.equal(setup.tab(tab.id).runningAgents, 1);
     // Another request after the turn, and entries still file under the spawning turn.
-    const second = await pendingFrom(setup, tab.id, "tests");
+    const second = await setup.pending(tab.id, "approval", "tests");
     assert.equal(setup.tab(tab.id).agentRequests, 1);
     assert.equal(setup.tab(tab.id).status, "idle");
     const tool = (await setup.agentTranscript(tab.id, "tests")).find(
       (entry) => entry.kind === "tool",
     );
     assert.equal(tool?.turnId, turnId);
-    await respond(setup, tab.id, second.id);
+    await setup.respond(tab.id, second.id);
     await setup.until(
       async () =>
-        (await card(setup, tab.id, "tests"))?.agent?.status === "completed",
+        (await setup.card(tab.id, "tests"))?.agent?.status === "completed",
       "background completion",
     );
     assert.equal(
-      (await card(setup, tab.id, "tests"))?.detail,
+      (await setup.card(tab.id, "tests"))?.detail,
       "All tests passed.",
     );
     // The harness then wakes the lead with a turn of its own.
@@ -893,23 +562,18 @@ test("sub-agents get cards under their turn, and a background one outlives the t
     assert.ok(woken.turnId && woken.turnId !== turnId);
     assert.equal(setup.tab(tab.id).status, "idle");
     assert.equal(setup.tab(tab.id).runningAgents, undefined);
-  } finally {
-    setup.close();
-  }
-});
+  }));
 
-test("Stop on an idle tab stops its background sub-agents", async () => {
-  const fake = new FakeHarness();
-  const setup = await start(fake);
-  try {
+test("Stop on an idle tab stops its background sub-agents", () =>
+  withHost(async (setup, fake) => {
     const tab = await setup.open();
-    await assert.rejects(stopTab(setup, tab.id), /no running turn/);
+    await assert.rejects(setup.stopTab(tab.id), /no running turn/);
     await setup.send(tab.id, "FAKE_AGENTS go");
     await setup.settled(tab.id);
-    const approval = await pendingFrom(setup, tab.id, "tests");
-    await stopTab(setup, tab.id);
+    const approval = await setup.pending(tab.id, "approval", "tests");
+    await setup.stopTab(tab.id);
     assert.ok(fake.calls.includes("stop"));
-    const tests = await card(setup, tab.id, "tests");
+    const tests = await setup.card(tab.id, "tests");
     assert.equal(tests?.agent?.status, "stopped");
     assert.equal(tests?.detail, "Stopped before finishing");
     assert.equal(setup.tab(tab.id).runningAgents, undefined);
@@ -920,19 +584,14 @@ test("Stop on an idle tab stops its background sub-agents", async () => {
       )?.state,
       "cancelled",
     );
-    await assert.rejects(stopTab(setup, tab.id), /no running turn/);
-  } finally {
-    setup.close();
-  }
-});
+    await assert.rejects(setup.stopTab(tab.id), /no running turn/);
+  }));
 
-test("a sub-agent request never blocks the lead, and Stop cancels both kinds", async () => {
-  const fake = new FakeHarness();
-  const setup = await start(fake);
-  try {
+test("a sub-agent request never blocks the lead, and Stop cancels both kinds", () =>
+  withHost(async (setup, fake) => {
     const tab = await setup.open();
     await setup.send(tab.id, "FAKE_APPROVAL please");
-    const lead = await pendingOf(setup, tab.id, "approval");
+    const lead = await setup.pending(tab.id, "approval");
     assert.equal(setup.tab(tab.id).status, "awaiting_host");
     const session = fake.sessions[0];
     session.emit({ type: "agent", key: "helper", description: "Help" });
@@ -942,10 +601,10 @@ test("a sub-agent request never blocks the lead, and Stop cancels both kinds", a
       request: "helper-1",
       summary: "Run command: ls",
     });
-    const sub = await pendingFrom(setup, tab.id, "helper");
+    const sub = await setup.pending(tab.id, "approval", "helper");
     assert.equal(setup.tab(tab.id).status, "awaiting_host");
     assert.equal(setup.tab(tab.id).agentRequests, 1);
-    await stopTab(setup, tab.id);
+    await setup.stopTab(tab.id);
     await setup.settled(tab.id);
     assert.equal(
       (await setup.transcript(tab.id)).find((entry) => entry.id === lead.id)
@@ -959,15 +618,10 @@ test("a sub-agent request never blocks the lead, and Stop cancels both kinds", a
       "cancelled",
     );
     assert.equal(setup.tab(tab.id).agentRequests, undefined);
-  } finally {
-    setup.close();
-  }
-});
+  }));
 
-test("a sub-agent request during a running turn leaves it running", async () => {
-  const fake = new FakeHarness();
-  const setup = await start(fake);
-  try {
+test("a sub-agent request during a running turn leaves it running", () =>
+  withHost(async (setup, fake) => {
     const tab = await setup.open();
     await setup.send(tab.id, "FAKE_SLOW");
     await setup.until(() => fake.sessions.length === 1, "session");
@@ -989,29 +643,18 @@ test("a sub-agent request during a running turn leaves it running", async () => 
         },
       ],
     });
-    const question = await pendingFrom(setup, tab.id, "helper");
+    const question = await setup.pending(tab.id, "question", "helper");
     assert.equal(setup.tab(tab.id).status, "running");
     session.respond("slow", "accept");
     await setup.settled(tab.id);
     // Still answerable after the turn ended.
-    await setup.dispatch({
-      type: "question.answer",
-      roomId: setup.roomId,
-      tabId: tab.id,
-      questionId: question.id,
-      answers: { which: ["README.md"] },
-    });
+    await setup.answer(tab.id, question.id, { which: ["README.md"] });
     assert.ok(fake.calls.includes("answer:helper-q"));
     assert.equal(setup.tab(tab.id).agentRequests, undefined);
-  } finally {
-    setup.close();
-  }
-});
+  }));
 
-test("a harness-started turn runs like an owner turn and blocks sends until it ends", async () => {
-  const fake = new FakeHarness();
-  const setup = await start(fake);
-  try {
+test("a harness-started turn runs like an owner turn and blocks sends until it ends", () =>
+  withHost(async (setup, fake) => {
     const tab = await setup.open();
     await setup.send(tab.id, "Hello");
     await setup.settled(tab.id);
@@ -1034,15 +677,10 @@ test("a harness-started turn runs like an owner turn and blocks sends until it e
     assert.equal(entries.at(-1)?.outcome, "completed");
     await setup.send(tab.id, "Again");
     await setup.settled(tab.id);
-  } finally {
-    setup.close();
-  }
-});
+  }));
 
-test("sub-agent tools update in place after the turn, and re-engaged cards file under the new turn", async () => {
-  const fake = new FakeHarness();
-  const setup = await start(fake);
-  try {
+test("sub-agent tools update in place after the turn, and re-engaged cards file under the new turn", () =>
+  withHost(async (setup, fake) => {
     const tab = await setup.open();
     await setup.send(tab.id, "FAKE_SLOW");
     await setup.until(() => fake.sessions.length === 1, "session");
@@ -1086,14 +724,11 @@ test("sub-agent tools update in place after the turn, and re-engaged cards file 
     tools = await setup.agentTranscript(tab.id, "worker");
     assert.equal(tools.at(-1)?.turnId, second);
     assert.notEqual(second, first);
-    const worker = await card(setup, tab.id, "worker");
+    const worker = await setup.card(tab.id, "worker");
     assert.equal(worker?.turnId, first);
     assert.equal(worker?.agent?.status, "running");
     assert.equal(worker?.agent?.endedAt, undefined);
-  } finally {
-    setup.close();
-  }
-});
+  }));
 
 test("after a restart running cards read interrupted and idle tabs get no turn notice", async () => {
   const fake = new FakeHarness();
@@ -1101,7 +736,7 @@ test("after a restart running cards read interrupted and idle tabs get no turn n
   const tab = await first.open();
   await first.send(tab.id, "FAKE_AGENTS go");
   await first.settled(tab.id);
-  await pendingFrom(first, tab.id, "tests");
+  await first.pending(tab.id, "approval", "tests");
   first.close();
 
   const second = await start(fake, first);
@@ -1133,10 +768,8 @@ test("after a restart running cards read interrupted and idle tabs get no turn n
   }
 });
 
-test("a crash with no turn interrupts running cards, and the stop timeout stops them", async () => {
-  const fake = new FakeHarness();
-  const setup = await start(fake);
-  try {
+test("a crash with no turn interrupts running cards, and the stop timeout stops them", () =>
+  withHost(async (setup, fake) => {
     const tab = await setup.open();
     await setup.send(tab.id, "FAKE_AGENTS go");
     await setup.settled(tab.id);
@@ -1145,7 +778,7 @@ test("a crash with no turn interrupts running cards, and the stop timeout stops 
       message: "The fake harness exited.",
     });
     assert.equal(
-      (await card(setup, tab.id, "tests"))?.agent?.status,
+      (await setup.card(tab.id, "tests"))?.agent?.status,
       "interrupted",
     );
     assert.equal(setup.tab(tab.id).runningAgents, undefined);
@@ -1162,89 +795,51 @@ test("a crash with no turn interrupts running cards, and the stop timeout stops 
       key: "stuck",
       description: "Stuck",
     });
-    await stopTab(setup, tab.id);
-    assert.equal(
-      (await card(setup, tab.id, "stuck"))?.agent?.status,
-      "running",
-    );
+    await setup.stopTab(tab.id);
+    assert.equal((await setup.card(tab.id, "stuck"))?.agent?.status, "running");
     await setup.until(
       async () =>
-        (await card(setup, tab.id, "stuck"))?.agent?.status === "stopped",
+        (await setup.card(tab.id, "stuck"))?.agent?.status === "stopped",
       "stop timeout",
     );
     assert.equal(
-      (await card(setup, tab.id, "stuck"))?.detail,
+      (await setup.card(tab.id, "stuck"))?.detail,
       "Stopped before finishing",
     );
     assert.equal(fake.calls.filter((call) => call === "close").length, 2);
-  } finally {
-    setup.close();
-  }
-});
+  }));
 
-test("running sub-agents guard close, reset, and harness changes", async () => {
-  const fake = new FakeHarness();
-  const setup = await start(fake);
-  try {
+test("running sub-agents guard close, reset, and harness changes", () =>
+  withHost(async (setup, fake) => {
     const tab = await setup.open();
     await setup.send(tab.id, "FAKE_AGENTS go");
     await setup.settled(tab.id);
+    await assert.rejects(setup.closeTab(tab.id), /running sub-agents/);
     await assert.rejects(
-      setup.dispatch({
-        type: "tab.close",
-        roomId: setup.roomId,
-        tabId: tab.id,
-      }),
-      /running sub-agents/,
-    );
-    await assert.rejects(
-      setup.dispatch({
-        type: "tab.resetSession",
-        roomId: setup.roomId,
-        tabId: tab.id,
-      }),
+      setup.resetSession(tab.id),
       /sub-agents are still running/,
     );
     await assert.rejects(
-      setup.dispatch({
-        type: "tab.setLoadout",
-        roomId: setup.roomId,
-        tabId: tab.id,
-        loadout: { ...setup.tab(tab.id).loadout, harness: "claude" },
+      setup.setLoadout(tab.id, {
+        ...setup.tab(tab.id).loadout,
+        harness: "claude",
       }),
       /sub-agents are still running/,
     );
     // Other loadout changes stay open.
-    await setup.dispatch({
-      type: "tab.setLoadout",
-      roomId: setup.roomId,
-      tabId: tab.id,
-      loadout: { ...setup.tab(tab.id).loadout, effort: "low" },
+    await setup.setLoadout(tab.id, {
+      ...setup.tab(tab.id).loadout,
+      effort: "low",
     });
-    await setup.dispatch({
-      type: "tab.close",
-      roomId: setup.roomId,
-      tabId: tab.id,
-      confirm: true,
-    });
+    await setup.closeTab(tab.id, true);
     assert.equal(setup.tabs().length, 0);
     assert.ok(fake.calls.includes("stop"));
-  } finally {
-    setup.close();
-  }
-});
+  }));
 
-test("the lead plan lands on the tab, sub-agent plans stay off it, and a reset clears it", async () => {
-  const fake = new FakeHarness();
-  const setup = await start(fake);
-  try {
+test("the lead plan lands on the tab, sub-agent plans stay off it, and a reset clears it", () =>
+  withHost(async (setup, fake) => {
     const tab = await setup.open();
-    await setup.dispatch({
-      type: "tab.setLoadout",
-      roomId: setup.roomId,
-      tabId: tab.id,
-      loadout: { ...tab.loadout, planMode: true },
-    });
+    await setup.setLoadout(tab.id, { ...tab.loadout, planMode: true });
     await setup.send(tab.id, "FAKE_SLOW");
     await setup.until(() => fake.sessions.length === 1, "session");
     const session = fake.sessions[0];
@@ -1269,13 +864,6 @@ test("the lead plan lands on the tab, sub-agent plans stay off it, and a reset c
       { text: "Lead step", status: "pending" },
     ]);
     session.emit({ type: "agent", key: "planner", status: "completed" });
-    await setup.dispatch({
-      type: "tab.resetSession",
-      roomId: setup.roomId,
-      tabId: tab.id,
-    });
+    await setup.resetSession(tab.id);
     assert.equal(setup.tab(tab.id).plan, undefined);
-  } finally {
-    setup.close();
-  }
-});
+  }));
