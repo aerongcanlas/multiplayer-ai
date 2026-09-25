@@ -1,9 +1,11 @@
 import type {
+  AgentStatus,
   HarnessId,
   HarnessModel,
   HarnessQuestion,
   HarnessState,
   Loadout,
+  PlanStep,
 } from "../../shared/tabs";
 
 /** The resolved program and launch environment an adapter runs with. */
@@ -18,6 +20,7 @@ export interface Inspection {
   limits: HarnessState["limits"];
 }
 
+// `agent` names the sub-agent card an event belongs to; lead events leave it unset.
 export type HarnessEvent =
   // The harness session to resume later (a Codex thread or a Claude Code session).
   | { type: "session"; sessionId: string }
@@ -27,6 +30,7 @@ export type HarnessEvent =
       item: string;
       kind: "assistant" | "reasoning" | "plan";
       delta: string;
+      agent?: string;
     }
   // A whole text item, replacing any streamed deltas for that item.
   | {
@@ -34,9 +38,16 @@ export type HarnessEvent =
       item: string;
       kind: "assistant" | "reasoning" | "plan";
       text: string;
+      agent?: string;
     }
   // Tool activity: a one-line shareable summary and local-only detail such as output.
-  | { type: "tool"; item: string; summary: string; detail?: string }
+  | {
+      type: "tool";
+      item: string;
+      summary: string;
+      detail?: string;
+      agent?: string;
+    }
   // A request the host approves or declines. `plan` marks a "continue into execution" request.
   | {
       type: "approval";
@@ -44,9 +55,47 @@ export type HarnessEvent =
       summary: string;
       detail?: string;
       plan?: boolean;
+      agent?: string;
     }
-  | { type: "question"; request: string; questions: HarnessQuestion[] }
-  | { type: "notice"; summary: string; notice?: "unsupported_request" };
+  | {
+      type: "question";
+      request: string;
+      questions: HarnessQuestion[];
+      agent?: string;
+    }
+  | {
+      type: "notice";
+      summary: string;
+      notice?: "unsupported_request";
+      agent?: string;
+    }
+  // Creates or updates a sub-agent card. Fields left out keep their last value.
+  | {
+      type: "agent";
+      key: string;
+      parentKey?: string;
+      description?: string;
+      agentType?: string;
+      name?: string;
+      model?: string;
+      status?: Exclude<AgentStatus, "interrupted">;
+      background?: boolean;
+      toolUses?: number;
+      latestTool?: string;
+      summary?: string;
+    }
+  // The lead's own plan, replacing the previous one.
+  | { type: "steps"; steps: PlanStep[]; explanation?: string };
+
+/** What a session reports outside the turn iterator (KTD4). */
+export type SessionEvent =
+  | HarnessEvent
+  // A lead turn the harness started by itself (KTD14); its lead events follow on the listener.
+  | { type: "turn.started" }
+  | { type: "turn.completed" }
+  | { type: "turn.failed"; error: HarnessError }
+  // The harness process or query ended with no turn running.
+  | { type: "crashed"; message: string };
 
 export type HarnessErrorKind =
   // The program is missing, failed to download, or is not signed in.
@@ -76,7 +125,10 @@ export interface HarnessSession {
   send(prompt: string, loadout: Loadout): AsyncIterable<HarnessEvent>;
   respond(request: string, decision: "accept" | "decline"): void;
   answer(request: string, answers: Record<string, string[]>): void;
-  /** Answers every pending request the way the harness expects for a stop, then interrupts. */
+  /**
+   * Answers every pending request the way the harness expects for a stop, then interrupts the lead
+   * turn and all running background work, sub-agents included.
+   */
   stop(): Promise<void>;
   close(): void;
 }
@@ -86,6 +138,8 @@ export interface OpenRequest extends LaunchContext {
   cwd: string;
   sessionId?: string;
   loadout: Loadout;
+  /** Receives sub-agent events, harness-started turns, and crashes, during or after a turn. */
+  listener?: (event: SessionEvent) => void;
 }
 
 export interface HarnessAdapter {

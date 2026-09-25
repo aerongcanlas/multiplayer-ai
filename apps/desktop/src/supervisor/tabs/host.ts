@@ -4,6 +4,7 @@ import {
   DEFAULT_LOADOUT,
   HARNESS_LABELS,
   tabBusy,
+  type AgentCard,
   type Loadout,
   type Tab,
   type TranscriptEntry,
@@ -13,9 +14,10 @@ import {
   HarnessError,
   type HarnessEvent,
   type HarnessSession,
+  type SessionEvent,
 } from "../harnesses/contract";
 import type { HarnessRegistry } from "../harnesses/registry";
-import type { TranscriptWriter } from "./transcript";
+import { oneLine, type TranscriptWriter } from "./transcript";
 
 export type TabCommand = Extract<
   Command,
@@ -34,23 +36,36 @@ export interface HostStore {
   ): TranscriptPage;
   agentCards(tabId: string): TranscriptEntry[];
   pendingEntries(tabId: string): TranscriptEntry[];
+  agentCards(tabId: string): TranscriptEntry[];
   deleteTranscript(tabId: string): void;
 }
 
 interface Turn {
   id: string;
   roomId: string;
-  // Transcript entry ID -> the harness's request ID, for approvals and questions still pending.
-  requests: Map<string, string>;
+  // A lead turn the harness started by itself (KTD14).
+  harness: boolean;
   stopping: boolean;
   finished: boolean;
-  aborted: boolean;
   stopTimer?: ReturnType<typeof setTimeout>;
 }
 interface Live {
   session?: HarnessSession;
   turn?: Turn;
+  // Transcript entry ID -> the harness's request, for approvals and questions still pending.
+  // Requests with an agent key come from sub-agents and never block the tab (KTD5).
+  requests: Map<string, { request: string; agentKey?: string }>;
+  // Sub-agent key -> its card entry and the turn its entries file under (KTD15).
+  cards: Map<string, { entryId: string; turnId: string | null }>;
+  // A Stop that found only sub-agents running.
+  stopTimer?: ReturnType<typeof setTimeout>;
 }
+type AgentEvent = Extract<HarnessEvent, { type: "agent" }>;
+
+const NOTES = {
+  stopped: "Stopped before finishing",
+  interrupted: "Interrupted before finishing",
+} as const;
 
 const now = () => new Date().toISOString();
 const STOP_TIMEOUT_MS = 10_000;
@@ -82,32 +97,58 @@ export class TabHost {
     private stopTimeoutMs = STOP_TIMEOUT_MS,
   ) {}
 
-  /** After an app restart, running turns are interrupted and pending requests are cleared. */
+  /**
+   * After an app restart, running turns and sub-agents are interrupted and pending requests are
+   * cleared.
+   */
   recover() {
-    const interrupted: { roomId: string; tabId: string }[] = [];
+    const tabs: { roomId: string; tabId: string; busy: boolean }[] = [];
     this.store.transaction((draft) => {
       for (const room of draft.rooms)
-        for (const tab of room.tabs)
-          if (tabBusy(tab.status)) {
-            tab.status = "interrupted";
+        for (const tab of room.tabs) {
+          const busy = tabBusy(tab.status);
+          tabs.push({ roomId: room.id, tabId: tab.id, busy });
+          if (busy) tab.status = "interrupted";
+          if (busy || tab.runningAgents || tab.agentRequests) {
+            delete tab.runningAgents;
+            delete tab.agentRequests;
             tab.updatedAt = now();
-            interrupted.push({ roomId: room.id, tabId: tab.id });
           }
+        }
     });
-    for (const { roomId, tabId } of interrupted) {
-      for (const entry of this.store.pendingEntries(tabId)) {
+    for (const { roomId, tabId, busy } of tabs) {
+      const pending = this.store.pendingEntries(tabId);
+      const running = this.store
+        .agentCards(tabId)
+        .filter((entry) => entry.agent?.status === "running");
+      if (!busy && !pending.length && !running.length) continue;
+      for (const entry of pending) {
         this.writer.adopt(roomId, entry);
         this.writer.update(entry.id, { state: "cancelled" });
       }
-      this.writer.append(roomId, tabId, {
-        turnId: null,
-        kind: "notice",
-        notice: "interrupted",
-        summary:
-          "The app restarted during this turn. It was interrupted; send a follow-up to continue.",
-      });
+      for (const entry of running) {
+        this.writer.adopt(roomId, entry);
+        this.endCard(entry.id, entry.agent!, "interrupted");
+      }
+      if (busy)
+        this.writer.append(roomId, tabId, {
+          turnId: null,
+          kind: "notice",
+          notice: "interrupted",
+          summary:
+            "The app restarted during this turn. It was interrupted; send a follow-up to continue.",
+        });
       this.writer.release(tabId);
     }
+  }
+
+  private liveOf(tabId: string): Live {
+    let live = this.live.get(tabId);
+    if (!live) {
+      live = { requests: new Map(), cards: new Map() };
+      this.live.set(tabId, live);
+    }
+    return live;
   }
 
   private ready(tab: Tab) {
@@ -206,11 +247,11 @@ export class TabHost {
       case "tab.send":
         return this.send(command);
       case "tab.stop": {
-        const turn = this.live.get(command.tabId)?.turn;
         findTab(this.store.read(), command.roomId, command.tabId);
-        if (!turn || turn.finished)
+        const turn = this.live.get(command.tabId)?.turn;
+        if ((!turn || turn.finished) && !this.runningAgents(command.tabId))
           throw new Error("This tab has no running turn.");
-        this.stop(command.tabId, turn);
+        this.stop(command.roomId, command.tabId);
         return;
       }
       case "tab.transcript":
@@ -291,7 +332,12 @@ export class TabHost {
       throw new Error(
         "This tab is running a turn. Confirm to stop it and close the tab.",
       );
-    if (live?.turn && !live.turn.finished) this.stop(tabId, live.turn);
+    if (this.runningAgents(tabId) && !confirm)
+      throw new Error(
+        "This tab has running sub-agents. Confirm to stop them and close the tab.",
+      );
+    if ((live?.turn && !live.turn.finished) || this.runningAgents(tabId))
+      this.stop(roomId, tabId);
     this.store.transaction((draft) => {
       const room = draft.rooms.find((room) => room.id === roomId)!;
       room.tabs = room.tabs.filter((item) => item.id !== tabId);
@@ -299,6 +345,7 @@ export class TabHost {
     this.writer.forget(tabId);
     this.store.deleteTranscript(tabId);
     this.live.delete(tabId);
+    clearTimeout(live?.stopTimer);
     live?.session?.close();
     return undefined;
   }
@@ -307,16 +354,21 @@ export class TabHost {
     const { tab } = findTab(this.store.read(), roomId, tabId);
     if (tabBusy(tab.status))
       throw new Error("Change the loadout after this turn ends.");
+    const harnessChanged = loadout.harness !== tab.loadout.harness;
+    if (harnessChanged && this.runningAgents(tabId))
+      throw new Error(
+        "This tab's sub-agents are still running. Wait for them or stop them before switching harness.",
+      );
     this.registry.adapter(loadout.harness);
     if (loadout.model) this.validateLoadout(loadout);
-    const harnessChanged = loadout.harness !== tab.loadout.harness;
-    if (harnessChanged) this.dropSession(tabId);
+    if (harnessChanged) this.dropSession(roomId, tabId);
     this.store.transaction((draft) => {
       const { tab } = findTab(draft, roomId, tabId);
       tab.loadout = loadout.model ? loadout : this.withDefaultModel(loadout);
       if (harnessChanged) {
         delete tab.sessionId;
         delete tab.resumed;
+        delete tab.plan;
         tab.status = this.registry.ready(loadout.harness)
           ? "idle"
           : "unavailable";
@@ -338,20 +390,49 @@ export class TabHost {
     return undefined;
   }
 
-  private dropSession(tabId: string) {
+  /**
+   * Closes the tab's harness session. Its sub-agents cannot finish any more, so running cards
+   * settle and their requests are cancelled.
+   */
+  private dropSession(
+    roomId: string,
+    tabId: string,
+    outcome: "stopped" | "interrupted" = "interrupted",
+  ) {
     const live = this.live.get(tabId);
-    live?.session?.close();
-    if (live) live.session = undefined;
+    if (!live) return;
+    // Cleared first so the closing session's last events are ignored.
+    const session = live.session;
+    live.session = undefined;
+    session?.close();
+    clearTimeout(live.stopTimer);
+    live.stopTimer = undefined;
+    for (const [entryId, request] of live.requests)
+      if (request.agentKey) {
+        this.writer.update(entryId, { state: "cancelled" });
+        live.requests.delete(entryId);
+      }
+    for (const { entryId } of live.cards.values()) {
+      const agent = this.writer.entry(entryId)?.agent;
+      if (agent?.status === "running") this.endCard(entryId, agent, outcome);
+    }
+    live.cards.clear();
+    this.counts(roomId, tabId);
   }
 
   private resetSession(roomId: string, tabId: string) {
     const { tab } = findTab(this.store.read(), roomId, tabId);
     if (tabBusy(tab.status)) throw new Error("Stop the running turn first.");
-    this.dropSession(tabId);
+    if (this.runningAgents(tabId))
+      throw new Error(
+        "This tab's sub-agents are still running. Wait for them or stop them first.",
+      );
+    this.dropSession(roomId, tabId);
     this.store.transaction((draft) => {
       const { tab } = findTab(draft, roomId, tabId);
       delete tab.sessionId;
       delete tab.resumed;
+      delete tab.plan;
       tab.status = this.ready(tab) ? "idle" : "unavailable";
       tab.updatedAt = now();
     });
@@ -404,10 +485,9 @@ export class TabHost {
     const turn: Turn = {
       id: randomUUID(),
       roomId: room.id,
-      requests: new Map(),
+      harness: false,
       stopping: false,
       finished: false,
-      aborted: false,
     };
     let loadout = tab.loadout;
     this.store.transaction((draft) => {
@@ -440,9 +520,7 @@ export class TabHost {
           }
         : {}),
     });
-    const live = this.live.get(tab.id) ?? {};
-    live.turn = turn;
-    this.live.set(tab.id, live);
+    this.liveOf(tab.id).turn = turn;
     void this.run(tab.id, turn, command.text, loadout);
     return undefined;
   }
@@ -474,13 +552,23 @@ export class TabHost {
             "failed",
             "Select the repository again to restore access.",
           );
+        const opened: { session?: HarnessSession } = {};
         const session = await this.registry.adapter(loadout.harness).open({
           ...context,
           tabId,
           cwd,
           loadout,
           ...(tab.sessionId ? { sessionId: tab.sessionId } : {}),
+          // Events from a session the tab has since dropped are ignored.
+          listener: (event) => {
+            if (
+              !opened.session ||
+              this.live.get(tabId)?.session === opened.session
+            )
+              this.sessionEvent(turn.roomId, tabId, event);
+          },
         });
+        opened.session = session;
         if (turn.finished || !this.exists(turn.roomId, tabId)) {
           session.close();
           return;
@@ -494,7 +582,7 @@ export class TabHost {
       if (turn.stopping) return this.finish(tabId, turn, "stopped");
       for await (const event of live.session.send(prompt, loadout)) {
         if (turn.finished) break;
-        this.event(tabId, turn, event);
+        this.event(turn.roomId, tabId, turn, event);
       }
       this.finish(tabId, turn, turn.stopping ? "stopped" : "completed");
     } catch (error) {
@@ -507,9 +595,69 @@ export class TabHost {
     }
   }
 
-  private event(tabId: string, turn: Turn, event: HarnessEvent) {
-    if (!this.exists(turn.roomId, tabId)) return;
-    const roomId = turn.roomId;
+  /** Events a session reports outside the owner's turn iterator (KTD4, KTD14). */
+  private sessionEvent(roomId: string, tabId: string, event: SessionEvent) {
+    if (this.closed || !this.exists(roomId, tabId)) return;
+    const live = this.liveOf(tabId);
+    const turn = live.turn && !live.turn.finished ? live.turn : undefined;
+    switch (event.type) {
+      case "turn.started": {
+        if (turn) return;
+        live.turn = {
+          id: randomUUID(),
+          roomId,
+          harness: true,
+          stopping: false,
+          finished: false,
+        };
+        this.setStatus(roomId, tabId, "running");
+        return;
+      }
+      case "turn.completed":
+        if (turn?.harness)
+          this.finish(tabId, turn, turn.stopping ? "stopped" : "completed");
+        return;
+      case "turn.failed":
+        if (turn?.harness) this.fail(tabId, turn, event.error);
+        return;
+      case "crashed": {
+        const failure = new HarnessError("crashed", event.message);
+        if (turn?.harness) return this.fail(tabId, turn, failure);
+        // An owner turn reports the failure through its own iterator.
+        if (turn) return;
+        const running = this.runningAgents(tabId);
+        this.dropSession(roomId, tabId);
+        if (running)
+          this.writer.append(roomId, tabId, {
+            turnId: null,
+            kind: "notice",
+            summary: `${event.message} Its running sub-agents were interrupted.`,
+          });
+        this.writer.release(tabId);
+        return;
+      }
+      default:
+        this.event(roomId, tabId, turn, event);
+        if (!turn) this.writer.release(tabId);
+    }
+  }
+
+  /** The turn a sub-agent's entries file under: its card's, else the running turn (KTD4). */
+  private filing(tabId: string, turn: Turn | undefined, agentKey?: string) {
+    const card = agentKey
+      ? this.live.get(tabId)?.cards.get(agentKey)
+      : undefined;
+    return card ? card.turnId : (turn?.id ?? null);
+  }
+
+  private event(
+    roomId: string,
+    tabId: string,
+    turn: Turn | undefined,
+    event: HarnessEvent,
+  ) {
+    if (!this.exists(roomId, tabId)) return;
+    const live = this.liveOf(tabId);
     switch (event.type) {
       case "session":
         this.store.transaction((draft) => {
@@ -518,67 +666,240 @@ export class TabHost {
         });
         return;
       case "text":
-        return this.writer.text(
-          roomId,
-          tabId,
-          turn.id,
-          event.item,
-          event.kind,
-          event.delta,
-        );
       case "message":
         return this.writer.text(
           roomId,
           tabId,
-          turn.id,
+          this.filing(tabId, turn, event.agent),
           event.item,
           event.kind,
-          event.text,
-          true,
+          event.type === "text" ? event.delta : event.text,
+          event.type === "message",
+          event.agent,
         );
-      case "tool":
-        return this.writer.tool(
+      case "tool": {
+        const created = this.writer.tool(
           roomId,
           tabId,
-          turn.id,
+          this.filing(tabId, turn, event.agent),
           event.item,
           event.summary,
           event.detail,
+          event.agent,
         );
+        const card = event.agent ? live.cards.get(event.agent) : undefined;
+        const agent = card && this.writer.entry(card.entryId)?.agent;
+        if (created && card && agent?.status === "running")
+          this.writer.update(card.entryId, {
+            agent: {
+              ...agent,
+              toolUses: agent.toolUses + 1,
+              latestTool: oneLine(event.summary, 200),
+            },
+          });
+        return;
+      }
       case "notice":
         this.writer.append(roomId, tabId, {
-          turnId: turn.id,
+          turnId: this.filing(tabId, turn, event.agent),
           kind: "notice",
           summary: event.summary,
           ...(event.notice ? { notice: event.notice } : {}),
+          ...(event.agent ? { agentKey: event.agent } : {}),
+        });
+        return;
+      case "agent":
+        return this.agent(roomId, tabId, turn, event);
+      case "steps":
+        this.store.transaction((draft) => {
+          const { tab } = findTab(draft, roomId, tabId);
+          tab.plan = {
+            turnId: turn?.id ?? null,
+            steps: event.steps,
+            ...(event.explanation ? { explanation: event.explanation } : {}),
+            updatedAt: now(),
+          };
         });
         return;
       case "approval":
       case "question": {
+        const turnId = this.filing(tabId, turn, event.agent);
+        const agentKey = event.agent ? { agentKey: event.agent } : {};
         const entry =
           event.type === "approval"
             ? this.writer.append(roomId, tabId, {
-                turnId: turn.id,
+                turnId,
                 kind: event.plan ? "plan" : "approval",
                 state: "pending",
                 summary: event.summary,
                 ...(event.detail ? { detail: event.detail } : {}),
+                ...agentKey,
               })
             : this.writer.append(roomId, tabId, {
-                turnId: turn.id,
+                turnId,
                 kind: "question",
                 state: "pending",
                 summary: event.questions
                   .map((question) => question.question)
                   .join(" "),
                 questions: event.questions,
+                ...agentKey,
               });
-        turn.requests.set(entry.id, event.request);
+        live.requests.set(entry.id, { request: event.request, ...agentKey });
         this.writer.flush();
-        this.setStatus(roomId, tabId, "awaiting_host");
+        // Only the lead's own requests hold its turn (KTD5).
+        if (event.agent) this.counts(roomId, tabId);
+        else if (turn) this.setStatus(roomId, tabId, "awaiting_host");
         return;
       }
     }
+  }
+
+  /** Creates or updates a sub-agent card (KTD1, KTD15). */
+  private agent(
+    roomId: string,
+    tabId: string,
+    turn: Turn | undefined,
+    event: AgentEvent,
+  ) {
+    const live = this.liveOf(tabId);
+    const known = live.cards.get(event.key);
+    const entry = known && this.cardEntry(roomId, tabId, known.entryId);
+    const fields: Partial<AgentCard> = {
+      ...(event.agentType !== undefined ? { type: event.agentType } : {}),
+      ...(event.name !== undefined ? { name: event.name } : {}),
+      ...(event.model !== undefined ? { model: event.model } : {}),
+      ...(event.background !== undefined
+        ? { background: event.background }
+        : {}),
+      ...(event.toolUses !== undefined ? { toolUses: event.toolUses } : {}),
+      ...(event.latestTool !== undefined
+        ? { latestTool: oneLine(event.latestTool, 200) }
+        : {}),
+    };
+    if (!known || !entry?.agent) {
+      const parent = event.parentKey
+        ? live.cards.get(event.parentKey)
+        : undefined;
+      const turnId = turn?.id ?? parent?.turnId ?? null;
+      const created = this.writer.append(roomId, tabId, {
+        turnId,
+        kind: "agent",
+        summary: oneLine(event.description ?? "Sub-agent", 2_000),
+        agent: {
+          key: event.key,
+          ...(event.parentKey ? { parentKey: event.parentKey } : {}),
+          status: "running",
+          background: false,
+          startedAt: now(),
+          toolUses: 0,
+          ...fields,
+        },
+      });
+      live.cards.set(event.key, { entryId: created.id, turnId });
+      if (event.status && event.status !== "running")
+        this.endCard(created.id, created.agent!, event.status, event.summary);
+    } else {
+      const agent = { ...entry.agent, ...fields };
+      const status = event.status ?? agent.status;
+      const patch = {
+        ...(event.description
+          ? { summary: oneLine(event.description, 2_000) }
+          : {}),
+      };
+      if (status === "running" && agent.status !== "running") {
+        // Re-engaged: new entries file under the turn that re-engaged it.
+        known.turnId = turn?.id ?? known.turnId;
+        delete agent.endedAt;
+        this.writer.update(entry.id, {
+          ...patch,
+          agent: { ...agent, status },
+        });
+      } else if (status !== "running" && agent.status === "running") {
+        this.writer.update(entry.id, { ...patch, agent });
+        this.endCard(entry.id, agent, status, event.summary);
+      } else
+        this.writer.update(entry.id, {
+          ...patch,
+          ...(event.summary !== undefined ? { detail: event.summary } : {}),
+          agent: { ...agent, status },
+        });
+    }
+    const status = this.writer.entry(live.cards.get(event.key)!.entryId)?.agent
+      ?.status;
+    if (status !== "running")
+      for (const [entryId, request] of live.requests)
+        if (request.agentKey === event.key) {
+          this.writer.update(entryId, { state: "cancelled" });
+          live.requests.delete(entryId);
+        }
+    this.counts(roomId, tabId);
+  }
+
+  /** A card entry, reloaded from the journal when the writer already released it. */
+  private cardEntry(roomId: string, tabId: string, entryId: string) {
+    const entry = this.writer.entry(entryId);
+    if (entry) return entry;
+    const stored = this.store
+      .agentCards(tabId)
+      .find((item) => item.id === entryId);
+    if (!stored) return undefined;
+    this.writer.adopt(roomId, stored);
+    return this.writer.entry(entryId);
+  }
+
+  /** Settles a running card; stopped and interrupted cards get a note in place of a summary. */
+  private endCard(
+    entryId: string,
+    agent: AgentCard,
+    status: Exclude<AgentCard["status"], "running">,
+    summary?: string,
+  ) {
+    const detail =
+      summary ??
+      (status === "stopped" || status === "interrupted"
+        ? NOTES[status]
+        : undefined);
+    this.writer.update(entryId, {
+      agent: { ...agent, status, endedAt: now() },
+      ...(detail !== undefined ? { detail } : {}),
+    });
+  }
+
+  private runningAgents(tabId: string) {
+    const live = this.live.get(tabId);
+    if (!live) return 0;
+    return [...live.cards.values()].filter(
+      (card) => this.writer.entry(card.entryId)?.agent?.status === "running",
+    ).length;
+  }
+
+  /** Mirrors running sub-agents and their waiting requests onto the tab (KTD6). */
+  private counts(roomId: string, tabId: string) {
+    if (!this.exists(roomId, tabId)) return;
+    const live = this.live.get(tabId);
+    const running = this.runningAgents(tabId);
+    const waiting = live
+      ? [...live.requests.values()].filter((request) => request.agentKey).length
+      : 0;
+    if (live && !running) {
+      clearTimeout(live.stopTimer);
+      live.stopTimer = undefined;
+    }
+    const { tab } = findTab(this.store.read(), roomId, tabId);
+    if (
+      (tab.runningAgents ?? 0) === running &&
+      (tab.agentRequests ?? 0) === waiting
+    )
+      return;
+    this.store.transaction((draft) => {
+      const { tab } = findTab(draft, roomId, tabId);
+      if (running) tab.runningAgents = running;
+      else delete tab.runningAgents;
+      if (waiting) tab.agentRequests = waiting;
+      else delete tab.agentRequests;
+      tab.updatedAt = now();
+    });
   }
 
   private setStatus(roomId: string, tabId: string, status: Tab["status"]) {
@@ -592,26 +913,33 @@ export class TabHost {
 
   private pendingEntry(roomId: string, tabId: string, entryId: string) {
     findTab(this.store.read(), roomId, tabId);
-    const turn = this.live.get(tabId)?.turn;
+    const live = this.live.get(tabId);
     const entry = this.writer.entry(entryId);
-    const request = turn?.requests.get(entryId);
+    const request = live?.requests.get(entryId);
     if (
-      !turn ||
-      turn.finished ||
+      !live?.session ||
       !entry ||
       entry.tabId !== tabId ||
       entry.state !== "pending" ||
       !request
     )
       throw new Error("That request is no longer pending.");
-    return { turn, entry, request, session: this.live.get(tabId)!.session! };
+    return { live, entry, request: request.request, session: live.session };
   }
 
-  private settle(tabId: string, turn: Turn, entryId: string) {
-    turn.requests.delete(entryId);
+  private settle(roomId: string, tabId: string, live: Live, entryId: string) {
+    const request = live.requests.get(entryId);
+    live.requests.delete(entryId);
     this.writer.flush();
-    if (!turn.requests.size && !turn.stopping)
-      this.setStatus(turn.roomId, tabId, "running");
+    if (request?.agentKey) return this.counts(roomId, tabId);
+    const turn = live.turn;
+    if (
+      turn &&
+      !turn.finished &&
+      !turn.stopping &&
+      ![...live.requests.values()].some((request) => !request.agentKey)
+    )
+      this.setStatus(roomId, tabId, "running");
   }
 
   private respond(
@@ -620,7 +948,7 @@ export class TabHost {
     entryId: string,
     decision: "accept" | "decline",
   ) {
-    const { turn, entry, request, session } = this.pendingEntry(
+    const { live, entry, request, session } = this.pendingEntry(
       roomId,
       tabId,
       entryId,
@@ -629,12 +957,12 @@ export class TabHost {
     this.writer.update(entry.id, {
       state: decision === "accept" ? "accepted" : "declined",
     });
-    if (entry.kind === "plan" && decision === "accept")
+    if (entry.kind === "plan" && !entry.agentKey && decision === "accept")
       this.store.transaction((draft) => {
         const { tab } = findTab(draft, roomId, tabId);
         tab.loadout = { ...tab.loadout, planMode: false };
       });
-    this.settle(tabId, turn, entryId);
+    this.settle(roomId, tabId, live, entryId);
     return undefined;
   }
 
@@ -644,7 +972,7 @@ export class TabHost {
     entryId: string,
     answers: Record<string, string[]>,
   ) {
-    const { turn, entry, request, session } = this.pendingEntry(
+    const { live, entry, request, session } = this.pendingEntry(
       roomId,
       tabId,
       entryId,
@@ -667,26 +995,36 @@ export class TabHost {
         )
         .join("\n"),
     });
-    this.settle(tabId, turn, entryId);
+    this.settle(roomId, tabId, live, entryId);
     return undefined;
   }
 
-  private stop(tabId: string, turn: Turn) {
-    if (turn.stopping) return;
-    turn.stopping = true;
-    for (const entryId of turn.requests.keys())
+  /** Stops the running turn and every running sub-agent (KTD7). */
+  private stop(roomId: string, tabId: string) {
+    const live = this.liveOf(tabId);
+    const turn = live.turn && !live.turn.finished ? live.turn : undefined;
+    if (turn ? turn.stopping : live.stopTimer) return;
+    if (turn) turn.stopping = true;
+    for (const entryId of live.requests.keys())
       this.writer.update(entryId, { state: "cancelled" });
-    turn.requests.clear();
+    live.requests.clear();
     this.writer.flush();
-    const session = this.live.get(tabId)?.session;
-    void session?.stop().catch(() => {});
+    this.counts(roomId, tabId);
+    void live.session?.stop().catch(() => {});
     // A harness that ignores the interrupt is closed so the tab never stays stuck.
-    turn.stopTimer = setTimeout(() => {
-      if (turn.finished) return;
-      this.dropSession(tabId);
-      this.finish(tabId, turn, "stopped");
+    const timer = setTimeout(() => {
+      if (live.turn && live.turn !== turn) return;
+      if (turn && !turn.finished) {
+        this.dropSession(roomId, tabId, "stopped");
+        this.finish(tabId, turn, "stopped");
+      } else if (this.runningAgents(tabId)) {
+        this.dropSession(roomId, tabId, "stopped");
+        this.writer.release(tabId);
+      }
     }, this.stopTimeoutMs);
-    turn.stopTimer.unref?.();
+    timer.unref?.();
+    if (turn) turn.stopTimer = timer;
+    else live.stopTimer = timer;
   }
 
   private finish(tabId: string, turn: Turn, outcome: "completed" | "stopped") {
@@ -697,7 +1035,9 @@ export class TabHost {
     const entries = this.writer.turnEntries(tabId, turn.id);
     if (outcome === "completed" && tab.loadout.planMode) {
       const plan = entries
-        .filter((entry) => entry.kind === "plan" && !entry.state)
+        .filter(
+          (entry) => entry.kind === "plan" && !entry.state && !entry.agentKey,
+        )
         .at(-1);
       if (plan) this.writer.update(plan.id, { continuable: true });
     }
@@ -743,7 +1083,7 @@ export class TabHost {
       });
       status = "unavailable";
     } else if (failure.kind === "resume_failed") {
-      this.dropSession(tabId);
+      this.dropSession(roomId, tabId);
       this.writer.append(roomId, tabId, {
         turnId: turn.id,
         kind: "notice",
@@ -753,7 +1093,7 @@ export class TabHost {
       });
       status = "resume_failed";
     } else {
-      if (failure.kind === "crashed") this.dropSession(tabId);
+      if (failure.kind === "crashed") this.dropSession(roomId, tabId);
       this.writer.append(roomId, tabId, {
         turnId: turn.id,
         kind: "error",
@@ -779,20 +1119,25 @@ export class TabHost {
     });
   }
 
+  /** Ends a turn; only the lead's requests go with it (KTD5). */
   private end(tabId: string, turn: Turn) {
     turn.finished = true;
     clearTimeout(turn.stopTimer);
-    for (const entryId of turn.requests.keys())
-      this.writer.update(entryId, { state: "cancelled" });
-    turn.requests.clear();
     const live = this.live.get(tabId);
-    if (live?.turn === turn) live.turn = undefined;
+    if (!live) return;
+    for (const [entryId, request] of live.requests)
+      if (!request.agentKey) {
+        this.writer.update(entryId, { state: "cancelled" });
+        live.requests.delete(entryId);
+      }
+    if (live.turn === turn) live.turn = undefined;
   }
 
   close() {
     this.closed = true;
     for (const live of this.live.values()) {
       if (live.turn) live.turn.finished = true;
+      clearTimeout(live.stopTimer);
       live.session?.close();
     }
     this.live.clear();

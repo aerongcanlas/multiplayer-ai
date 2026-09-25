@@ -87,3 +87,41 @@ test("released entries leave memory while pending ones stay editable", () => {
   assert.equal(writer.entry(pending.id), undefined);
   writer.close();
 });
+
+test("running sub-agent cards and their entries outlive a release, keyed apart from the lead", () => {
+  const { writer, saved, roomId, tabId, turnId } = setup();
+  const card = (status: "running" | "completed") => ({
+    key: "task-1",
+    status,
+    background: true,
+    startedAt: new Date().toISOString(),
+    toolUses: 0,
+  });
+  const entry = writer.append(roomId, tabId, {
+    turnId,
+    kind: "agent",
+    summary: "Run tests",
+    agent: card("running"),
+  });
+  assert.equal(writer.tool(roomId, tabId, turnId, "t", "ls", undefined), true);
+  assert.equal(
+    writer.tool(roomId, tabId, turnId, "t", "pnpm test", undefined, "task-1"),
+    true,
+  );
+  writer.release(tabId);
+  assert.ok(writer.entry(entry.id));
+  // The sub-agent's tool result lands in place after the turn ended.
+  assert.equal(
+    writer.tool(roomId, tabId, turnId, "t", "pnpm test", "ok", "task-1"),
+    false,
+  );
+  writer.flush();
+  const tools = saved.flat().filter((item) => item.kind === "tool");
+  assert.deepEqual([...new Set(tools.map((item) => item.seq))].length, 2);
+  assert.equal(tools.at(-1)?.agentKey, "task-1");
+  assert.equal(tools.at(-1)?.detail, "ok");
+  writer.update(entry.id, { agent: card("completed") });
+  writer.release(tabId);
+  assert.equal(writer.entry(entry.id), undefined);
+  writer.close();
+});

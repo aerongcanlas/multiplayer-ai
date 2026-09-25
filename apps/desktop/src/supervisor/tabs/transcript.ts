@@ -14,6 +14,13 @@ export const oneLine = (text: string, limit = 400) => {
   return line.length > limit ? `${line.slice(0, limit - 1)}…` : line;
 };
 
+const itemKey = (
+  tabId: string,
+  turnId: string | null,
+  agentKey: string | undefined,
+  item: string,
+) => `${tabId}\0${turnId ?? ""}\0${agentKey ?? ""}\0${item}`;
+
 export type EntryInput = Pick<TranscriptEntry, "turnId" | "kind" | "summary"> &
   Partial<
     Omit<
@@ -105,46 +112,61 @@ export class TranscriptWriter {
   text(
     roomId: string,
     tabId: string,
-    turnId: string,
+    turnId: string | null,
     item: string,
     kind: "assistant" | "reasoning" | "plan",
     text: string,
     replace = false,
+    agentKey?: string,
   ) {
-    const key = `${tabId}\0${turnId}\0${item}`;
+    const key = itemKey(tabId, turnId, agentKey, item);
     const existing = this.items.get(key);
     const entry = existing && this.live.get(existing)?.entry;
     if (!entry) {
       this.items.set(
         key,
-        this.append(roomId, tabId, { turnId, kind, summary: text }).id,
+        this.append(roomId, tabId, {
+          turnId,
+          kind,
+          summary: text,
+          ...(agentKey ? { agentKey } : {}),
+        }).id,
       );
       return;
     }
     this.update(entry.id, { summary: replace ? text : entry.summary + text });
   }
 
-  /** Creates or updates the tool entry for one harness item. */
+  /** Creates or updates the tool entry for one harness item. Returns whether it was new. */
   tool(
     roomId: string,
     tabId: string,
-    turnId: string,
+    turnId: string | null,
     item: string,
     summary: string,
     detail?: string,
-  ) {
-    const key = `${tabId}\0${turnId}\0tool\0${item}`;
+    agentKey?: string,
+  ): boolean {
+    const key = itemKey(tabId, turnId, agentKey, `tool\0${item}`);
     const existing = this.items.get(key);
     const patch = {
       summary: oneLine(summary),
       ...(detail !== undefined ? { detail } : {}),
     };
-    if (existing && this.live.has(existing)) this.update(existing, patch);
-    else
-      this.items.set(
-        key,
-        this.append(roomId, tabId, { turnId, kind: "tool", ...patch }).id,
-      );
+    if (existing && this.live.has(existing)) {
+      this.update(existing, patch);
+      return false;
+    }
+    this.items.set(
+      key,
+      this.append(roomId, tabId, {
+        turnId,
+        kind: "tool",
+        ...patch,
+        ...(agentKey ? { agentKey } : {}),
+      }).id,
+    );
+    return true;
   }
 
   /** Entries of a tab's turn, oldest first. */
@@ -161,11 +183,28 @@ export class TranscriptWriter {
       .filter((entry) => entry.tabId === tabId && entry.state === "pending");
   }
 
-  /** Drops finished entries of a tab from memory once flushed. */
+  /**
+   * Drops finished entries of a tab from memory once flushed. Running sub-agent cards and their
+   * entries stay editable, since they keep growing after the turn that spawned them.
+   */
   release(tabId: string) {
     this.flush();
-    for (const [id, live] of this.live)
-      if (live.entry.tabId === tabId && live.entry.state !== "pending")
+    const running = new Set(
+      [...this.live.values()]
+        .map((live) => live.entry)
+        .filter(
+          (entry) =>
+            entry.tabId === tabId && entry.agent?.status === "running",
+        )
+        .map((entry) => entry.agent!.key),
+    );
+    for (const [id, { entry }] of this.live)
+      if (
+        entry.tabId === tabId &&
+        entry.state !== "pending" &&
+        !(entry.agent && running.has(entry.agent.key)) &&
+        !(entry.agentKey && running.has(entry.agentKey))
+      )
         this.live.delete(id);
     for (const [key, id] of this.items)
       if (!this.live.has(id)) this.items.delete(key);

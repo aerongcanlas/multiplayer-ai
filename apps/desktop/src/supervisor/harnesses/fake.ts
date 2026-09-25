@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
 import type { HarnessId, HarnessModel, Loadout } from "../../shared/tabs";
 import {
   HarnessError,
@@ -8,11 +9,12 @@ import {
   type Inspection,
   type LaunchContext,
   type OpenRequest,
+  type SessionEvent,
 } from "./contract";
 
 // A scripted adapter for tests and MP_E2E only. Prompt markers select the behavior:
 // FAKE_APPROVAL, FAKE_QUESTION, FAKE_EXIT_PLAN, FAKE_SLOW, FAKE_THROW, FAKE_SIGNOUT, FAKE_USAGE,
-// and FAKE_CRASH. Options make resumes fail or fail the first turn after a resume.
+// FAKE_CRASH, and FAKE_AGENTS. Options make resumes fail or fail the first turn after a resume.
 const STOPPED = Symbol("stopped");
 type Waiting = (value: unknown) => void;
 
@@ -21,6 +23,7 @@ export class FakeSession implements HarnessSession {
   private pending = new Map<string, Waiting>();
   private stopped = false;
   private turns = 0;
+  private running = new Set<string>();
   constructor(
     private harness: FakeHarness,
     readonly request: OpenRequest,
@@ -32,6 +35,65 @@ export class FakeSession implements HarnessSession {
     return new Promise<unknown>((resolve) =>
       this.pending.set(request, resolve),
     );
+  }
+
+  /**
+   * Reports an event on the session listener, as a harness does outside the turn iterator. A
+   * request resolves with the host's answer.
+   */
+  emit(event: SessionEvent) {
+    const answer =
+      event.type === "approval" || event.type === "question"
+        ? this.wait(event.request)
+        : undefined;
+    this.request.listener?.(event);
+    return answer;
+  }
+
+  private agent(event: Omit<Extract<HarnessEvent, { type: "agent" }>, "type">) {
+    if (event.status === "running") this.running.add(event.key);
+    else if (event.status) this.running.delete(event.key);
+    this.emit({ type: "agent", ...event });
+  }
+
+  // The background sub-agent of FAKE_AGENTS: it asks for approval during the turn and again after
+  // it, then completes and wakes the lead with a turn of its own.
+  private async background() {
+    const first = this.emit({
+      type: "approval",
+      agent: "tests",
+      request: "tests-1",
+      summary: "Run command: pnpm test",
+    });
+    if ((await first) === STOPPED) return;
+    await delay(100);
+    this.emit({
+      type: "tool",
+      agent: "tests",
+      item: "test",
+      summary: "pnpm test",
+      detail: "12 passed",
+    });
+    const second = this.emit({
+      type: "approval",
+      agent: "tests",
+      request: "tests-2",
+      summary: "Run command: pnpm lint",
+    });
+    if ((await second) === STOPPED) return;
+    this.agent({
+      key: "tests",
+      status: "completed",
+      summary: "All tests passed.",
+    });
+    this.emit({ type: "turn.started" });
+    this.emit({
+      type: "message",
+      item: "wake",
+      kind: "assistant",
+      text: "The background tests passed.",
+    });
+    this.emit({ type: "turn.completed" });
   }
 
   async *send(prompt: string, loadout: Loadout): AsyncIterable<HarnessEvent> {
@@ -64,6 +126,74 @@ export class FakeSession implements HarnessSession {
       );
     if (prompt.includes("FAKE_CRASH"))
       throw new HarnessError("crashed", "The fake harness exited.");
+    if (prompt.includes("FAKE_AGENTS")) {
+      yield {
+        type: "steps",
+        steps: [
+          { text: "Inspect the checkout", status: "done" },
+          { text: "Run the tests", status: "active" },
+        ],
+      };
+      this.agent({
+        key: "inspect",
+        description: "Inspect the checkout",
+        agentType: "Explore",
+        status: "running",
+      });
+      this.emit({
+        type: "tool",
+        agent: "inspect",
+        item: "ls",
+        summary: "ls",
+        detail: "README.md",
+      });
+      this.agent({
+        key: "readme",
+        parentKey: "inspect",
+        description: "Read the README",
+        agentType: "Explore",
+        status: "running",
+      });
+      this.emit({
+        type: "message",
+        agent: "readme",
+        item: "reply",
+        kind: "assistant",
+        text: "The README is short.",
+      });
+      this.agent({
+        key: "readme",
+        status: "completed",
+        summary: "The README is short.",
+      });
+      this.agent({
+        key: "tests",
+        description: "Run the test suite",
+        agentType: "general-purpose",
+        background: true,
+        status: "running",
+      });
+      void this.background();
+      this.emit({
+        type: "message",
+        agent: "inspect",
+        item: "reply",
+        kind: "assistant",
+        text: "Found README.md.",
+      });
+      this.agent({
+        key: "inspect",
+        status: "completed",
+        summary: "Found README.md.",
+      });
+      yield {
+        type: "message",
+        item: "reply",
+        kind: "assistant",
+        text: "The tests keep running in the background.",
+      };
+      return;
+    }
     if (prompt.includes("FAKE_SLOW")) {
       await this.wait("slow");
       return;
@@ -164,6 +294,9 @@ export class FakeSession implements HarnessSession {
       waiting(STOPPED);
     }
     this.pending.clear();
+    for (const key of this.running)
+      this.emit({ type: "agent", key, status: "stopped" });
+    this.running.clear();
     this.stopped = true;
     this.harness.calls.push("stop");
   }
