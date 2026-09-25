@@ -65,13 +65,15 @@ const bridge: DesktopBridge = {
     invoke({ type: "tab.setLoadout", roomId, tabId, loadout }),
   sendToTab: (input) => invoke({ ...input, type: "tab.send" }),
   stopTab: (roomId, tabId) => invoke({ type: "tab.stop", roomId, tabId }),
-  loadTranscript: (roomId, tabId, beforeSeq) =>
+  loadTranscript: (roomId, tabId, beforeSeq, agentKey) =>
     invoke({
       type: "tab.transcript",
       roomId,
       tabId,
       ...(beforeSeq ? { beforeSeq } : {}),
+      ...(agentKey ? { agentKey } : {}),
     }),
+  loadAgents: (roomId, tabId) => invoke({ type: "tab.agents", roomId, tabId }),
   resetTabSession: (roomId, tabId) =>
     invoke({ type: "tab.resetSession", roomId, tabId }),
   respondToTabApproval: (roomId, tabId, approvalId, decision) =>

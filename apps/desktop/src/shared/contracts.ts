@@ -187,7 +187,10 @@ export interface DesktopBridge {
     roomId: string,
     tabId: string,
     beforeSeq?: number,
+    agentKey?: string,
   ): Promise<Result>;
+  // The tab's sub-agent cards arrive in the Result's `transcript` field.
+  loadAgents(roomId: string, tabId: string): Promise<Result>;
   resetTabSession(roomId: string, tabId: string): Promise<Result>;
   respondToTabApproval(
     roomId: string,

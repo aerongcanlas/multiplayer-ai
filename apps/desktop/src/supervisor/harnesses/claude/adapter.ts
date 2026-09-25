@@ -542,6 +542,7 @@ export class ClaudeAdapter implements HarnessAdapter {
   readonly id = "claude" as const;
   // Anthropic's terms do not allow third-party products to offer claude.ai sign-in (R11).
   readonly signIn = "guidance" as const;
+  readonly reportsAgents = true;
   closed = false;
   readonly idleMs: number;
   private sessions = new Set<ClaudeSession>();

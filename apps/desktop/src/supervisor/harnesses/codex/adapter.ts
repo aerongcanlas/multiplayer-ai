@@ -700,6 +700,7 @@ function elicitationContent(
 export class CodexAdapter implements HarnessAdapter {
   readonly id = "codex" as const;
   readonly signIn = "in_app" as const;
+  readonly reportsAgents = true;
   closed = false;
   readonly idleMs: number;
   private processes = new Map<string, CodexProcess>();

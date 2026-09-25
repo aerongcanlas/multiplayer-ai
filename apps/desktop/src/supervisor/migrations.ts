@@ -48,6 +48,16 @@ export const steps: readonly Step[] = [
       DROP TABLE IF EXISTS events;
     `);
   },
+  // 5: sub-agent cards and their entries page by kind and agent key. Every earlier row is a lead
+  // entry, so its agent key stays null.
+  (db) =>
+    db.exec(`
+      ALTER TABLE transcript_entries ADD COLUMN kind TEXT NOT NULL DEFAULT '';
+      ALTER TABLE transcript_entries ADD COLUMN agent_key TEXT;
+      UPDATE transcript_entries SET kind = coalesce(json_extract(body, '$.kind'), '');
+      CREATE INDEX transcript_entries_agent ON transcript_entries (tab_id, agent_key, seq);
+      CREATE INDEX transcript_entries_kind ON transcript_entries (tab_id, kind);
+    `),
 ];
 
 export const JOURNAL_SCHEMA_VERSION = steps.length;

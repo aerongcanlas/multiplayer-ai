@@ -71,6 +71,7 @@ export class HarnessRegistry {
         },
         auth: { state: "unknown" },
         signIn: adapter.signIn,
+        reportsAgents: adapter.reportsAgents,
         models: [],
         modelsRefreshedAt: null,
         limits: [],

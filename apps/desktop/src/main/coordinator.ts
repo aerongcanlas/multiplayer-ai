@@ -16,6 +16,7 @@ const DIRECT = new Set([
   "tab.close",
   "tab.rename",
   "tab.transcript",
+  "tab.agents",
   "tab.resetSession",
   "approval.respond",
   "question.answer",

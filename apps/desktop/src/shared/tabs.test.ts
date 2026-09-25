@@ -56,6 +56,38 @@ test("tool output is summary-shared and reasoning is never shared", () => {
   assert.equal(SHARE_LEVELS.user, "full");
 });
 
+test("sub-agent cards and entries parse, and an unknown card status is rejected", () => {
+  const card = {
+    key: "task-1",
+    type: "Explore",
+    status: "running",
+    background: true,
+    startedAt: new Date().toISOString(),
+    toolUses: 0,
+  };
+  assert.equal(
+    transcriptEntrySchema.safeParse(entry("agent", { agent: card })).success,
+    true,
+  );
+  assert.equal(
+    transcriptEntrySchema.safeParse(
+      entry("agent", { agent: { ...card, status: "paused" } }),
+    ).success,
+    false,
+  );
+  assert.equal(
+    transcriptEntrySchema.safeParse(entry("approval", { agentKey: "task-1" }))
+      .success,
+    true,
+  );
+});
+
+test("cards share in full and sub-agent entries keep their kind's level", () => {
+  assert.equal(SHARE_LEVELS.agent, "full");
+  const reasoning = entry("reasoning", { agentKey: "task-1" });
+  assert.equal(reasoning.share, "none");
+});
+
 test("tabs start without read-along", () => {
   const base = {
     id: randomUUID(),
@@ -68,6 +100,23 @@ test("tabs start without read-along", () => {
     updatedAt: "now",
   };
   assert.equal(tabSchema.safeParse(base).success, true);
+  assert.equal(
+    tabSchema.safeParse({
+      ...base,
+      runningAgents: 1,
+      agentRequests: 0,
+      plan: {
+        turnId: null,
+        steps: [{ text: "Inspect", status: "active" }],
+        updatedAt: "now",
+      },
+    }).success,
+    true,
+  );
+  assert.equal(
+    tabSchema.safeParse({ ...base, runningAgents: -1 }).success,
+    false,
+  );
   assert.equal(
     tabSchema.safeParse({ ...base, readAlong: true }).success,
     false,

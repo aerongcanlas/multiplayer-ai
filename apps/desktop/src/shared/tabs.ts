@@ -37,6 +37,30 @@ export const TAB_STATUSES = [
 ] as const;
 export type TabStatus = (typeof TAB_STATUSES)[number];
 
+export const PLAN_STEP_STATUSES = ["pending", "active", "done"] as const;
+export const tabPlanSchema = z
+  .object({
+    // The turn that last revised the plan; null once that turn is unknown.
+    turnId: id.nullable(),
+    explanation: z.string().max(4_000).optional(),
+    steps: z
+      .array(
+        z
+          .object({
+            text: z.string().max(2_000),
+            status: z.enum(PLAN_STEP_STATUSES),
+          })
+          .strict(),
+      )
+      .max(200),
+    updatedAt: z.string(),
+  })
+  .strict();
+export type TabPlan = z.infer<typeof tabPlanSchema>;
+export type PlanStep = TabPlan["steps"][number];
+
+const count = z.number().int().nonnegative().optional();
+
 export const tabSchema = z
   .object({
     id,
@@ -48,6 +72,11 @@ export const tabSchema = z
     // Set after a resume until the first turn on the resumed session completes.
     resumed: z.boolean().optional(),
     readAlong: z.literal(false),
+    // The harness's own plan for the tab (KTD9).
+    plan: tabPlanSchema.optional(),
+    // Sub-agents still running and sub-agent requests waiting on the owner (KTD6).
+    runningAgents: count,
+    agentRequests: count,
     createdAt: z.string(),
     updatedAt: z.string(),
   })
@@ -65,6 +94,7 @@ export const TRANSCRIPT_KINDS = [
   "notice",
   "error",
   "turn",
+  "agent",
 ] as const;
 export type TranscriptKind = (typeof TRANSCRIPT_KINDS)[number];
 export type ShareLevel = "full" | "summary" | "none";
@@ -81,6 +111,7 @@ export const SHARE_LEVELS: Record<TranscriptKind, ShareLevel> = {
   notice: "full",
   error: "summary",
   turn: "summary",
+  agent: "full",
 };
 
 const questionSchema = z
@@ -125,6 +156,33 @@ const suggestionSourceSchema = z
   .strict();
 export type SuggestionSource = z.infer<typeof suggestionSourceSchema>;
 
+export const AGENT_STATUSES = [
+  "running",
+  "completed",
+  "failed",
+  "stopped",
+  "interrupted",
+] as const;
+export type AgentStatus = (typeof AGENT_STATUSES)[number];
+const agentKey = z.string().min(1).max(200);
+// A sub-agent card (KTD1): the entry's summary is the task and its detail the final summary.
+export const agentCardSchema = z
+  .object({
+    key: agentKey,
+    parentKey: agentKey.optional(),
+    type: z.string().max(200).optional(),
+    name: z.string().max(200).optional(),
+    model: z.string().max(200).optional(),
+    status: z.enum(AGENT_STATUSES),
+    background: z.boolean(),
+    startedAt: z.string(),
+    endedAt: z.string().optional(),
+    toolUses: z.number().int().nonnegative(),
+    latestTool: z.string().max(400).optional(),
+  })
+  .strict();
+export type AgentCard = z.infer<typeof agentCardSchema>;
+
 export const transcriptEntrySchema = z
   .object({
     id,
@@ -138,6 +196,9 @@ export const transcriptEntrySchema = z
     // Local-only detail such as command output or a diff.
     detail: z.string().max(200_000).optional(),
     source: suggestionSourceSchema.optional(),
+    // Set on entries a sub-agent produced, naming its card.
+    agentKey: agentKey.optional(),
+    agent: agentCardSchema.optional(),
     // Approval, plan, and question entries that wait on the host.
     state: z
       .enum(["pending", "accepted", "declined", "answered", "cancelled"])
@@ -217,6 +278,8 @@ export interface HarnessState {
   models: HarnessModel[];
   modelsRefreshedAt: string | null;
   limits: { name: string; usedPercent: number; resetsAt: number | null }[];
+  // Whether the harness reports its sub-agents (KTD12).
+  reportsAgents: boolean;
   // Claude Code shows a one-time notice about Anthropic's third-party login policy.
   noticePending: boolean;
 }
@@ -271,8 +334,12 @@ export const tabCommandSchemas = [
       ...tabRef,
       beforeSeq: z.number().int().positive().optional(),
       limit: z.number().int().min(1).max(500).optional(),
+      // Pages one sub-agent's entries instead of the lead's.
+      agentKey: agentKey.optional(),
     })
     .strict(),
+  // Every sub-agent card of the tab, in the transcript result.
+  z.object({ type: z.literal("tab.agents"), ...tabRef }).strict(),
   z.object({ type: z.literal("tab.resetSession"), ...tabRef }).strict(),
   z
     .object({

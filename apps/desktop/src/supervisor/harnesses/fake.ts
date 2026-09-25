@@ -176,6 +176,7 @@ export class FakeSession implements HarnessSession {
 
 export class FakeHarness implements HarnessAdapter {
   readonly signIn: "in_app" | "guidance";
+  readonly reportsAgents: boolean;
   calls: string[] = [];
   loadouts: Loadout[] = [];
   sessions: FakeSession[] = [];
@@ -195,8 +196,10 @@ export class FakeHarness implements HarnessAdapter {
       signIn?: "in_app" | "guidance";
       resumable?: boolean;
       failFirstResumedTurn?: boolean;
+      reportsAgents?: boolean;
     } = {},
   ) {
+    this.reportsAgents = options.reportsAgents ?? true;
     this.resumable = options.resumable ?? true;
     this.failFirstResumedTurn = options.failFirstResumedTurn ?? false;
     this.signedIn = options.signedIn ?? true;

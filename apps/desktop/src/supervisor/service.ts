@@ -60,8 +60,9 @@ export class SupervisorService {
             ? (journal.getWorkspace(workspace.id)?.path ?? null)
             : null;
         },
-        transcriptPage: (tabId, beforeSeq, limit) =>
-          journal.transcriptPage(tabId, beforeSeq, limit),
+        transcriptPage: (tabId, beforeSeq, limit, agentKey) =>
+          journal.transcriptPage(tabId, beforeSeq, limit, agentKey),
+        agentCards: (tabId) => journal.agentCards(tabId),
         pendingEntries: (tabId) => journal.pendingEntries(tabId),
         deleteTranscript: (tabId) => journal.deleteTranscript(tabId),
       },

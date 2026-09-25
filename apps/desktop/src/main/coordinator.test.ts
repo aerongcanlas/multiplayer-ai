@@ -181,11 +181,12 @@ test("Stop and approval responses reach the supervisor while the shared refresh 
       decision: "decline" as const,
     },
     { type: "tab.transcript" as const, roomId: room.id, tabId },
+    { type: "tab.agents" as const, roomId: room.id, tabId },
   ])
     assert.equal((await coordinator.dispatch(command)).ok, true);
   assert.deepEqual(
     requests.map((request) => request.type),
-    ["tab.stop", "approval.respond", "tab.transcript"],
+    ["tab.stop", "approval.respond", "tab.transcript", "tab.agents"],
   );
   assert.equal(
     (

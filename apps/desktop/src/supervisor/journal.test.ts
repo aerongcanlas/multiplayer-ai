@@ -311,3 +311,108 @@ test("tabs, transcript pages, and settings persist", async () => {
   assert.equal(reopened.getSetting("claude.notice"), true);
   reopened.close();
 });
+
+const lead = (
+  tabId: string,
+  seq: number,
+  extra: Partial<TranscriptEntry> = {},
+): TranscriptEntry => ({
+  id: randomUUID(),
+  tabId,
+  seq,
+  turnId: null,
+  kind: "assistant",
+  share: "full",
+  summary: `entry ${seq}`,
+  createdAt: now,
+  updatedAt: now,
+  ...extra,
+});
+
+test("step 5 backfills kind and leaves every earlier entry on the lead page", async () => {
+  const file = join(await directory(), "execution-journal.sqlite");
+  const db = new DatabaseSync(file);
+  migrate(db, file, steps.slice(0, 4));
+  const tabId = randomUUID();
+  const insert = db.prepare(
+    "INSERT INTO transcript_entries (tab_id, seq, id, body) VALUES (?, ?, ?, ?)",
+  );
+  const before = [
+    lead(tabId, 1, { kind: "user" }),
+    lead(tabId, 2),
+    lead(tabId, 3, { kind: "turn" }),
+  ];
+  for (const entry of before)
+    insert.run(tabId, entry.seq, entry.id, JSON.stringify(entry));
+  db.close();
+
+  const journal = new Journal(file);
+  assert.equal(version(file), JOURNAL_SCHEMA_VERSION);
+  assert.deepEqual(journal.transcriptPage(tabId).entries, before);
+  journal.close();
+  const check = new DatabaseSync(file);
+  assert.deepEqual(
+    check
+      .prepare(
+        "SELECT kind, agent_key FROM transcript_entries WHERE tab_id = ? ORDER BY seq",
+      )
+      .all(tabId)
+      .map((row) => ({ ...row })),
+    [
+      { kind: "user", agent_key: null },
+      { kind: "assistant", agent_key: null },
+      { kind: "turn", agent_key: null },
+    ],
+  );
+  check.close();
+});
+
+test("sub-agent entries page by agent key and cards load apart from both", async () => {
+  const file = join(await directory(), "execution-journal.sqlite");
+  const journal = new Journal(file);
+  const tabId = randomUUID();
+  const card = lead(tabId, 2, {
+    kind: "agent",
+    summary: "Explore the repo",
+    agent: {
+      key: "task-1",
+      status: "running",
+      background: false,
+      startedAt: now,
+      toolUses: 0,
+    },
+  });
+  journal.saveTranscript([
+    lead(tabId, 1, { kind: "user" }),
+    card,
+    lead(tabId, 3, { agentKey: "task-1", summary: "sub one" }),
+    lead(tabId, 4, { kind: "tool", agentKey: "task-1", summary: "sub two" }),
+    lead(tabId, 5),
+  ]);
+  assert.deepEqual(
+    journal.transcriptPage(tabId).entries.map((entry) => entry.seq),
+    [1, 5],
+  );
+  assert.deepEqual(
+    journal
+      .transcriptPage(tabId, undefined, 200, "task-1")
+      .entries.map((entry) => entry.summary),
+    ["sub one", "sub two"],
+  );
+  assert.deepEqual(
+    journal.agentCards(tabId).map((entry) => entry.id),
+    [card.id],
+  );
+  journal.saveTranscript([
+    {
+      ...card,
+      detail: "Found it",
+      agent: { ...card.agent!, status: "completed", endedAt: now },
+    },
+  ]);
+  const [saved] = journal.agentCards(tabId);
+  assert.equal(saved.agent?.status, "completed");
+  assert.equal(saved.detail, "Found it");
+  assert.equal(journal.lastSeq(tabId), 5);
+  journal.close();
+});

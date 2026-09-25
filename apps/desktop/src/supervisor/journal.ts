@@ -111,23 +111,37 @@ export class Journal {
     if (!entries.length) return;
     this.write(() => {
       const upsert = this.db.prepare(
-        "INSERT INTO transcript_entries (tab_id, seq, id, body) VALUES (?, ?, ?, ?) ON CONFLICT(tab_id, seq) DO UPDATE SET body=excluded.body",
+        "INSERT INTO transcript_entries (tab_id, seq, id, body, kind, agent_key) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(tab_id, seq) DO UPDATE SET body=excluded.body, kind=excluded.kind, agent_key=excluded.agent_key",
       );
       for (const entry of entries)
-        upsert.run(entry.tabId, entry.seq, entry.id, JSON.stringify(entry));
+        upsert.run(
+          entry.tabId,
+          entry.seq,
+          entry.id,
+          JSON.stringify(entry),
+          entry.kind,
+          entry.agentKey ?? null,
+        );
     });
   }
 
+  /** The lead's entries, or one sub-agent's with `agentKey`. Cards page through `agentCards`. */
   transcriptPage(
     tabId: string,
     beforeSeq?: number,
     limit = 200,
+    agentKey?: string,
   ): TranscriptPage {
     const rows = this.db
       .prepare(
-        "SELECT body FROM transcript_entries WHERE tab_id = ? AND seq < ? ORDER BY seq DESC LIMIT ?",
+        "SELECT body FROM transcript_entries WHERE tab_id = ? AND agent_key IS ? AND kind <> 'agent' AND seq < ? ORDER BY seq DESC LIMIT ?",
       )
-      .all(tabId, beforeSeq ?? Number.MAX_SAFE_INTEGER, limit + 1);
+      .all(
+        tabId,
+        agentKey ?? null,
+        beforeSeq ?? Number.MAX_SAFE_INTEGER,
+        limit + 1,
+      );
     const entries = rows
       .slice(0, limit)
       .map((row) => JSON.parse(row.body as string) as TranscriptEntry)
@@ -137,6 +151,16 @@ export class Journal {
       entries,
       nextSeq: rows.length > limit ? (entries[0]?.seq ?? null) : null,
     };
+  }
+
+  /** The tab's sub-agent cards, oldest first. */
+  agentCards(tabId: string): TranscriptEntry[] {
+    return this.db
+      .prepare(
+        "SELECT body FROM transcript_entries WHERE tab_id = ? AND kind = 'agent' ORDER BY seq",
+      )
+      .all(tabId)
+      .map((row) => JSON.parse(row.body as string) as TranscriptEntry);
   }
 
   /** Entries that still wait on the host, newest last. */

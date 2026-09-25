@@ -30,7 +30,9 @@ export interface HostStore {
     tabId: string,
     beforeSeq?: number,
     limit?: number,
+    agentKey?: string,
   ): TranscriptPage;
+  agentCards(tabId: string): TranscriptEntry[];
   pendingEntries(tabId: string): TranscriptEntry[];
   deleteTranscript(tabId: string): void;
 }
@@ -218,7 +220,16 @@ export class TabHost {
           command.tabId,
           command.beforeSeq,
           command.limit,
+          command.agentKey,
         );
+      case "tab.agents":
+        findTab(this.store.read(), command.roomId, command.tabId);
+        this.writer.flush();
+        return {
+          tabId: command.tabId,
+          entries: this.store.agentCards(command.tabId),
+          nextSeq: null,
+        };
       case "tab.resetSession":
         return this.resetSession(command.roomId, command.tabId);
       case "approval.respond":

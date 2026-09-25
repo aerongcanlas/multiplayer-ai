@@ -91,6 +91,8 @@ export interface OpenRequest extends LaunchContext {
 export interface HarnessAdapter {
   readonly id: HarnessId;
   readonly signIn: "in_app" | "guidance";
+  /** Whether sessions report sub-agents on the session listener (KTD12). */
+  readonly reportsAgents: boolean;
   /** Checks that a custom executable speaks the harness protocol. Returns its version. */
   handshake(context: LaunchContext): Promise<{ version: string | null }>;
   inspect(context: LaunchContext): Promise<Inspection>;
