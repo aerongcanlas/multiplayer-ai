@@ -326,7 +326,7 @@ test("after a restart a running turn is interrupted with no pending approval, an
       "cancelled",
     );
     assert.equal(entries.at(-1)?.notice, "interrupted");
-    // AE5: the follow-up reopens the stored session.
+    // The follow-up reopens the stored session.
     await second.send(tab.id, "Continue");
     await second.settled(tab.id);
     assert.ok(fake.calls.includes(`open:${sessionId}`));
@@ -794,7 +794,7 @@ test("sub-agents get cards under their turn, and a background one outlives the t
     const tab = await setup.open();
     await setup.send(tab.id, "FAKE_AGENTS go");
     await setup.settled(tab.id);
-    // AE1: the tab is idle and accepts messages while the background card runs.
+    // The tab is idle and accepts messages while the background card runs.
     const idle = setup.tab(tab.id);
     assert.equal(idle.status, "idle");
     assert.equal(idle.runningAgents, 1);
@@ -849,7 +849,7 @@ test("sub-agents get cards under their turn, and a background one outlives the t
       ["tool", "assistant"],
     );
     assert.equal(tests.agent?.background, true);
-    // AE7: the approval raised mid-turn is still pending after the turn and names its sub-agent.
+    // The approval raised mid-turn is still pending after the turn and names its sub-agent.
     const first = await pendingFrom(setup, tab.id, "tests");
     assert.equal(first.agentKey, "tests");
     assert.equal(first.turnId, turnId);
@@ -907,7 +907,6 @@ test("Stop on an idle tab stops its background sub-agents", async () => {
     await setup.send(tab.id, "FAKE_AGENTS go");
     await setup.settled(tab.id);
     const approval = await pendingFrom(setup, tab.id, "tests");
-    // AE2
     await stopTab(setup, tab.id);
     assert.ok(fake.calls.includes("stop"));
     const tests = await card(setup, tab.id, "tests");

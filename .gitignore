@@ -37,7 +37,6 @@ scripts/
 /docs/*
 !/docs/desktop-migration.md
 !/docs/shared-rooms.md
-!/docs/codex-runner.md
 !/docs/desktop-harnesses.md
 /.worktrees/
 MEMORY.md

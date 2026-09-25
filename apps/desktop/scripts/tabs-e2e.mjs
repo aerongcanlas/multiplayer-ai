@@ -188,7 +188,7 @@ try {
     .click();
   await page.getByRole("button", { name: "repository", exact: true }).waitFor();
 
-  // F1 / AE1: the first Codex tab downloads, verifies, and becomes ready.
+  // The first Codex tab downloads, verifies, and becomes ready.
   await tabsPanel()
     .getByRole("button", { name: "New tab", exact: true })
     .click();
@@ -200,7 +200,7 @@ try {
   assert.equal(programs.requests("codex"), 1);
   assert.equal((await harness("codex")).program.state, "ready");
   assert.equal((await tabNamed("Codex 1")).loadout.model, "fixture-codex");
-  // AE3: only the efforts the model reports are offered.
+  // Only the efforts the model reports are offered.
   assert.deepEqual(
     await tabsPanel()
       .getByRole("combobox", { name: "Effort", exact: true })
@@ -210,7 +210,7 @@ try {
   );
   await checkpoint("A first Codex tab downloads, verifies, and becomes ready");
 
-  // F2 / AE4: an approval card pauses the turn until the host approves.
+  // An approval card pauses the turn until the host approves.
   await send("FIXTURE_APPROVAL inspect the checkout");
   const approval = tabsPanel().getByRole("region", { name: "Agent approval" });
   await approval.getByText("Run command: git status --short").waitFor();
@@ -229,7 +229,7 @@ try {
     "An approval card shows, Approve continues, and the tool summary lands",
   );
 
-  // AE8: Stop while an approval is pending ends the turn stopped.
+  // Stop while an approval is pending ends the turn stopped.
   await send("FIXTURE_APPROVAL again");
   await tabsPanel()
     .getByRole("button", { name: "Approve once", exact: true })
@@ -326,7 +326,7 @@ try {
     "A corrupted download shows the failure and a working retry",
   );
 
-  // AE2: signed-out Claude Code shows guidance, no sign-in button, and the one-time notice.
+  // Signed-out Claude Code shows guidance, no sign-in button, and the one-time notice.
   await until(
     async () => (await harness("claude")).auth.state === "signed_out",
     "Claude Code sign-in state",
@@ -366,7 +366,7 @@ try {
     "Signed-out Claude Code shows guidance and the one-time notice only",
   );
 
-  // AE7: a skill's question appears as a card and the answer continues the turn.
+  // A skill's question appears as a card and the answer continues the turn.
   await send("/review FIXTURE_ASK");
   const question = tabsPanel().getByRole("form", { name: "Harness question" });
   await question.getByText("Which approach should the skill take?").waitFor();
@@ -404,7 +404,7 @@ try {
     "Claude Code plan mode continues into execution from its card",
   );
 
-  // AE6: a tab whose harness kept no to-do list shows its state and a no-plan note.
+  // A tab whose harness kept no to-do list shows its state and a no-plan note.
   await leadContext()
     .getByText(/No plan in this tab/)
     .waitFor();
@@ -415,7 +415,7 @@ try {
     .waitFor();
   await checkpoint("Lead context shows the tab's state and a no-plan note");
 
-  // F1 / AE1: sub-agents get cards under the turn; a mid-turn sub-agent approval names its
+  // Sub-agents get cards under the turn; a mid-turn sub-agent approval names its
   // sub-agent and leaves the turn running; a background card outlives the turn.
   await send("FIXTURE_AGENTS FIXTURE_BACKGROUND");
   const inspectApproval = tabsPanel().getByRole("region", {
@@ -444,7 +444,7 @@ try {
     "Sub-agent cards appear under the turn and a background card outlives it",
   );
 
-  // F2: a card opens its sub-agent's own transcript, read-only, and back returns to the lead.
+  // A card opens its sub-agent's own transcript, read-only, and back returns to the lead.
   await agentCard("Inspect the checkout").click();
   await tabsPanel()
     .getByRole("heading", { name: "Inspect the checkout" })
@@ -463,7 +463,7 @@ try {
   assert.equal(await tabsPanel().getByText("Looking around.").count(), 0);
   await checkpoint("A card opens its sub-agent's transcript and back returns");
 
-  // F4 / AE7: the background sub-agent asks after the turn; the tab stays idle and usable.
+  // The background sub-agent asks after the turn; the tab stays idle and usable.
   const backgroundApproval = tabsPanel().getByRole("region", {
     name: "Approval for sub-agent Run the tests",
   });
@@ -481,7 +481,7 @@ try {
     async () => !(await tabNamed("Claude Code 1")).agentRequests,
     "the needs-you mark to clear",
   );
-  // F3: the finished sub-agent wakes the lead in a turn of its own.
+  // The finished sub-agent wakes the lead in a turn of its own.
   await tabsPanel()
     .getByText("The background agent reports: All tests passed.")
     .waitFor();
@@ -498,7 +498,7 @@ try {
     "A background approval never blocks the tab and its reply lands as a new turn",
   );
 
-  // F3 / AE2: Stop on an idle tab stops its background sub-agent.
+  // Stop on an idle tab stops its background sub-agent.
   await tabsPanel()
     .getByRole("button", { name: "New tab", exact: true })
     .click();
@@ -602,7 +602,7 @@ try {
     "A room suggestion fills the active tab and the turn shows its source",
   );
 
-  // AE5: after a restart, a follow-up continues the same Codex thread.
+  // After a restart, a follow-up continues the same Codex thread.
   const threadId = (await tabNamed("Codex 1")).sessionId;
   assert.ok(threadId);
   await application.close();
@@ -624,7 +624,7 @@ try {
   );
   await checkpoint("After a restart a follow-up continues the fixture session");
 
-  // AE3 setup: a background sub-agent is still running when the app dies.
+  // A background sub-agent is still running when the app dies.
   await tabsPanel()
     .getByRole("button", { name: "New tab", exact: true })
     .click();
@@ -641,7 +641,7 @@ try {
   await agentCard("Run the tests").getByText("Running").waitFor();
   await selectTab("Codex 1");
 
-  // AE8: killing the app mid-turn leaves the turn interrupted with nothing pending.
+  // Killing the app mid-turn leaves the turn interrupted with nothing pending.
   await send("FIXTURE_APPROVAL before the crash");
   await tabsPanel()
     .getByRole("button", { name: "Approve once", exact: true })
@@ -665,7 +665,7 @@ try {
     "Killing the app mid-turn shows the turn interrupted after relaunch",
   );
 
-  // AE3: the sub-agent that was running reads interrupted, not running.
+  // The sub-agent that was running reads interrupted, not running.
   await selectTab("Claude Code 3");
   await agentCard("Run the tests")
     .getByText("Interrupted", { exact: true })

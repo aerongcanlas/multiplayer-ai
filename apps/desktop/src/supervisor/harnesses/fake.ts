@@ -12,13 +12,13 @@ import {
   type SessionEvent,
 } from "./contract";
 
-// A scripted adapter for tests and MP_E2E only. Prompt markers select the behavior:
-// FAKE_APPROVAL, FAKE_QUESTION, FAKE_EXIT_PLAN, FAKE_SLOW, FAKE_THROW, FAKE_SIGNOUT, FAKE_USAGE,
-// FAKE_CRASH, and FAKE_AGENTS. Options make resumes fail or fail the first turn after a resume.
+// A scripted adapter for tests. Prompt markers select the behavior: FAKE_APPROVAL, FAKE_QUESTION,
+// FAKE_EXIT_PLAN, FAKE_SLOW, FAKE_THROW, FAKE_SIGNOUT, FAKE_USAGE, and FAKE_AGENTS. Options make
+// resumes fail or fail the first turn after a resume.
 const STOPPED = Symbol("stopped");
 type Waiting = (value: unknown) => void;
 
-export class FakeSession implements HarnessSession {
+class FakeSession implements HarnessSession {
   sessionId: string | undefined;
   private pending = new Map<string, Waiting>();
   private stopped = false;
@@ -124,8 +124,6 @@ export class FakeSession implements HarnessSession {
         "Usage limit reached.",
         2_000_000_000,
       );
-    if (prompt.includes("FAKE_CRASH"))
-      throw new HarnessError("crashed", "The fake harness exited.");
     if (prompt.includes("FAKE_AGENTS")) {
       yield {
         type: "steps",
@@ -309,7 +307,7 @@ export class FakeSession implements HarnessSession {
 
 export class FakeHarness implements HarnessAdapter {
   readonly signIn: "in_app" | "guidance";
-  readonly reportsAgents: boolean;
+  readonly reportsAgents = true;
   calls: string[] = [];
   loadouts: Loadout[] = [];
   sessions: FakeSession[] = [];
@@ -323,22 +321,18 @@ export class FakeHarness implements HarnessAdapter {
   constructor(
     readonly id: HarnessId = "codex",
     options: {
-      signedIn?: boolean;
-      models?: HarnessModel[];
       inspectDelayMs?: number;
       signIn?: "in_app" | "guidance";
       resumable?: boolean;
       failFirstResumedTurn?: boolean;
-      reportsAgents?: boolean;
     } = {},
   ) {
-    this.reportsAgents = options.reportsAgents ?? true;
     this.resumable = options.resumable ?? true;
     this.failFirstResumedTurn = options.failFirstResumedTurn ?? false;
-    this.signedIn = options.signedIn ?? true;
+    this.signedIn = true;
     this.inspectDelayMs = options.inspectDelayMs ?? 0;
     this.signIn = options.signIn ?? "in_app";
-    this.models = options.models ?? [
+    this.models = [
       {
         id: "fake-model",
         name: "Fake model",

@@ -13,19 +13,19 @@ import { EventQueue } from "../queue";
 // A scripted Claude Agent SDK query for tests and MP_E2E only. It never starts Claude Code or
 // makes network requests. Prompt markers select behavior: FIXTURE_ASK (an AskUserQuestion call),
 // FIXTURE_BASH (a Bash tool call), FIXTURE_EXIT_PLAN (an ExitPlanMode call in plan mode),
-// FIXTURE_USAGE (a usage limit), FIXTURE_SLOW (waits for an interrupt), FIXTURE_CRASH,
+// FIXTURE_USAGE (a usage limit), FIXTURE_SLOW (waits for an interrupt),
 // FIXTURE_AGENTS (a sub-agent with a nested one, an approval from inside it, and a to-do list), and
 // FIXTURE_BACKGROUND (a background sub-agent and a background shell command that outlive the
 // turn; after the turn the sub-agent asks to run a command, then completes and Claude Code replies
 // on its own, and `finishShell` ends the shell command). Sessions persist in the state file so a
 // restarted app can resume them.
 
-export interface FixtureState {
+interface FixtureState {
   signedIn: boolean;
   sessions: Record<string, number>;
 }
 
-export interface FixtureRecord {
+interface FixtureRecord {
   options: Options[];
   calls: string[];
 }
@@ -203,8 +203,6 @@ export function claudeFixture(
         const turns = load().sessions[sessionId] ?? 0;
         const reply: string[] = [];
         let failed: string | undefined;
-        if (prompt.includes("FIXTURE_CRASH"))
-          throw new Error("Claude Code exited with code 1");
         if (prompt.includes("FIXTURE_SLOW"))
           await new Promise<void>((resolve) => (interrupted = resolve));
         if (prompt.includes("FIXTURE_USAGE")) {

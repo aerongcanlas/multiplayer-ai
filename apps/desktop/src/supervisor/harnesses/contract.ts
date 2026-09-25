@@ -97,7 +97,7 @@ export type SessionEvent =
   // The harness process or query ended with no turn running.
   | { type: "crashed"; message: string };
 
-export type HarnessErrorKind =
+type HarnessErrorKind =
   // The program is missing, failed to download, or is not signed in.
   | "unavailable"
   | "failed"

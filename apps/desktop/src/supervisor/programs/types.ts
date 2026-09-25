@@ -1,16 +1,14 @@
 import type { HarnessId } from "../../shared/tabs";
 
-export const PLATFORM_KEYS = [
-  "darwin-arm64",
-  "darwin-x64",
-  "linux-arm64",
-  "linux-x64",
-  "linux-arm64-musl",
-  "linux-x64-musl",
-  "win32-arm64",
-  "win32-x64",
-] as const;
-export type PlatformKey = (typeof PLATFORM_KEYS)[number];
+export type PlatformKey =
+  | "darwin-arm64"
+  | "darwin-x64"
+  | "linux-arm64"
+  | "linux-x64"
+  | "linux-arm64-musl"
+  | "linux-x64-musl"
+  | "win32-arm64"
+  | "win32-x64";
 
 export interface Digest {
   sha256: string;

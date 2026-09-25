@@ -25,7 +25,7 @@ import type {
   ProgramManifest,
 } from "./types";
 
-export type ProgramErrorCode =
+type ProgramErrorCode =
   | "checksum_mismatch"
   | "network"
   | "disk_full"
@@ -41,13 +41,13 @@ export class ProgramError extends Error {
   }
 }
 
-export interface ResolvedProgram {
+interface ResolvedProgram {
   path: string;
   source: "managed" | "custom";
   // The pinned version for managed programs; custom programs report theirs in the handshake.
   version: string | null;
 }
-export interface ProgramProgress {
+interface ProgramProgress {
   harness: HarnessId;
   received: number;
   total: number;

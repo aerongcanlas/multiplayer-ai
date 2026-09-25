@@ -21,7 +21,7 @@ const itemKey = (
   item: string,
 ) => `${tabId}\0${turnId ?? ""}\0${agentKey ?? ""}\0${item}`;
 
-export type EntryInput = Pick<TranscriptEntry, "turnId" | "kind" | "summary"> &
+type EntryInput = Pick<TranscriptEntry, "turnId" | "kind" | "summary"> &
   Partial<
     Omit<
       TranscriptEntry,

@@ -39,7 +39,7 @@ export class SupervisorClient {
       harnessManifest?: string;
     } = {},
   ) {
-    // Credentials and provider keys from the launching terminal are not inherited by the mock supervisor.
+    // Credentials and provider keys from the launching terminal are not inherited by the supervisor.
     const env = Object.fromEntries(
       Object.entries(process.env).filter(([key]) =>
         /^(PATH|SYSTEMROOT|WINDIR|TEMP|TMP|HOME|USERPROFILE|LOCALAPPDATA|APPDATA|COMSPEC|PATHEXT)$/i.test(

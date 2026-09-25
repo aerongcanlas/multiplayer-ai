@@ -40,7 +40,7 @@ export interface ClaudeQuery extends AsyncIterable<SDKMessage> {
   applyFlagSettings(settings: Record<string, unknown>): Promise<void>;
   close(): void;
 }
-export type StartQuery = (params: {
+type StartQuery = (params: {
   prompt: AsyncIterable<SDKUserMessage>;
   options: Options;
 }) => ClaudeQuery;
@@ -84,7 +84,7 @@ export const permissionMode = (loadout: Loadout): PermissionMode =>
       : "default";
 
 /** The host's environment plus the flags every Claude Code launch needs. */
-export function claudeEnvironment(
+function claudeEnvironment(
   context: LaunchContext,
 ): Record<string, string> {
   return {
@@ -95,8 +95,7 @@ export function claudeEnvironment(
   };
 }
 
-
-export function toolSummary(name: string, input: Record<string, unknown>) {
+function toolSummary(name: string, input: Record<string, unknown>) {
   if (name === "Bash") return `Run command: ${clip(string(input.command))}`;
   if (["Edit", "Write", "MultiEdit", "NotebookEdit"].includes(name))
     return `${name === "Write" ? "Write" : "Edit"} ${string(input.file_path) || string(input.notebook_path)}`;
@@ -342,7 +341,9 @@ class ClaudeSession implements HarnessSession {
             id: String(index),
             header: string(question.header),
             question:
-              string(question.question) || string(question.header) || "Question",
+              string(question.question) ||
+              string(question.header) ||
+              "Question",
             options: (Array.isArray(question.options)
               ? question.options
               : []

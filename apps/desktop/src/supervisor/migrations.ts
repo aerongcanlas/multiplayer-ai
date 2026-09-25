@@ -1,7 +1,7 @@
 import { existsSync, rmSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
 
-export type Step = ((db: DatabaseSync) => void) | null;
+type Step = ((db: DatabaseSync) => void) | null;
 
 // Ordered, append-only schema steps keyed by `PRAGMA user_version`. Index i moves a
 // journal from version i to i + 1. Step 2 is unused: a `feat/desktop-agent-connections` build

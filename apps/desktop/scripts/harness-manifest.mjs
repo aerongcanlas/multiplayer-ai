@@ -108,24 +108,6 @@ function tarEntries(archive) {
   return files;
 }
 
-// Reads one file out of the SDK's npm tarball without a tar dependency.
-function tarFile(archive, wanted) {
-  for (let offset = 0; offset + 512 <= archive.length;) {
-    const name = archive
-      .toString("utf8", offset, offset + 100)
-      .replace(/\0.*$/s, "");
-    if (!name) break;
-    const size = parseInt(
-      archive.toString("utf8", offset + 124, offset + 136).trim() || "0",
-      8,
-    );
-    if (name === wanted)
-      return archive.subarray(offset + 512, offset + 512 + size);
-    offset += 512 + Math.ceil(size / 512) * 512;
-  }
-  throw new Error(`${wanted} is missing from the SDK package.`);
-}
-
 async function claude() {
   const tarball = gunzipSync(
     await download(
@@ -133,7 +115,7 @@ async function claude() {
     ),
   );
   const manifest = JSON.parse(
-    tarFile(tarball, "package/manifest.json").toString("utf8"),
+    tarEntries(tarball).get("package/manifest.json").toString("utf8"),
   );
   if (manifest.version !== CLAUDE_VERSION)
     throw new Error(

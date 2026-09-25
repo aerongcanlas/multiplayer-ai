@@ -10,7 +10,7 @@ const octal = (header: Buffer, start: number, length: number) =>
   parseInt(field(header, start, length).trim() || "0", 8);
 
 /** Rejects absolute paths and `..` so an archive can only write inside its target folder. */
-export function safePath(root: string, name: string): string {
+function safePath(root: string, name: string): string {
   const relative = normalize(name.replace(/\\/g, "/")).replace(/^\.\/+/, "");
   if (
     !relative ||

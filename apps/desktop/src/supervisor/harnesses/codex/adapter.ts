@@ -13,13 +13,18 @@ import type { ThreadResumeParams } from "./generated/v2/ThreadResumeParams";
 import type { ThreadStartParams } from "./generated/v2/ThreadStartParams";
 import { ARGS, CodexProcess, versionOf, type Launcher } from "./process";
 import { CodexSession } from "./session";
-import { JsonRpcTransport, RpcError, type RpcNotification, type RpcRequest } from "./transport";
+import {
+  JsonRpcTransport,
+  RpcError,
+  type RpcNotification,
+  type RpcRequest,
+} from "./transport";
 
 const IDLE_MS = 10 * 60_000;
 const LOGIN_HOSTS = ["auth.openai.com", "chatgpt.com"];
 const direct: Launcher = (executable, args, env) => ({ executable, args, env });
 
-export const loginUrlAllowed = (value: string) => {
+const loginUrlAllowed = (value: string) => {
   try {
     const url = new URL(value);
     return (
