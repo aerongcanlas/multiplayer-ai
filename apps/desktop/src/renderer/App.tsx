@@ -49,7 +49,7 @@ function RoomView({
   const [source, setSource] = useState<Suggestion | null>(null);
   const [announcement, setAnnouncement] = useState("");
   const [invite, setInvite] = useState<string | null>(null);
-  // Mission Control and the main area both follow the active tab (KTD13).
+  // Mission Control and the main area both follow the active tab.
   const [selectedTab, setSelectedTab] = useState<string | null>(() =>
     rememberedTab(room.id),
   );

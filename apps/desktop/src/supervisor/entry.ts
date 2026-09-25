@@ -76,7 +76,7 @@ let pending = Promise.resolve();
 parent.on("message", ({ data }) => {
   pending = pending.then(async () => {
     try {
-      // Harness I/O runs as background jobs, so a slow refresh never holds this queue (KTD16).
+      // Harness I/O runs as background jobs, so a slow refresh never holds this queue.
       const result = await supervisor.dispatchResult(data.command);
       parent.postMessage({
         type: "response",

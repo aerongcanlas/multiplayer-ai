@@ -587,7 +587,7 @@ test("sub-agent threads register under their parent, and their approvals outlive
       woke.filter((event) => event.type !== "text").map((event) => event.type),
       ["turn.started", "message", "turn.completed"],
     );
-    // KTD15: a follow-up to the finished scout sets its card running again.
+    // A follow-up to the finished scout sets its card running again.
     await run(session, "FIXTURE_FOLLOWUP");
     const after = agentEvents(heard, scout)
       .map((event) => event.status)

@@ -47,7 +47,7 @@ const ask = {
   approvalPolicy: "on-request" as AskForApproval,
   approvalsReviewer: "user" as const,
 };
-/** KTD7: the tab's access mode replaces the host's Codex sandbox and approval settings. */
+/** The tab's access mode replaces the host's Codex sandbox and approval settings. */
 export function accessSettings(loadout: Loadout, cwd: string) {
   if (loadout.planMode || loadout.access === "ask")
     return {
@@ -90,7 +90,7 @@ const versionOf = (userAgent: string) =>
 const clip = (text: string, limit = 400) =>
   text.length > limit ? `${text.slice(0, limit - 1)}…` : text;
 
-/** One shared app-server process per executable (KTD5). */
+/** One shared app-server process per executable. */
 class CodexProcess {
   readonly transport: JsonRpcTransport;
   readonly ready: Promise<void>;
@@ -130,7 +130,7 @@ class CodexProcess {
             title: "Multiplayer AI",
             version: "0.1.0",
           },
-          // Native plan mode and user questions exist only behind the experimental API (KTD6).
+          // Native plan mode and user questions exist only behind the experimental API.
           capabilities: { experimentalApi: true, requestAttestation: false },
         } satisfies InitializeParams as Record<string, unknown>),
       );
@@ -172,11 +172,11 @@ interface PendingRequest {
   rpc: RpcRequest;
   // Elicitation answers are converted back to the requested schema's types.
   fields?: Record<string, string>;
-  // The sub-agent thread that asked; its requests outlive the lead's turn (KTD5).
+  // The sub-agent thread that asked; its requests outlive the lead's turn.
   agent?: string;
 }
 
-/** A sub-agent thread spawned from the tab's thread or from another sub-agent (KTD11). */
+/** A sub-agent thread spawned from the tab's thread or from another sub-agent. */
 interface SubAgent {
   parentKey?: string;
   turnId: string;
@@ -190,7 +190,7 @@ const STEP_STATUS: Record<string, PlanStep["status"]> = {
   inProgress: "active",
   completed: "done",
 };
-// Collab calls that send a finished sub-agent more work (KTD15).
+// Collab calls that send a finished sub-agent more work.
 const REENGAGE = new Set([
   "sendInput",
   "followupTask",
@@ -216,7 +216,7 @@ class CodexSession implements HarnessSession {
   // A new thread's ID is reported on the first turn so the tab can resume it later.
   private announced: boolean;
   private agents = new Map<string, SubAgent>();
-  // A lead turn Codex started by itself (KTD14), and its events held until the owner's turn has
+  // A lead turn Codex started by itself, and its events held until the owner's turn has
   // fully ended on the host.
   private harnessTurn = false;
   private backlog: SessionEvent[] = [];
@@ -274,7 +274,7 @@ class CodexSession implements HarnessSession {
     return undefined;
   }
 
-  /** Registers a sub-agent thread under the thread that spawned it (KTD11). */
+  /** Registers a sub-agent thread under the thread that spawned it. */
   register(
     threadId: string,
     parent: string,
@@ -353,7 +353,7 @@ class CodexSession implements HarnessSession {
         : {}),
       sandboxPolicy: access.sandboxPolicy,
       // collaborationMode wins over top-level model and effort, so the loadout goes in settings.
-      // A null developer_instructions keeps the harness's own mode instructions (KTD6).
+      // A null developer_instructions keeps the harness's own mode instructions.
       collaborationMode: {
         mode: loadout.planMode ? "plan" : "default",
         settings: {
@@ -380,7 +380,7 @@ class CodexSession implements HarnessSession {
       yield* queue;
     } finally {
       this.queue = undefined;
-      // Sub-agent requests stay answerable after the lead's turn (KTD5).
+      // Sub-agent requests stay answerable after the lead's turn.
       for (const [key, pending] of this.pending)
         if (!pending.agent) this.pending.delete(key);
       this.flush();
@@ -399,7 +399,7 @@ class CodexSession implements HarnessSession {
       }
       if (this.active) this.turnId = turnId;
       else if (!this.harnessTurn) {
-        // Codex started a lead turn by itself (KTD14).
+        // Codex started a lead turn by itself.
         this.harnessTurn = true;
         this.turnId = turnId;
         this.harness({ type: "turn.started" });
@@ -494,7 +494,7 @@ class CodexSession implements HarnessSession {
           kind: "plan",
           text,
         });
-        // Only the lead's own plan becomes the tab's plan (KTD9).
+        // Only the lead's own plan becomes the tab's plan.
         if (lead)
           emit({
             type: "steps",
@@ -689,7 +689,7 @@ class CodexSession implements HarnessSession {
     const key = String(rpc.id);
     const threadId = string(params.threadId);
     const agent = threadId !== this.sessionId ? threadId : undefined;
-    // A sub-agent thread's requests reach the owner with or without a lead turn (KTD5).
+    // A sub-agent thread's requests reach the owner with or without a lead turn.
     const emit = this.out(threadId);
     if (!emit) {
       this.process.transport.reject(
@@ -851,7 +851,7 @@ class CodexSession implements HarnessSession {
 
   async stop() {
     const transport = this.process.transport;
-    // Stop answers every pending request first (KTD7), then interrupts the turn.
+    // Stop answers every pending request first, then interrupts the turn.
     for (const { rpc } of this.pending.values()) {
       if (rpc.method === "item/tool/requestUserInput")
         transport.respond(rpc.id, {
@@ -871,7 +871,7 @@ class CodexSession implements HarnessSession {
       else transport.respond(rpc.id, { decision: "cancel" });
     }
     this.pending.clear();
-    // The lead's turn and each running sub-agent thread's turn are interrupted (KTD7).
+    // The lead's turn and each running sub-agent thread's turn are interrupted.
     const turns: [string, string][] = [
       ...[...this.agents]
         .filter(([, agent]) => agent.running && agent.turnId)
@@ -1064,7 +1064,7 @@ export class CodexAdapter implements HarnessAdapter {
       this.readResets(message.params);
       return;
     }
-    // A spawned thread names its parent in a thread object, not a top-level thread ID (KTD11).
+    // A spawned thread names its parent in a thread object, not a top-level thread ID.
     if (message.method === "thread/started") {
       const thread = object(message.params.thread);
       const parent = string(thread.parentThreadId);

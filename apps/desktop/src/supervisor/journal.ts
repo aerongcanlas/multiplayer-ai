@@ -127,7 +127,7 @@ export class Journal {
 
   /**
    * The lead's entries, or one sub-agent's with `agentKey`. Sub-agent approvals and questions
-   * appear on both, since they wait on the owner in the tab (R18). Cards load through
+   * appear on both, since they wait on the owner in the tab. Cards load through
    * `agentCards`.
    */
   transcriptPage(

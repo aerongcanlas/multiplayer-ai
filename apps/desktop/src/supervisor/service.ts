@@ -166,7 +166,7 @@ export class SupervisorService {
       const registry = this.registry;
       if (!registry)
         throw new Error("Harnesses are unavailable in this build.");
-      // Harness I/O runs in the background and reports through snapshots (KTD16).
+      // Harness I/O runs in the background and reports through snapshots.
       if (command.type === "harness.refresh")
         void registry.refresh(command.harness);
       else if (command.type === "harness.signIn")

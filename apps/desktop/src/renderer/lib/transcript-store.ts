@@ -40,7 +40,7 @@ function merge(current: TranscriptEntry[], incoming: TranscriptEntry[]) {
 function destinations(entry: TranscriptEntry) {
   if (!entry.agentKey) return [keyOf(entry.tabId)];
   const own = keyOf(entry.tabId, entry.agentKey);
-  // A sub-agent's request waits in the lead's view as well (R18).
+  // A sub-agent's request waits in the lead's view as well.
   return entry.kind === "approval" || entry.kind === "question"
     ? [keyOf(entry.tabId), own]
     : [own];

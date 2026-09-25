@@ -43,7 +43,7 @@ export interface HostStore {
 interface Turn {
   id: string;
   roomId: string;
-  // A lead turn the harness started by itself (KTD14).
+  // A lead turn the harness started by itself.
   harness: boolean;
   stopping: boolean;
   finished: boolean;
@@ -53,9 +53,9 @@ interface Live {
   session?: HarnessSession;
   turn?: Turn;
   // Transcript entry ID -> the harness's request, for approvals and questions still pending.
-  // Requests with an agent key come from sub-agents and never block the tab (KTD5).
+  // Requests with an agent key come from sub-agents and never block the tab.
   requests: Map<string, { request: string; agentKey?: string }>;
-  // Sub-agent key -> its card entry and the turn its entries file under (KTD15).
+  // Sub-agent key -> its card entry and the turn its entries file under.
   cards: Map<string, { entryId: string; turnId: string | null }>;
   // A Stop that found only sub-agents running.
   stopTimer?: ReturnType<typeof setTimeout>;
@@ -595,7 +595,7 @@ export class TabHost {
     }
   }
 
-  /** Events a session reports outside the owner's turn iterator (KTD4, KTD14). */
+  /** Events a session reports outside the owner's turn iterator. */
   private sessionEvent(roomId: string, tabId: string, event: SessionEvent) {
     if (this.closed || !this.exists(roomId, tabId)) return;
     const live = this.liveOf(tabId);
@@ -645,7 +645,7 @@ export class TabHost {
     }
   }
 
-  /** The turn a sub-agent's entries file under: its card's, else the running turn (KTD4). */
+  /** The turn a sub-agent's entries file under: its card's, else the running turn. */
   private filing(tabId: string, turn: Turn | undefined, agentKey?: string) {
     const card = agentKey
       ? this.live.get(tabId)?.cards.get(agentKey)
@@ -750,7 +750,7 @@ export class TabHost {
               });
         live.requests.set(entry.id, { request: event.request, ...agentKey });
         this.writer.flush();
-        // Only the lead's own requests hold its turn (KTD5).
+        // Only the lead's own requests hold its turn.
         if (event.agent) this.counts(roomId, tabId);
         else if (turn) this.setStatus(roomId, tabId, "awaiting_host");
         return;
@@ -758,7 +758,7 @@ export class TabHost {
     }
   }
 
-  /** Creates or updates a sub-agent card (KTD1, KTD15). */
+  /** Creates or updates a sub-agent card. */
   private agent(
     roomId: string,
     tabId: string,
@@ -877,7 +877,7 @@ export class TabHost {
     ).length;
   }
 
-  /** Mirrors running sub-agents and their waiting requests onto the tab (KTD6). */
+  /** Mirrors running sub-agents and their waiting requests onto the tab. */
   private counts(roomId: string, tabId: string) {
     if (!this.exists(roomId, tabId)) return;
     const live = this.live.get(tabId);
@@ -1002,7 +1002,7 @@ export class TabHost {
     return undefined;
   }
 
-  /** Stops the running turn and every running sub-agent (KTD7). */
+  /** Stops the running turn and every running sub-agent. */
   private stop(roomId: string, tabId: string) {
     const live = this.liveOf(tabId);
     const turn = live.turn && !live.turn.finished ? live.turn : undefined;
@@ -1122,7 +1122,7 @@ export class TabHost {
     });
   }
 
-  /** Ends a turn; only the lead's requests go with it (KTD5). */
+  /** Ends a turn; only the lead's requests go with it. */
   private end(tabId: string, turn: Turn) {
     turn.finished = true;
     clearTimeout(turn.stopTimer);

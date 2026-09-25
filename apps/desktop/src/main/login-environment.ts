@@ -15,7 +15,7 @@ export function parseEnvironment(output: string): Record<string, string> {
 }
 
 /**
- * The host's login-shell environment (KTD15), so harnesses find the same PATH, SSH agent, and
+ * The host's login-shell environment, so harnesses find the same PATH, SSH agent, and
  * tool configuration they have in a terminal. A Dock-launched app only has a minimal PATH. On
  * Windows, or when the shell fails or times out, the app's own environment is used.
  */

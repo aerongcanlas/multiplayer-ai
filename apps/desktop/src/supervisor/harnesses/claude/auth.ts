@@ -12,7 +12,7 @@ export interface AuthStatus {
 
 /**
  * Reads the machine's existing Claude Code login with `claude auth status --json`. The app never
- * starts a claude.ai sign-in of its own (R11).
+ * starts a claude.ai sign-in of its own.
  */
 export async function readAuthStatus(
   executable: string,

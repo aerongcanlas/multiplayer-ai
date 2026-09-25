@@ -175,7 +175,7 @@ else {
       },
     );
     // Harnesses launch with the host's login-shell environment; the supervisor strips provider
-    // credentials before any harness sees it (KTD15).
+    // credentials before any harness sees it.
     void resolveLoginEnvironment().then((env) =>
       supervisor.request({ type: "host.environment", env }),
     );

@@ -30,7 +30,7 @@ const git = (...args) =>
     stdio: "pipe",
   }).toString();
 
-// A project skill loads through Claude Code's project settings (R28) and asks through AskUserQuestion.
+// A project skill loads through Claude Code's project settings and asks through AskUserQuestion.
 const skill = join(repository, ".claude/skills/pick-color/SKILL.md");
 await mkdir(dirname(skill), { recursive: true });
 await writeFile(

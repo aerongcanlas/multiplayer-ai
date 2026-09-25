@@ -22,7 +22,7 @@ import { AGENT_STATUS_LABELS, STATUS_LABELS } from "./labels";
 
 type Actions = Parameters<typeof TranscriptView>[0]["actions"];
 
-/** One sub-agent's transcript in the main area, read-only, with a way back to the lead (R10). */
+/** One sub-agent's transcript in the main area, read-only, with a way back to the lead. */
 function AgentDrillIn({
   roomId,
   tab,
@@ -87,7 +87,7 @@ export function TabsPanel({
   onSent,
 }: {
   room: Room;
-  // The active tab and the sub-agent open in the main area, owned by the room view (KTD13).
+  // The active tab and the sub-agent open in the main area, owned by the room view.
   tab: Tab | undefined;
   agentKey: string | null;
   onSelect: (tabId: string) => void;
@@ -107,7 +107,7 @@ export function TabsPanel({
   const closingTab = room.tabs.find((item) => item.id === closing);
   const harness = harnesses.find((item) => item.id === tab?.loadout.harness);
   const busy = tab ? tabBusy(tab.status) : false;
-  // Stop also covers sub-agents still running after the turn (R13).
+  // Stop also covers sub-agents still running after the turn.
   const stoppable = busy || Boolean(tab?.runningAgents);
   const models = harness?.models ?? [];
   const modelMissing = Boolean(

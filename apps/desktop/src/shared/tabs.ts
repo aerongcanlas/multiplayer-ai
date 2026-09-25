@@ -72,9 +72,9 @@ export const tabSchema = z
     // Set after a resume until the first turn on the resumed session completes.
     resumed: z.boolean().optional(),
     readAlong: z.literal(false),
-    // The harness's own plan for the tab (KTD9).
+    // The harness's own plan for the tab.
     plan: tabPlanSchema.optional(),
-    // Sub-agents still running and sub-agent requests waiting on the owner (KTD6).
+    // Sub-agents still running and sub-agent requests waiting on the owner.
     runningAgents: count,
     agentRequests: count,
     createdAt: z.string(),
@@ -99,7 +99,7 @@ export const TRANSCRIPT_KINDS = [
 export type TranscriptKind = (typeof TRANSCRIPT_KINDS)[number];
 export type ShareLevel = "full" | "summary" | "none";
 
-// What each kind may share once read-along exists (KTD4).
+// What each kind may share once read-along exists.
 export const SHARE_LEVELS: Record<TranscriptKind, ShareLevel> = {
   user: "full",
   assistant: "full",
@@ -165,7 +165,7 @@ export const AGENT_STATUSES = [
 ] as const;
 export type AgentStatus = (typeof AGENT_STATUSES)[number];
 const agentKey = z.string().min(1).max(200);
-// A sub-agent card (KTD1): the entry's summary is the task and its detail the final summary.
+// A sub-agent card: the entry's summary is the task and its detail the final summary.
 export const agentCardSchema = z
   .object({
     key: agentKey,
@@ -278,7 +278,7 @@ export interface HarnessState {
   models: HarnessModel[];
   modelsRefreshedAt: string | null;
   limits: { name: string; usedPercent: number; resetsAt: number | null }[];
-  // Whether the harness reports its sub-agents (KTD12).
+  // Whether the harness reports its sub-agents.
   reportsAgents: boolean;
   // Claude Code shows a one-time notice about Anthropic's third-party login policy.
   noticePending: boolean;

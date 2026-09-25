@@ -544,7 +544,7 @@ try {
   await settled("Claude Code 1");
   await checkpoint("Two tabs run turns concurrently and stop independently");
 
-  // R30: closing a running tab asks for confirmation.
+  // Closing a running tab asks for confirmation.
   await tabsPanel()
     .getByRole("button", { name: "New tab", exact: true })
     .click();
@@ -573,7 +573,7 @@ try {
     "Closing a running tab asks for confirmation, then stops and closes it",
   );
 
-  // R5: a room suggestion fills the active tab, and the sent turn shows its source.
+  // A room suggestion fills the active tab, and the sent turn shows its source.
   await selectTab("Codex 1");
   await page
     .getByRole("textbox", { name: "Group chat message", exact: true })

@@ -1071,7 +1071,7 @@ test("sub-agent tools update in place after the turn, and re-engaged cards file 
     assert.equal(tools[0].detail, "built");
     assert.equal(tools[0].turnId, first);
     assert.equal(setup.tab(tab.id).runningAgents, undefined);
-    // KTD15: a follow-up to the finished sub-agent.
+    // A follow-up to the finished sub-agent.
     await setup.send(tab.id, "FAKE_SLOW again");
     await setup.until(() => setup.tab(tab.id).status === "running", "turn");
     session.emit({ type: "agent", key: "worker", status: "running" });

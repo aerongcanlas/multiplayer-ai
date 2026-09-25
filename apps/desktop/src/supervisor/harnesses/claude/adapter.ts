@@ -43,7 +43,7 @@ export type StartQuery = (params: {
   options: Options;
 }) => ClaudeQuery;
 
-// The supervisor bundle loads the SDK's ESM entry at startup (KTD13), so a broken package shows up
+// The supervisor bundle loads the SDK's ESM entry at startup, so a broken package shows up
 // before any tab opens. The SDK's own platform binary is not packaged; tabs use the managed CLI.
 const sdkQuery: StartQuery = (params) =>
   query(params) as unknown as ClaudeQuery;
@@ -81,7 +81,7 @@ export const permissionMode = (loadout: Loadout): PermissionMode =>
       ? "acceptEdits"
       : "default";
 
-/** KTD8: the host's environment plus the flags every Claude Code launch needs. */
+/** The host's environment plus the flags every Claude Code launch needs. */
 export function claudeEnvironment(
   context: LaunchContext,
 ): Record<string, string> {
@@ -130,7 +130,7 @@ interface Pending {
   kind: "approval" | "plan" | "question";
   input: Record<string, unknown>;
   resolve: Waiter;
-  // Set for a sub-agent's request, which outlives the lead's turn (KTD5).
+  // Set for a sub-agent's request, which outlives the lead's turn.
   agent?: string;
 }
 
@@ -180,7 +180,7 @@ class ClaudeSession implements HarnessSession {
   private query?: ClaudeQuery;
   private channel?: PromptChannel;
   private turn?: EventQueue<HarnessEvent>;
-  // The owner's latest send, matched against each result (KTD14).
+  // The owner's latest send, matched against each result.
   private owner = "";
   // A lead turn Claude Code started by itself, such as a reply to a finished background task.
   private harnessTurn = false;
@@ -192,9 +192,9 @@ class ClaudeSession implements HarnessSession {
   private spawned = new Map<string, string>();
   // The tool call each tool call ran inside, for nesting and sub-agent requests.
   private parents = new Map<string, string>();
-  // Every non-ambient background task, sub-agent or not (KTD10).
+  // Every non-ambient background task, sub-agent or not.
   private background = new Set<string>();
-  // The lead's to-do list, from TodoWrite or TaskCreate and TaskUpdate (KTD9).
+  // The lead's to-do list, from TodoWrite or TaskCreate and TaskUpdate.
   private steps: (PlanStep & { id: string })[] = [];
   private creating = new Map<string, string>();
   private loadout: Loadout;
@@ -228,9 +228,9 @@ class ClaudeSession implements HarnessSession {
         pathToClaudeCodeExecutable: this.request.executable,
         cwd: this.request.cwd,
         env: claudeEnvironment(this.request),
-        // SDK 0.3.280 sends an empty system prompt when this is omitted (KTD8).
+        // SDK 0.3.280 sends an empty system prompt when this is omitted.
         systemPrompt: { type: "preset", preset: "claude_code" },
-        // The host's own skills, plugins, hooks, instructions, and MCP servers load (R28).
+        // The host's own skills, plugins, hooks, instructions, and MCP servers load.
         settingSources: ["user", "project", "local"],
         permissionMode: permissionMode(this.loadout),
         ...(this.loadout.model ? { model: this.loadout.model } : {}),
@@ -281,7 +281,7 @@ class ClaudeSession implements HarnessSession {
     this.query = undefined;
     this.channel = undefined;
     this.denyAll("Claude Code stopped.");
-    // The background set is per CLI process (KTD8).
+    // The background set is per CLI process.
     this.background.clear();
     this.cards.clear();
     if (this.turn && !this.turn.ended) return this.turn.fail(failure);
@@ -334,7 +334,7 @@ class ClaudeSession implements HarnessSession {
   private canUseTool: CanUseTool = (name, input, options) =>
     new Promise<PermissionResult>((resolve) => {
       // A sub-agent's request is named by its card; an unmatched ID still marks it as a
-      // sub-agent's so it never blocks the lead (KTD5).
+      // sub-agent's so it never blocks the lead.
       const agent = options.agentID
         ? (this.agentOf(this.parents.get(options.toolUseID)) ??
           (this.cards.has(options.agentID) ? options.agentID : undefined) ??
@@ -419,7 +419,7 @@ class ClaudeSession implements HarnessSession {
     const agent = this.agentOf(parent);
     if (parent && !agent) return;
     if (value.type === "stream_event") {
-      // Sub-agent deltas are skipped; their complete messages follow (KTD10).
+      // Sub-agent deltas are skipped; their complete messages follow.
       if (parent) return;
       const event = record(value.event);
       if (event.type === "message_start")
@@ -466,7 +466,7 @@ class ClaudeSession implements HarnessSession {
           "Claude Code reached its usage limit.",
           this.resetsAt,
         );
-      // A complete lead message with no owner turn is a turn Claude Code started (KTD14).
+      // A complete lead message with no owner turn is a turn Claude Code started.
       if (!agent && !this.ownerTurn() && !this.harnessTurn) {
         this.harnessTurn = true;
         clearTimeout(this.idle);
@@ -577,7 +577,7 @@ class ClaudeSession implements HarnessSession {
       }
       case "task_started": {
         const tool = text(value.tool_use_id) || undefined;
-        // Only real sub-agents get cards (KTD2).
+        // Only real sub-agents get cards.
         if (
           value.task_type !== "local_agent" ||
           value.ambient === true ||
@@ -669,7 +669,7 @@ class ClaudeSession implements HarnessSession {
     }
   }
 
-  /** Maps the lead's to-do tools onto its plan (KTD9). */
+  /** Maps the lead's to-do tools onto its plan. */
   private plan(name: string, input: Record<string, unknown>, tool: string) {
     if (name === "TodoWrite") {
       this.steps = (Array.isArray(input.todos) ? input.todos : []).map(
@@ -731,7 +731,7 @@ class ClaudeSession implements HarnessSession {
     this.owner = randomUUID();
     if (!this.query) this.start();
     else {
-      // Streaming input keeps the loadout adjustable between turns (KTD8).
+      // Streaming input keeps the loadout adjustable between turns.
       await this.query.setModel(loadout.model || undefined);
       await this.query.applyFlagSettings({
         effortLevel: loadout.effort ?? null,
@@ -744,7 +744,7 @@ class ClaudeSession implements HarnessSession {
       this.resumeSession = this.sessionId;
     } finally {
       this.turn = undefined;
-      // Sub-agent requests stay answerable after the lead's turn (KTD5).
+      // Sub-agent requests stay answerable after the lead's turn.
       this.denyAll("The turn ended.", true);
       this.flush();
       this.arm();
@@ -753,7 +753,7 @@ class ClaudeSession implements HarnessSession {
 
   /**
    * Closes the query after ten idle minutes with no turn and no background work; the next send
-   * resumes the session (KTD10).
+   * resumes the session.
    */
   private arm() {
     clearTimeout(this.idle);
@@ -824,7 +824,7 @@ class ClaudeSession implements HarnessSession {
     });
   }
 
-  /** Interrupts the lead and stops every background task, sub-agents included (KTD7). */
+  /** Interrupts the lead and stops every background task, sub-agents included. */
   async stop() {
     this.denyAll("The host stopped the turn.");
     const query = this.query;
@@ -844,10 +844,10 @@ class ClaudeSession implements HarnessSession {
   }
 }
 
-/** Claude Code through the Claude Agent SDK, one streaming-input query per open tab (KTD8). */
+/** Claude Code through the Claude Agent SDK, one streaming-input query per open tab. */
 export class ClaudeAdapter implements HarnessAdapter {
   readonly id = "claude" as const;
-  // Anthropic's terms do not allow third-party products to offer claude.ai sign-in (R11).
+  // Anthropic's terms do not allow third-party products to offer claude.ai sign-in.
   readonly signIn = "guidance" as const;
   readonly reportsAgents = true;
   closed = false;
