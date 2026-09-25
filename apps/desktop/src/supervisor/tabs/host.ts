@@ -618,7 +618,10 @@ export class TabHost {
           this.finish(tabId, turn, turn.stopping ? "stopped" : "completed");
         return;
       case "turn.failed":
-        if (turn?.harness) this.fail(tabId, turn, event.error);
+        if (!turn?.harness) return;
+        if (turn.stopping && event.error.kind !== "signed_out")
+          this.finish(tabId, turn, "stopped");
+        else this.fail(tabId, turn, event.error);
         return;
       case "crashed": {
         const failure = new HarnessError("crashed", event.message);
