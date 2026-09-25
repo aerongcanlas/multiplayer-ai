@@ -69,10 +69,12 @@ export class JsonRpcTransport extends EventEmitter {
         `${this.options.name} could not start. Check its program in Harness settings.`,
       ),
     );
-    child.on("exit", () => this.fail(`${this.options.name} exited.`));
+    // "close" waits for stdout to drain, so the last responses are handled before failing.
+    child.on("close", () => this.fail(`${this.options.name} exited.`));
   }
 
   private consume(chunk: string) {
+    if (this.ended) return;
     this.buffer += chunk;
     if (this.buffer.length > MAX_MESSAGE) {
       this.fail(`${this.options.name} sent an oversized protocol message.`);
@@ -83,6 +85,7 @@ export class JsonRpcTransport extends EventEmitter {
       const line = this.buffer.slice(0, index);
       this.buffer = this.buffer.slice(index + 1);
       if (!line.trim()) continue;
+      if (this.ended) return;
       let message: Record<string, unknown>;
       try {
         message = object(JSON.parse(line));

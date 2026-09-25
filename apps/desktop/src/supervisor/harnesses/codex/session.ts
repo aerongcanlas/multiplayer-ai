@@ -11,7 +11,11 @@ import { EventQueue } from "../queue";
 import { SessionRelay } from "../relay";
 import { accessSettings } from "./access";
 import type { CodexAdapter } from "./adapter";
-import { elicitationContent, elicitationQuestions } from "./elicitation";
+import {
+  elicitationContent,
+  elicitationQuestions,
+  type ElicitationField,
+} from "./elicitation";
 import type { McpServerElicitationRequestResponse } from "./generated/v2/McpServerElicitationRequestResponse";
 import type { PermissionsRequestApprovalResponse } from "./generated/v2/PermissionsRequestApprovalResponse";
 import type { ToolRequestUserInputResponse } from "./generated/v2/ToolRequestUserInputResponse";
@@ -22,7 +26,7 @@ import type { RpcNotification, RpcRequest } from "./transport";
 interface PendingRequest {
   rpc: RpcRequest;
   // Elicitation answers are converted back to the requested schema's types.
-  fields?: Record<string, string>;
+  fields?: Record<string, ElicitationField>;
   // The sub-agent thread that asked; its requests outlive the lead's turn.
   agent?: string;
 }
@@ -60,6 +64,8 @@ export class CodexSession implements HarnessSession {
   private process: CodexProcess;
   private queue?: EventQueue<HarnessEvent>;
   private turnId = "";
+  // Stop pressed before the lead turn's ID was known; the turn is skipped or interrupted on start.
+  private stopRequested = false;
   private pending = new Map<string, PendingRequest>();
   private failure?: HarnessError;
   private changes = new Map<string, string>();
@@ -171,7 +177,9 @@ export class CodexSession implements HarnessSession {
   }
 
   async *send(prompt: string, loadout: Loadout): AsyncIterable<HarnessEvent> {
+    this.stopRequested = false;
     await this.ensureProcess();
+    if (this.stopRequested) return;
     const queue = new EventQueue<HarnessEvent>();
     this.queue = queue;
     if (!this.announced) {
@@ -205,6 +213,14 @@ export class CodexSession implements HarnessSession {
       .request("turn/start", params as unknown as Record<string, unknown>)
       .then((response) => {
         this.turnId ||= string(object(object(response).turn).id);
+        if (this.stopRequested && this.turnId && this.active)
+          void this.process.transport
+            .request(
+              "turn/interrupt",
+              { threadId: this.sessionId!, turnId: this.turnId },
+              8_000,
+            )
+            .catch(() => {});
       })
       .catch((error) =>
         queue.fail(
@@ -536,7 +552,7 @@ export class CodexSession implements HarnessSession {
       );
       return;
     }
-    const hold = (fields?: Record<string, string>) =>
+    const hold = (fields?: Record<string, ElicitationField>) =>
       this.pending.set(key, {
         rpc,
         ...(fields ? { fields } : {}),
@@ -673,7 +689,11 @@ export class CodexSession implements HarnessSession {
     if (rpc.method === "mcpServer/elicitation/request")
       this.process.transport.respond(rpc.id, {
         action: "accept",
-        content: elicitationContent(answers, fields ?? {}),
+        // Enum values come from the server's own schema, so they are valid JSON.
+        content: elicitationContent(
+          answers,
+          fields ?? {},
+        ) as McpServerElicitationRequestResponse["content"],
         _meta: null,
       } satisfies McpServerElicitationRequestResponse);
     else
@@ -715,6 +735,7 @@ export class CodexSession implements HarnessSession {
       .map(([threadId, agent]) => [threadId, agent.turnId]);
     if (this.turnId && (this.active || this.harnessTurn))
       turns.unshift([this.sessionId!, this.turnId]);
+    else this.stopRequested = true;
     await Promise.all(
       turns.map(([threadId, turnId]) =>
         transport.request("turn/interrupt", { threadId, turnId }, 8_000),
@@ -752,6 +773,8 @@ export class CodexSession implements HarnessSession {
       [...this.agents.values()].some((agent) => agent.running)
     )
       void this.stop().catch(() => {});
+    // The turn's events no longer reach this session, so its send() ends here.
+    if (this.active) this.queue!.end();
     this.process.sessions.delete(this);
     this.process.touch();
   }

@@ -86,7 +86,12 @@ const hashing = (
   new Transform({
     transform(chunk: Buffer, _encoding, callback) {
       digest.update(chunk);
-      onBytes(chunk.length);
+      try {
+        onBytes(chunk.length);
+      } catch (error) {
+        callback(error as Error);
+        return;
+      }
       callback(null, chunk);
     },
   });
@@ -128,6 +133,7 @@ export class ProgramManager extends EventEmitter {
       platform?: PlatformKey | null;
       fetch?: typeof fetch;
       createWriteStream?: (path: string) => Writable;
+      // How long a download may go without receiving data before it is abandoned.
       timeoutMs?: number;
     },
   ) {
@@ -249,7 +255,11 @@ export class ProgramManager extends EventEmitter {
           await pipeline(
             createReadStream(partial),
             createZstdDecompress(),
-            hashing(digest, (count) => (size += count)),
+            hashing(digest, (count) => {
+              size += count;
+              // Stop a runaway stream instead of filling the disk.
+              if (size > binary.size) throw new Error("Oversized output.");
+            }),
             this.writer(unpacked),
           );
         } catch (error) {
@@ -340,8 +350,33 @@ export class ProgramManager extends EventEmitter {
     asset: ProgramAsset,
     partial: string,
   ) {
+    // An idle timeout, reset on every chunk, so slow but steady connections still finish.
+    const controller = new AbortController();
+    let idle: ReturnType<typeof setTimeout> | undefined;
+    const arm = () => {
+      clearTimeout(idle);
+      idle = setTimeout(
+        () => controller.abort(),
+        this.options.timeoutMs ?? 2 * 60_000,
+      );
+    };
+    arm();
+    try {
+      await this.transfer(harness, asset, partial, controller.signal, arm);
+    } finally {
+      clearTimeout(idle);
+    }
+  }
+
+  private async transfer(
+    harness: HarnessId,
+    asset: ProgramAsset,
+    partial: string,
+    signal: AbortSignal,
+    progress: () => void,
+  ) {
     const response = await this.fetch(asset.url, {
-      signal: AbortSignal.timeout(this.options.timeoutMs ?? 20 * 60_000),
+      signal,
       redirect: "follow",
     });
     if (!response.ok || !response.body)
@@ -356,7 +391,13 @@ export class ProgramManager extends EventEmitter {
     await pipeline(
       Readable.fromWeb(response.body as WebReadableStream<Uint8Array>),
       hashing(digest, (count) => {
+        progress();
         received += count;
+        if (received > total)
+          throw new ProgramError(
+            "checksum_mismatch",
+            "The harness download is larger than its pinned size. It was deleted.",
+          );
         // Report about every 1% so a large download does not flood snapshots.
         if (received - reported >= total / 100 || received === total) {
           reported = received;

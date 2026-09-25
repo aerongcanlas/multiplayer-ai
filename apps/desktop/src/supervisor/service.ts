@@ -134,7 +134,7 @@ export class SupervisorService {
       return { snapshot: this.snapshot() };
     }
     if (input.type === "shared.import") {
-      this.importShared(input.room);
+      await this.importShared(input.room);
       return { snapshot: this.snapshot() };
     }
     // workspace.register is accepted only on the private main-to-supervisor transport.
@@ -274,16 +274,31 @@ export class SupervisorService {
   }
 
   // Shared rooms keep this host's private repository selection and tabs for the same account.
-  private importShared(room: Snapshot["rooms"][number]) {
+  private async importShared(room: Snapshot["rooms"][number]) {
     if (!room.shared) throw new Error("Shared room identity is required.");
+    const previous = this.state.rooms.find((item) => item.id === room.id);
+    if (
+      previous &&
+      (previous.shared?.userId !== room.shared.userId ||
+        previous.shared?.project !== room.shared.project)
+    ) {
+      if (previous.tabs.some((tab) => tabBusy(tab.status) || tab.runningAgents))
+        throw new Error("Stop the previous account's running tabs first.");
+      // Close the previous account's tabs fully: sessions, live state, and transcripts.
+      for (const tab of previous.tabs)
+        await this.host?.handle({
+          type: "tab.close",
+          roomId: room.id,
+          tabId: tab.id,
+          confirm: true,
+        });
+    }
     this.transaction((draft) => {
       const index = draft.rooms.findIndex((item) => item.id === room.id);
       const old = draft.rooms[index];
       const sameAccount =
         old?.shared?.userId === room.shared?.userId &&
         old?.shared?.project === room.shared?.project;
-      if (old && !sameAccount && old.tabs.some((tab) => tabBusy(tab.status)))
-        throw new Error("Stop the previous account's running tabs first.");
       const next = sameAccount
         ? { ...room, workspace: old.workspace, tabs: old.tabs }
         : { ...room, tabs: [] };

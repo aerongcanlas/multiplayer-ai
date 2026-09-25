@@ -88,7 +88,9 @@ export class DesktopCoordinator {
     for (const room of this.local.rooms.filter(
       (room) => room.shared && !sharedRooms.some((item) => item.id === room.id),
     )) {
-      for (const tab of room.tabs.filter((tab) => tabBusy(tab.status)))
+      for (const tab of room.tabs.filter(
+        (tab) => tabBusy(tab.status) || tab.runningAgents,
+      ))
         void this.supervisor.request({
           type: "tab.stop",
           roomId: room.id,
@@ -184,6 +186,14 @@ export class DesktopCoordinator {
                   item.id === room!.id &&
                   item.shared?.userId === room!.shared?.userId,
               )
+            )
+              throw new Error("Room membership changed.");
+            // Direct commands skip shared.import, so the supervisor's copy must be this account's.
+            const held = this.local!.rooms.find((item) => item.id === room!.id);
+            if (
+              room.shared &&
+              (held?.shared?.userId !== room.shared.userId ||
+                held?.shared?.project !== room.shared.project)
             )
               throw new Error("Room membership changed.");
             transcript = (await this.localCommand(command)).transcript;

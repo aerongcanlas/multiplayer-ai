@@ -28,6 +28,8 @@ export class HarnessRegistry {
   private states = new Map<HarnessId, HarnessState>();
   private adapters = new Map<HarnessId, HarnessAdapter>();
   private refreshing = new Map<HarnessId, Promise<void>>();
+  // Bumped when the executable changes so work started for the old one stops writing state.
+  private generations = new Map<HarnessId, number>();
   // Custom executables that passed the handshake, so turns do not repeat it.
   private handshaken = new Map<HarnessId, string>();
   private environment: Promise<Record<string, string>>;
@@ -129,6 +131,15 @@ export class HarnessRegistry {
     );
   }
 
+  /** An update function that ignores writes once the harness's executable has changed. */
+  private updater(harness: HarnessId) {
+    const generation = this.generations.get(harness) ?? 0;
+    return (change: (state: HarnessState) => void) => {
+      if ((this.generations.get(harness) ?? 0) === generation)
+        this.update(harness, change);
+    };
+  }
+
   private update(harness: HarnessId, change: (state: HarnessState) => void) {
     if (this.closed) return;
     change(this.state(harness));
@@ -143,10 +154,11 @@ export class HarnessRegistry {
   async context(harness: HarnessId): Promise<LaunchContext> {
     const adapter = this.adapter(harness);
     const custom = this.customPath(harness);
+    const update = this.updater(harness);
     const env = await this.environment;
     try {
       if (!custom)
-        this.update(harness, (state) => {
+        update((state) => {
           if (state.program.state !== "ready") {
             state.program.state = "downloading";
             state.program.progress = 0;
@@ -168,7 +180,7 @@ export class HarnessRegistry {
             `The custom executable did not respond like ${HARNESS_LABELS[harness]}. ${error instanceof Error ? error.message : ""}`.trim(),
           );
         }
-        this.update(harness, (state) => {
+        update((state) => {
           state.program = {
             state: "custom",
             version,
@@ -183,7 +195,7 @@ export class HarnessRegistry {
         });
         this.handshaken.set(harness, program.path);
       } else if (program.source === "managed")
-        this.update(harness, (state) => {
+        update((state) => {
           state.program = {
             state: "ready",
             version: program.version,
@@ -200,7 +212,7 @@ export class HarnessRegistry {
               "network",
               error instanceof Error ? error.message : "The program failed.",
             );
-      this.update(harness, (state) => {
+      update((state) => {
         state.program = {
           state:
             failure.code === "custom_invalid"
@@ -222,22 +234,23 @@ export class HarnessRegistry {
   refresh(harness: HarnessId): Promise<void> {
     const running = this.refreshing.get(harness);
     if (running) return running;
-    const job = (async () => {
+    const update = this.updater(harness);
+    const job: Promise<void> = (async () => {
       const context = await this.context(harness);
       // A known sign-in state stays in place while it is re-read, so ready tabs stay usable.
-      this.update(harness, (state) => {
+      update((state) => {
         if (state.auth.state === "unknown") state.auth = { state: "checking" };
       });
       try {
         const inspection = await this.adapter(harness).inspect(context);
-        this.update(harness, (state) => {
+        update((state) => {
           state.auth = inspection.auth;
           state.models = inspection.models;
           state.limits = inspection.limits;
           state.modelsRefreshedAt = new Date().toISOString();
         });
       } catch (error) {
-        this.update(harness, (state) => {
+        update((state) => {
           state.auth = {
             state: "unknown",
             message:
@@ -251,7 +264,10 @@ export class HarnessRegistry {
       .catch(() => {
         /* Program failures are recorded in the harness state. */
       })
-      .finally(() => this.refreshing.delete(harness));
+      .finally(() => {
+        if (this.refreshing.get(harness) === job)
+          this.refreshing.delete(harness);
+      });
     this.refreshing.set(harness, job);
     return job;
   }
@@ -274,6 +290,8 @@ export class HarnessRegistry {
   }
 
   setExecutable(harness: HarnessId, path: string | null) {
+    this.generations.set(harness, (this.generations.get(harness) ?? 0) + 1);
+    this.refreshing.delete(harness);
     this.handshaken.delete(harness);
     this.options.settings.setSetting(executableKey(harness), path ?? undefined);
     this.update(harness, (state) => {

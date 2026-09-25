@@ -1016,6 +1016,8 @@ export class TabHost {
     void live.session?.stop().catch(() => {});
     // A harness that ignores the interrupt is closed so the tab never stays stuck.
     const timer = setTimeout(() => {
+      // A fired timer never blocks a later Stop on this tab.
+      if (!turn && live.stopTimer === timer) live.stopTimer = undefined;
       if (live.turn && live.turn !== turn) return;
       if (turn && !turn.finished) {
         this.dropSession(roomId, tabId, "stopped");
