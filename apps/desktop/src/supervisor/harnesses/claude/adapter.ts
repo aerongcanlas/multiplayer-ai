@@ -22,7 +22,9 @@ import {
   type OpenRequest,
   type SessionEvent,
 } from "../contract";
+import { clip, object, string } from "../json";
 import { EventQueue } from "../queue";
+import { SessionRelay } from "../relay";
 import { readAuthStatus, type AuthStatus } from "./auth";
 
 const IDLE_MS = 10 * 60_000;
@@ -38,12 +40,12 @@ export interface ClaudeQuery extends AsyncIterable<SDKMessage> {
   applyFlagSettings(settings: Record<string, unknown>): Promise<void>;
   close(): void;
 }
-export type StartQuery = (params: {
+type StartQuery = (params: {
   prompt: AsyncIterable<SDKUserMessage>;
   options: Options;
 }) => ClaudeQuery;
 
-// The supervisor bundle loads the SDK's ESM entry at startup (KTD13), so a broken package shows up
+// The supervisor bundle loads the SDK's ESM entry at startup, so a broken package shows up
 // before any tab opens. The SDK's own platform binary is not packaged; tabs use the managed CLI.
 const sdkQuery: StartQuery = (params) =>
   query(params) as unknown as ClaudeQuery;
@@ -81,10 +83,8 @@ export const permissionMode = (loadout: Loadout): PermissionMode =>
       ? "acceptEdits"
       : "default";
 
-/** KTD8: the host's environment plus the flags every Claude Code launch needs. */
-export function claudeEnvironment(
-  context: LaunchContext,
-): Record<string, string> {
+/** The host's environment plus the flags every Claude Code launch needs. */
+function claudeEnvironment(context: LaunchContext): Record<string, string> {
   return {
     ...context.env,
     CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1",
@@ -93,25 +93,17 @@ export function claudeEnvironment(
   };
 }
 
-const clip = (text: string, limit = 400) =>
-  text.length > limit ? `${text.slice(0, limit - 1)}…` : text;
-const record = (value: unknown): Record<string, unknown> =>
-  value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-const text = (value: unknown) => (typeof value === "string" ? value : "");
-
-export function toolSummary(name: string, input: Record<string, unknown>) {
-  if (name === "Bash") return `Run command: ${clip(text(input.command))}`;
+function toolSummary(name: string, input: Record<string, unknown>) {
+  if (name === "Bash") return `Run command: ${clip(string(input.command))}`;
   if (["Edit", "Write", "MultiEdit", "NotebookEdit"].includes(name))
-    return `${name === "Write" ? "Write" : "Edit"} ${text(input.file_path) || text(input.notebook_path)}`;
-  if (name === "Read") return `Read ${text(input.file_path)}`;
-  if (name === "WebFetch") return `Fetch ${text(input.url)}`;
-  if (name === "WebSearch") return `Web search: ${text(input.query)}`;
+    return `${name === "Write" ? "Write" : "Edit"} ${string(input.file_path) || string(input.notebook_path)}`;
+  if (name === "Read") return `Read ${string(input.file_path)}`;
+  if (name === "WebFetch") return `Fetch ${string(input.url)}`;
+  if (name === "WebSearch") return `Web search: ${string(input.query)}`;
   if (name === "Glob" || name === "Grep")
-    return `${name} ${text(input.pattern)}`;
+    return `${name} ${string(input.pattern)}`;
   if (name === "Skill")
-    return `Run skill ${text(input.skill) || text(input.command)}`;
+    return `Run skill ${string(input.skill) || string(input.command)}`;
   return `Use ${name}`;
 }
 
@@ -120,7 +112,7 @@ const blockText = (content: unknown): string =>
     ? content
     : Array.isArray(content)
       ? content
-          .map((block) => text(record(block).text))
+          .map((block) => string(object(block).text))
           .filter(Boolean)
           .join("\n")
       : "";
@@ -130,7 +122,7 @@ interface Pending {
   kind: "approval" | "plan" | "question";
   input: Record<string, unknown>;
   resolve: Waiter;
-  // Set for a sub-agent's request, which outlives the lead's turn (KTD5).
+  // Set for a sub-agent's request, which outlives the lead's turn.
   agent?: string;
 }
 
@@ -155,8 +147,8 @@ function resultFailure(
 ): HarnessError | undefined {
   if (value.subtype === "success" && !value.is_error) return undefined;
   const detail =
-    text(value.result) ||
-    (Array.isArray(value.errors) ? value.errors.map(text).join("\n") : "") ||
+    string(value.result) ||
+    (Array.isArray(value.errors) ? value.errors.map(string).join("\n") : "") ||
     "Claude Code failed this turn.";
   if (failure) return failure;
   if (resuming && /No conversation found/i.test(detail))
@@ -180,21 +172,19 @@ class ClaudeSession implements HarnessSession {
   private query?: ClaudeQuery;
   private channel?: PromptChannel;
   private turn?: EventQueue<HarnessEvent>;
-  // The owner's latest send, matched against each result (KTD14).
+  // The owner's latest send, matched against each result.
   private owner = "";
   // A lead turn Claude Code started by itself, such as a reply to a finished background task.
   private harnessTurn = false;
-  // Harness-turn events held until the owner's turn has fully ended on the host.
-  private backlog: SessionEvent[] = [];
-  private flushing = false;
+  private relay: SessionRelay;
   // Sub-agent cards by task ID, and the task each spawning tool call started.
   private cards = new Map<string, { running: boolean }>();
   private spawned = new Map<string, string>();
   // The tool call each tool call ran inside, for nesting and sub-agent requests.
   private parents = new Map<string, string>();
-  // Every non-ambient background task, sub-agent or not (KTD10).
+  // Every non-ambient background task, sub-agent or not.
   private background = new Set<string>();
-  // The lead's to-do list, from TodoWrite or TaskCreate and TaskUpdate (KTD9).
+  // The lead's to-do list, from TodoWrite or TaskCreate and TaskUpdate.
   private steps: (PlanStep & { id: string })[] = [];
   private creating = new Map<string, string>();
   private loadout: Loadout;
@@ -206,9 +196,8 @@ class ClaudeSession implements HarnessSession {
   private blocks = new Map<string, number>();
   private idle?: ReturnType<typeof setTimeout>;
   private initialized = false;
-  private resumeSession: string | undefined;
   private resetsAt: number | null = null;
-  private closed = false;
+  private failure?: HarnessError;
   private counter = 0;
   private stderr = "";
 
@@ -217,8 +206,8 @@ class ClaudeSession implements HarnessSession {
     private request: OpenRequest,
   ) {
     this.sessionId = request.sessionId;
-    this.resumeSession = request.sessionId;
     this.loadout = request.loadout;
+    this.relay = new SessionRelay(request.listener, () => Boolean(this.turn));
   }
 
   private start() {
@@ -231,16 +220,16 @@ class ClaudeSession implements HarnessSession {
         pathToClaudeCodeExecutable: this.request.executable,
         cwd: this.request.cwd,
         env: claudeEnvironment(this.request),
-        // SDK 0.3.280 sends an empty system prompt when this is omitted (KTD8).
+        // SDK 0.3.280 sends an empty system prompt when this is omitted.
         systemPrompt: { type: "preset", preset: "claude_code" },
-        // The host's own skills, plugins, hooks, instructions, and MCP servers load (R28).
+        // The host's own skills, plugins, hooks, instructions, and MCP servers load.
         settingSources: ["user", "project", "local"],
         permissionMode: permissionMode(this.loadout),
         ...(this.loadout.model ? { model: this.loadout.model } : {}),
         ...(this.loadout.effort
           ? { effort: this.loadout.effort as Options["effort"] }
           : {}),
-        ...(this.resumeSession ? { resume: this.resumeSession } : {}),
+        ...(this.sessionId ? { resume: this.sessionId } : {}),
         includePartialMessages: true,
         canUseTool: this.canUseTool,
         // Raw stderr never enters app state; a short tail is kept only to classify failures.
@@ -267,7 +256,7 @@ class ClaudeSession implements HarnessSession {
       const message = error instanceof Error ? error.message : String(error);
       // A resumed query that fails before it initializes could not load the session.
       failure =
-        this.resumeSession && !this.initialized
+        this.sessionId && !this.initialized
           ? new HarnessError(
               "resume_failed",
               /No conversation found/i.test(`${message}\n${this.stderr}`)
@@ -284,7 +273,7 @@ class ClaudeSession implements HarnessSession {
     this.query = undefined;
     this.channel = undefined;
     this.denyAll("Claude Code stopped.");
-    // The background set is per CLI process (KTD8).
+    // The background set is per CLI process.
     this.background.clear();
     this.cards.clear();
     if (this.turn && !this.turn.ended) return this.turn.fail(failure);
@@ -296,25 +285,11 @@ class ClaudeSession implements HarnessSession {
   }
 
   private listen(event: SessionEvent) {
-    if (!this.closed) this.request.listener?.(event);
+    this.relay.send(event);
   }
 
-  /**
-   * Reports a harness-turn event, after the owner's turn has ended on the host so the host never
-   * sees a new turn start inside the old one.
-   */
   private harness(event: SessionEvent) {
-    if (this.turn || this.flushing) this.backlog.push(event);
-    else this.listen(event);
-  }
-
-  private flush() {
-    if (!this.backlog.length || this.flushing) return;
-    this.flushing = true;
-    setImmediate(() => {
-      this.flushing = false;
-      for (const event of this.backlog.splice(0)) this.listen(event);
-    });
+    this.relay.hold(event);
   }
 
   private ownerTurn() {
@@ -337,7 +312,7 @@ class ClaudeSession implements HarnessSession {
   private canUseTool: CanUseTool = (name, input, options) =>
     new Promise<PermissionResult>((resolve) => {
       // A sub-agent's request is named by its card; an unmatched ID still marks it as a
-      // sub-agent's so it never blocks the lead (KTD5).
+      // sub-agent's so it never blocks the lead.
       const agent = options.agentID
         ? (this.agentOf(this.parents.get(options.toolUseID)) ??
           (this.cards.has(options.agentID) ? options.agentID : undefined) ??
@@ -359,18 +334,20 @@ class ClaudeSession implements HarnessSession {
         const questions = (
           Array.isArray(input.questions) ? input.questions : []
         ).map((value, index): HarnessQuestion => {
-          const question = record(value);
+          const question = object(value);
           return {
             id: String(index),
-            header: text(question.header),
+            header: string(question.header),
             question:
-              text(question.question) || text(question.header) || "Question",
+              string(question.question) ||
+              string(question.header) ||
+              "Question",
             options: (Array.isArray(question.options)
               ? question.options
               : []
             ).map((option) => ({
-              label: text(record(option).label),
-              description: text(record(option).description),
+              label: string(object(option).label),
+              description: string(object(option).description),
             })),
             multiSelect: question.multiSelect === true,
             allowOther: true,
@@ -388,7 +365,7 @@ class ClaudeSession implements HarnessSession {
           request,
           plan: true,
           summary:
-            text(input.plan) || "Claude Code is ready to leave plan mode.",
+            string(input.plan) || "Claude Code is ready to leave plan mode.",
         });
         return;
       }
@@ -409,40 +386,40 @@ class ClaudeSession implements HarnessSession {
     });
 
   private message(message: SDKMessage) {
-    const value = record(message);
+    const value = object(message);
     if (value.type === "system") return this.system(value);
     if (value.type === "rate_limit_event") {
-      const info = record(value.rate_limit_info);
+      const info = object(value.rate_limit_info);
       if (info.status === "rejected" && typeof info.resetsAt === "number")
         this.resetsAt = info.resetsAt;
       return;
     }
-    const parent = text(value.parent_tool_use_id) || undefined;
+    const parent = string(value.parent_tool_use_id) || undefined;
     // Sub-agent frames attach to their card; frames of other tasks are not shown.
     const agent = this.agentOf(parent);
     if (parent && !agent) return;
     if (value.type === "stream_event") {
-      // Sub-agent deltas are skipped; their complete messages follow (KTD10).
+      // Sub-agent deltas are skipped; their complete messages follow.
       if (parent) return;
-      const event = record(value.event);
+      const event = object(value.event);
       if (event.type === "message_start")
-        this.messageId = text(record(event.message).id);
+        this.messageId = string(object(event.message).id);
       if (event.type === "content_block_delta") {
-        const delta = record(event.delta);
+        const delta = object(event.delta);
         const item = `${this.messageId}:${event.index}`;
         if (delta.type === "text_delta")
           this.lead({
             type: "text",
             item,
             kind: "assistant",
-            delta: text(delta.text),
+            delta: string(delta.text),
           });
         if (delta.type === "thinking_delta")
           this.lead({
             type: "text",
             item,
             kind: "reasoning",
-            delta: text(delta.thinking),
+            delta: string(delta.thinking),
           });
       }
       return;
@@ -452,9 +429,9 @@ class ClaudeSession implements HarnessSession {
         ? this.listen({ ...event, agent } as HarnessEvent)
         : this.lead(event);
     if (value.type === "assistant") {
-      const body = record(value.message);
-      const id = text(body.id);
-      const error = text(value.error);
+      const body = object(value.message);
+      const id = string(body.id);
+      const error = string(value.error);
       if (
         !agent &&
         (error === "authentication_failed" || error === "oauth_org_not_allowed")
@@ -469,7 +446,7 @@ class ClaudeSession implements HarnessSession {
           "Claude Code reached its usage limit.",
           this.resetsAt,
         );
-      // A complete lead message with no owner turn is a turn Claude Code started (KTD14).
+      // A complete lead message with no owner turn is a turn Claude Code started.
       if (!agent && !this.ownerTurn() && !this.harnessTurn) {
         this.harnessTurn = true;
         clearTimeout(this.idle);
@@ -483,38 +460,38 @@ class ClaudeSession implements HarnessSession {
         this.blocks.delete(this.blocks.keys().next().value!);
       content.forEach((raw, offset) => {
         const index = base + offset;
-        const block = record(raw);
+        const block = object(raw);
         if (block.type === "tool_use") {
-          const tool = text(block.id);
-          const input = record(block.input);
-          const summary = toolSummary(text(block.name), input);
+          const tool = string(block.id);
+          const input = object(block.input);
+          const summary = toolSummary(string(block.name), input);
           this.tools.set(tool, summary);
           if (parent) this.parents.set(tool, parent);
           emit({ type: "tool", item: tool, summary });
-          if (!agent) this.plan(text(block.name), input, tool);
+          if (!agent) this.plan(string(block.name), input, tool);
         } else if (block.type === "text")
           emit({
             type: "message",
             item: `${id}:${index}`,
             kind: "assistant",
-            text: text(block.text),
+            text: string(block.text),
           });
         else if (block.type === "thinking")
           emit({
             type: "message",
             item: `${id}:${index}`,
             kind: "reasoning",
-            text: text(block.thinking),
+            text: string(block.thinking),
           });
       });
       return;
     }
     if (value.type === "user") {
-      const content = record(value.message).content;
+      const content = object(value.message).content;
       for (const raw of Array.isArray(content) ? content : []) {
-        const block = record(raw);
+        const block = object(raw);
         if (block.type !== "tool_result") continue;
-        const id = text(block.tool_use_id);
+        const id = string(block.tool_use_id);
         emit({
           type: "tool",
           item: id,
@@ -525,7 +502,7 @@ class ClaudeSession implements HarnessSession {
         if (subject !== undefined && !block.is_error) {
           this.creating.delete(id);
           const created =
-            text(record(record(value.tool_use_result).task).id) ||
+            string(object(object(value.tool_use_result).task).id) ||
             (/#(\d+)/.exec(blockText(block.content))?.[1] ?? "");
           if (created) {
             this.steps.push({ id: created, text: subject, status: "pending" });
@@ -537,16 +514,16 @@ class ClaudeSession implements HarnessSession {
     }
     if (value.type === "result") {
       const uuids = [
-        text(value.user_message_uuid),
+        string(value.user_message_uuid),
         ...(Array.isArray(value.user_message_uuids)
-          ? value.user_message_uuids.map(text)
+          ? value.user_message_uuids.map(string)
           : []),
       ].filter(Boolean);
       const owner = this.ownerTurn();
       const failure = resultFailure(
         value,
         this.failure,
-        Boolean(this.resumeSession && !this.initialized),
+        Boolean(this.sessionId && !this.initialized),
         this.resetsAt,
       );
       this.failure = undefined;
@@ -569,14 +546,13 @@ class ClaudeSession implements HarnessSession {
   }
 
   private system(value: Record<string, unknown>) {
-    const task = text(value.task_id);
+    const task = string(value.task_id);
     switch (value.subtype) {
       case "init": {
         this.initialized = true;
-        const id = text(value.session_id);
+        const id = string(value.session_id);
         if (id && id !== this.sessionId) {
           this.sessionId = id;
-          this.resumeSession = id;
           const owner = this.ownerTurn();
           if (owner) owner.push({ type: "session", sessionId: id });
           else this.listen({ type: "session", sessionId: id });
@@ -584,8 +560,8 @@ class ClaudeSession implements HarnessSession {
         return;
       }
       case "task_started": {
-        const tool = text(value.tool_use_id) || undefined;
-        // Only real sub-agents get cards (KTD2).
+        const tool = string(value.tool_use_id) || undefined;
+        // Only real sub-agents get cards.
         if (
           value.task_type !== "local_agent" ||
           value.ambient === true ||
@@ -599,9 +575,9 @@ class ClaudeSession implements HarnessSession {
           type: "agent",
           key: task,
           ...(parentKey ? { parentKey } : {}),
-          description: text(value.description) || "Sub-agent",
-          ...(text(value.subagent_type)
-            ? { agentType: text(value.subagent_type) }
+          description: string(value.description) || "Sub-agent",
+          ...(string(value.subagent_type)
+            ? { agentType: string(value.subagent_type) }
             : {}),
           background: value.is_backgrounded === true,
           status: "running",
@@ -610,15 +586,15 @@ class ClaudeSession implements HarnessSession {
       }
       case "task_progress": {
         if (!this.cards.get(task)?.running) return;
-        const usage = record(value.usage);
+        const usage = object(value.usage);
         this.listen({
           type: "agent",
           key: task,
           ...(typeof usage.tool_uses === "number"
             ? { toolUses: usage.tool_uses }
             : {}),
-          ...(text(value.last_tool_name)
-            ? { latestTool: text(value.last_tool_name) }
+          ...(string(value.last_tool_name)
+            ? { latestTool: string(value.last_tool_name) }
             : {}),
         });
         return;
@@ -626,7 +602,7 @@ class ClaudeSession implements HarnessSession {
       case "task_updated": {
         const card = this.cards.get(task);
         if (!card?.running) return;
-        const patch = record(value.patch);
+        const patch = object(value.patch);
         const status =
           patch.status === "failed" || patch.status === "killed"
             ? AGENT_END[patch.status]
@@ -639,8 +615,8 @@ class ClaudeSession implements HarnessSession {
             ? { background: patch.is_backgrounded }
             : {}),
           ...(status ? { status } : {}),
-          ...(status && text(patch.error)
-            ? { summary: text(patch.error) }
+          ...(status && string(patch.error)
+            ? { summary: string(patch.error) }
             : {}),
         });
         return;
@@ -649,15 +625,15 @@ class ClaudeSession implements HarnessSession {
         const card = this.cards.get(task);
         if (!card?.running) return;
         card.running = false;
-        const usage = record(value.usage);
+        const usage = object(value.usage);
         const status =
-          AGENT_END[text(value.status) as keyof typeof AGENT_END] ??
+          AGENT_END[string(value.status) as keyof typeof AGENT_END] ??
           "completed";
         this.listen({
           type: "agent",
           key: task,
           status,
-          ...(text(value.summary) ? { summary: text(value.summary) } : {}),
+          ...(string(value.summary) ? { summary: string(value.summary) } : {}),
           ...(typeof usage.tool_uses === "number"
             ? { toolUses: usage.tool_uses }
             : {}),
@@ -667,9 +643,9 @@ class ClaudeSession implements HarnessSession {
       case "background_tasks_changed": {
         this.background = new Set(
           (Array.isArray(value.tasks) ? value.tasks : [])
-            .map(record)
+            .map(object)
             .filter((item) => item.ambient !== true)
-            .map((item) => text(item.task_id)),
+            .map((item) => string(item.task_id)),
         );
         this.arm();
         return;
@@ -677,34 +653,34 @@ class ClaudeSession implements HarnessSession {
     }
   }
 
-  /** Maps the lead's to-do tools onto its plan (KTD9). */
+  /** Maps the lead's to-do tools onto its plan. */
   private plan(name: string, input: Record<string, unknown>, tool: string) {
     if (name === "TodoWrite") {
       this.steps = (Array.isArray(input.todos) ? input.todos : []).map(
         (value, index) => {
-          const todo = record(value);
+          const todo = object(value);
           return {
             id: String(index),
-            text: text(todo.content),
-            status: STEP_STATUS[text(todo.status)] ?? "pending",
+            text: string(todo.content),
+            status: STEP_STATUS[string(todo.status)] ?? "pending",
           };
         },
       );
       this.reportSteps();
     } else if (name === "TaskCreate")
-      this.creating.set(tool, text(input.subject));
+      this.creating.set(tool, string(input.subject));
     else if (name === "TaskUpdate") {
       const index = this.steps.findIndex(
-        (step) => step.id === text(input.taskId),
+        (step) => step.id === string(input.taskId),
       );
       if (index < 0) return;
       if (input.status === "deleted") this.steps.splice(index, 1);
       else
         this.steps[index] = {
           ...this.steps[index],
-          ...(text(input.subject) ? { text: text(input.subject) } : {}),
-          ...(STEP_STATUS[text(input.status)]
-            ? { status: STEP_STATUS[text(input.status)] }
+          ...(string(input.subject) ? { text: string(input.subject) } : {}),
+          ...(STEP_STATUS[string(input.status)]
+            ? { status: STEP_STATUS[string(input.status)] }
             : {}),
         };
       this.reportSteps();
@@ -714,13 +690,9 @@ class ClaudeSession implements HarnessSession {
   private reportSteps() {
     this.lead({
       type: "steps",
-      steps: this.steps.map((step) => ({
-        text: step.text,
-        status: step.status,
-      })),
+      steps: this.steps.map(({ text, status }) => ({ text, status })),
     });
   }
-  private failure?: HarnessError;
 
   private denyAll(message: string, leadOnly = false) {
     for (const [request, pending] of this.pending)
@@ -749,23 +721,22 @@ class ClaudeSession implements HarnessSession {
       }
       this.channel!.push(prompt, this.owner);
       yield* turn;
-      this.resumeSession = this.sessionId;
     } finally {
       this.turn = undefined;
-      // Sub-agent requests stay answerable after the lead's turn (KTD5).
+      // Sub-agent requests stay answerable after the lead's turn.
       this.denyAll("The turn ended.", true);
-      this.flush();
+      this.relay.flush();
       this.arm();
     }
   }
 
   /**
    * Closes the query after ten idle minutes with no turn and no background work; the next send
-   * resumes the session (KTD10).
+   * resumes the session.
    */
   private arm() {
     clearTimeout(this.idle);
-    if (this.closed || this.adapter.closed) return;
+    if (this.relay.closed || this.adapter.closed) return;
     if (this.turn || this.harnessTurn || this.background.size) return;
     this.idle = setTimeout(() => this.release(), this.adapter.idleMs);
     this.idle.unref?.();
@@ -827,7 +798,7 @@ class ClaudeSession implements HarnessSession {
         ...pending.input,
         answers: Object.fromEntries(
           questions.map((question, index) => [
-            text(record(question).question),
+            string(object(question).question),
             (answers[String(index)] ?? []).join(", "),
           ]),
         ),
@@ -835,7 +806,7 @@ class ClaudeSession implements HarnessSession {
     });
   }
 
-  /** Interrupts the lead and stops every background task, sub-agents included (KTD7). */
+  /** Interrupts the lead and stops every background task, sub-agents included. */
   async stop() {
     this.denyAll("The host stopped the turn.");
     const query = this.query;
@@ -847,7 +818,7 @@ class ClaudeSession implements HarnessSession {
   }
 
   close() {
-    this.closed = true;
+    this.relay.closed = true;
     this.denyAll("The tab was closed.");
     this.turn?.end();
     this.release();
@@ -855,10 +826,10 @@ class ClaudeSession implements HarnessSession {
   }
 }
 
-/** Claude Code through the Claude Agent SDK, one streaming-input query per open tab (KTD8). */
+/** Claude Code through the Claude Agent SDK, one streaming-input query per open tab. */
 export class ClaudeAdapter implements HarnessAdapter {
   readonly id = "claude" as const;
-  // Anthropic's terms do not allow third-party products to offer claude.ai sign-in (R11).
+  // Anthropic's terms do not allow third-party products to offer claude.ai sign-in.
   readonly signIn = "guidance" as const;
   readonly reportsAgents = true;
   closed = false;

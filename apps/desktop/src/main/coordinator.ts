@@ -10,7 +10,7 @@ import type { CollaborationClient } from "./collaboration-client";
 import { tabBusy, type HarnessId, type TranscriptPage } from "../shared/tabs";
 
 // Commands that start work wait on shared-room checks; everything else reaches the supervisor
-// directly so Stop and responses work while the shared connection is down (KTD17).
+// directly so Stop and responses work while the shared connection is down.
 const DIRECT = new Set([
   "tab.stop",
   "tab.close",

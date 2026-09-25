@@ -1,87 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, mkdir, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { execFileSync } from "node:child_process";
-import { setTimeout as wait } from "node:timers/promises";
 import { randomUUID } from "node:crypto";
 import { Journal } from "./journal";
-import { SupervisorService } from "./service";
-import { inspectWorkspace } from "./workspace";
-import { HarnessRegistry } from "./harnesses/registry";
-import { FakeHarness } from "./harnesses/fake";
-import { ProgramManager } from "./programs/manager";
-import { HARNESS_MANIFEST } from "./programs/manifest";
+import { withHost } from "./test-support";
 
-async function setup() {
-  const dir = await mkdtemp(join(tmpdir(), "multiplayer-desktop-test-"));
-  const repo = join(dir, "repo");
-  await mkdir(repo);
-  execFileSync("git", ["-C", repo, "init"], { stdio: "pipe" });
-  execFileSync(
-    "git",
-    [
-      "-C",
-      repo,
-      "-c",
-      "user.name=Desktop Test",
-      "-c",
-      "user.email=desktop@example.invalid",
-      "-c",
-      "core.hooksPath=/dev/null",
-      "commit",
-      "--allow-empty",
-      "-m",
-      "Test fixture",
-    ],
-    { stdio: "pipe" },
-  );
-  const executable = join(dir, "fake-codex");
-  await writeFile(executable, "#!/bin/sh\n");
-  await chmod(executable, 0o755);
-  const journal = new Journal(join(dir, "state.sqlite"));
-  journal.setSetting("harness.codex.executable", executable);
-  const fake = new FakeHarness();
-  let changed = () => {};
-  const registry = new HarnessRegistry({
-    adapters: [fake],
-    programs: new ProgramManager({ root: dir, manifest: HARNESS_MANIFEST }),
-    settings: journal,
-    changed: () => changed(),
-    environmentTimeoutMs: 0,
-  });
-  registry.setEnvironment({ PATH: process.env.PATH ?? "" });
-  const service = new SupervisorService(journal, () => {}, {
-    registry,
-    publishTranscript: () => {},
-    transcriptInterval: 5,
-  });
-  changed = () => service.harnessesChanged();
-  await registry.refresh("codex");
-  const roomId = service.snapshot().rooms[0].id;
-  await service.dispatch({
-    type: "workspace.register",
-    roomId,
-    workspace: await inspectWorkspace(repo),
-  });
-  const settled = async (roomId: string, tabId: string) => {
-    for (let attempt = 0; attempt < 200; attempt++) {
-      const tab = service
-        .snapshot()
-        .rooms.find((room) => room.id === roomId)
-        ?.tabs.find((tab) => tab.id === tabId);
-      if (tab && !["running", "awaiting_host"].includes(tab.status)) return;
-      await wait(10);
-    }
-    throw new Error("The turn did not finish.");
-  };
-  return { dir, journal, service, roomId, fake, settled };
-}
-
-test("a suggestion used in a tab is submitted in a local room and stays draft in a shared room", async () => {
-  const { service, roomId, journal, settled, fake } = await setup();
-  try {
+test("a suggestion used in a tab is submitted in a local room and stays draft in a shared room", () =>
+  withHost(async ({ service, roomId, journal, settled }, fake) => {
     await service.dispatch({
       type: "message.send",
       roomId,
@@ -105,7 +30,7 @@ test("a suggestion used in a tab is submitted in a local room and stays draft in
       suggestionId: local.suggestions[0].id,
       suggestionRevision: 1,
     });
-    await settled(roomId, local.tabs[0].id);
+    await settled(local.tabs[0].id);
     assert.equal(
       service.snapshot().rooms[0].suggestions[0].status,
       "submitted",
@@ -145,7 +70,7 @@ test("a suggestion used in a tab is submitted in a local room and stays draft in
       suggestionId: shared.suggestions[0].id,
       suggestionRevision: 1,
     });
-    await settled(shared.id, tabId);
+    await settled(tabId, shared.id);
     assert.equal(room().suggestions[0].status, "draft");
     await service.dispatch({ type: "shared.import", room: shared });
     assert.equal(room().tabs[0].id, tabId);
@@ -154,14 +79,10 @@ test("a suggestion used in a tab is submitted in a local room and stays draft in
       fake.calls.filter((call) => call.startsWith("send:")).length,
       2,
     );
-  } finally {
-    service.close();
-  }
-});
+  }));
 
-test("messages and editable attributed suggestions persist; generating a suggestion does not dispatch work", async () => {
-  const { service, roomId, dir, fake } = await setup();
-  try {
+test("messages and editable attributed suggestions persist; generating a suggestion does not dispatch work", () =>
+  withHost(async ({ service, roomId, dir }, fake) => {
     await service.dispatch({
       type: "message.send",
       roomId,
@@ -198,7 +119,7 @@ test("messages and editable attributed suggestions persist; generating a suggest
       }),
       /changed/,
     );
-    const persisted = new Journal(join(dir, "state.sqlite"));
+    const persisted = new Journal(join(dir, "journal.sqlite"));
     assert.equal(
       persisted.load().rooms[0].suggestions[0].prompt,
       "Review first.",
@@ -208,14 +129,10 @@ test("messages and editable attributed suggestions persist; generating a suggest
       message.id,
     );
     persisted.close();
-  } finally {
-    service.close();
-  }
-});
+  }));
 
-test("cross-room and unknown messages are rejected without mutating state", async () => {
-  const { service, roomId } = await setup();
-  try {
+test("cross-room and unknown messages are rejected without mutating state", () =>
+  withHost(async ({ service, roomId }) => {
     await service.dispatch({ type: "room.create", name: "Another room" });
     const other = service.snapshot().rooms[1];
     await service.dispatch({
@@ -241,14 +158,10 @@ test("cross-room and unknown messages are rejected without mutating state", asyn
       /does not belong/,
     );
     assert.equal(service.snapshot().revision, revision);
-  } finally {
-    service.close();
-  }
-});
+  }));
 
-test("the repository cannot change under a running tab", async () => {
-  const { service, roomId, journal, settled } = await setup();
-  try {
+test("the repository cannot change under a running tab", () =>
+  withHost(async ({ service, roomId, journal, settled, stopTab }) => {
     await service.dispatch({ type: "tab.open", roomId, harness: "codex" });
     const room = service.snapshot().rooms[0];
     await service.dispatch({
@@ -265,13 +178,6 @@ test("the repository cannot change under a running tab", async () => {
       }),
       /Stop running tabs/,
     );
-    await service.dispatch({
-      type: "tab.stop",
-      roomId,
-      tabId: room.tabs[0].id,
-    });
-    await settled(roomId, room.tabs[0].id);
-  } finally {
-    service.close();
-  }
-});
+    await stopTab(room.tabs[0].id);
+    await settled(room.tabs[0].id);
+  }));

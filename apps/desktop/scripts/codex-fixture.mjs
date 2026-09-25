@@ -233,8 +233,7 @@ async function turn(threadId, turnId, prompt, params) {
   if (prompt.includes("FIXTURE_CRASH")) process.exit(1);
   if (prompt.includes("FIXTURE_AGENTS")) await spawnAgents(threadId, turnId);
   if (prompt.includes("FIXTURE_FOLLOWUP")) followUp(threadId, turnId);
-  if (prompt.includes("FIXTURE_SLOW") || prompt.includes("FIXTURE_CANCEL"))
-    return;
+  if (prompt.includes("FIXTURE_SLOW")) return;
   if (prompt.includes("FIXTURE_USAGE")) {
     notify("account/rateLimits/updated", {
       rateLimits: {

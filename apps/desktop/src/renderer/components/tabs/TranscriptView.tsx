@@ -12,19 +12,26 @@ import { useEffect, useRef } from "react";
 import {
   HARNESS_LABELS,
   tabBusy,
+  type AgentEntry,
+  type ApprovalDecision,
+  type QuestionAnswers,
   type Tab,
   type TranscriptEntry,
 } from "../../../shared/tabs";
-import { loadOlder, useTranscript } from "../../lib/transcript-store";
-import { useAgents } from "../../lib/agents-store";
+import {
+  loadOlder,
+  useAgents,
+  useTranscript,
+} from "../../lib/transcript-store";
 import { Button } from "../ui/Button";
 import { timeLabel } from "../../lib/time";
+import { plural } from "../../lib/utils";
 import { ApprovalCard } from "./ApprovalCard";
 import { QuestionCard } from "./QuestionCard";
 
-interface Actions {
-  onRespond: (entry: TranscriptEntry, decision: "accept" | "decline") => void;
-  onAnswer: (entry: TranscriptEntry, answers: Record<string, string[]>) => void;
+export interface Actions {
+  onRespond: (entry: TranscriptEntry, decision: ApprovalDecision) => void;
+  onAnswer: (entry: TranscriptEntry, answers: QuestionAnswers) => void;
   onContinuePlan: () => void;
   onFreshSession: () => void;
 }
@@ -61,8 +68,8 @@ function Entry({
           <p>{entry.summary}</p>
           {entry.source && (
             <span className="source-chip">
-              From a room suggestion · {entry.source.sources.length} source{" "}
-              {entry.source.sources.length === 1 ? "message" : "messages"}
+              From a room suggestion ·{" "}
+              {plural(entry.source.sources.length, "source message")}
             </span>
           )}
         </div>
@@ -205,18 +212,20 @@ export function TranscriptView({
   roomId,
   tab,
   agentKey = null,
+  agent,
   disabled,
   actions,
 }: {
   roomId: string;
   tab: Tab;
   agentKey?: string | null;
+  // The drilled-in sub-agent's card, once loaded.
+  agent?: AgentEntry;
   disabled: boolean;
   actions: Actions;
 }) {
   const transcript = useTranscript(roomId, tab.id, agentKey);
   const { cards } = useAgents(roomId, tab.id);
-  const card = (key: string) => cards.find((item) => item.agent?.key === key);
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   // Scroll position lives in a ref and follows layout changes, not effects on state.
@@ -237,7 +246,7 @@ export function TranscriptView({
     : entries.findLast((entry) => entry.kind === "plan" && !entry.agentKey);
   const last = entries.at(-1);
   const busy = agentKey
-    ? card(agentKey)?.agent?.status === "running"
+    ? agent?.agent.status === "running"
     : tabBusy(tab.status);
   return (
     <div
@@ -287,7 +296,8 @@ export function TranscriptView({
               tab={tab}
               agent={
                 entry.agentKey && !agentKey
-                  ? (card(entry.agentKey)?.summary ?? "a sub-agent")
+                  ? (cards.find((card) => card.agent.key === entry.agentKey)
+                      ?.summary ?? "a sub-agent")
                   : undefined
               }
               latestPlan={entry.id === latestPlan?.id}

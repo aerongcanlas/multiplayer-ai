@@ -4,7 +4,6 @@ import {
   DEFAULT_LOADOUT,
   HARNESS_LABELS,
   tabBusy,
-  type AgentCard,
   type Loadout,
   type Tab,
   type TranscriptEntry,
@@ -17,14 +16,16 @@ import {
   type SessionEvent,
 } from "../harnesses/contract";
 import type { HarnessRegistry } from "../harnesses/registry";
-import { oneLine, type TranscriptWriter } from "./transcript";
+import { AgentCards } from "./cards";
+import { validateLoadout, withDefaultModel } from "./loadout";
+import type { TranscriptWriter } from "./transcript";
 
 export type TabCommand = Extract<
   Command,
   { type: `tab.${string}` | "question.answer" | "approval.respond" }
 >;
 
-export interface HostStore {
+interface HostStore {
   read(): Snapshot;
   transaction(mutate: (draft: Snapshot) => void): void;
   workspacePath(roomId: string): string | null;
@@ -36,14 +37,13 @@ export interface HostStore {
   ): TranscriptPage;
   agentCards(tabId: string): TranscriptEntry[];
   pendingEntries(tabId: string): TranscriptEntry[];
-  agentCards(tabId: string): TranscriptEntry[];
   deleteTranscript(tabId: string): void;
 }
 
 interface Turn {
   id: string;
   roomId: string;
-  // A lead turn the harness started by itself (KTD14).
+  // A lead turn the harness started by itself.
   harness: boolean;
   stopping: boolean;
   finished: boolean;
@@ -53,20 +53,11 @@ interface Live {
   session?: HarnessSession;
   turn?: Turn;
   // Transcript entry ID -> the harness's request, for approvals and questions still pending.
-  // Requests with an agent key come from sub-agents and never block the tab (KTD5).
+  // Requests with an agent key come from sub-agents and never block the tab.
   requests: Map<string, { request: string; agentKey?: string }>;
-  // Sub-agent key -> its card entry and the turn its entries file under (KTD15).
-  cards: Map<string, { entryId: string; turnId: string | null }>;
   // A Stop that found only sub-agents running.
   stopTimer?: ReturnType<typeof setTimeout>;
 }
-type AgentEvent = Extract<HarnessEvent, { type: "agent" }>;
-
-const NOTES = {
-  stopped: "Stopped before finishing",
-  interrupted: "Interrupted before finishing",
-} as const;
-
 const now = () => new Date().toISOString();
 const STOP_TIMEOUT_MS = 10_000;
 
@@ -88,6 +79,7 @@ function findTab(
  */
 export class TabHost {
   private live = new Map<string, Live>();
+  private cards: AgentCards;
   private closed = false;
 
   constructor(
@@ -95,7 +87,9 @@ export class TabHost {
     private registry: HarnessRegistry,
     private writer: TranscriptWriter,
     private stopTimeoutMs = STOP_TIMEOUT_MS,
-  ) {}
+  ) {
+    this.cards = new AgentCards(store, writer);
+  }
 
   /**
    * After an app restart, running turns and sub-agents are interrupted and pending requests are
@@ -118,17 +112,11 @@ export class TabHost {
     });
     for (const { roomId, tabId, busy } of tabs) {
       const pending = this.store.pendingEntries(tabId);
-      const running = this.store
-        .agentCards(tabId)
-        .filter((entry) => entry.agent?.status === "running");
-      if (!busy && !pending.length && !running.length) continue;
+      const interrupted = this.cards.recover(roomId, tabId);
+      if (!busy && !pending.length && !interrupted) continue;
       for (const entry of pending) {
         this.writer.adopt(roomId, entry);
         this.writer.update(entry.id, { state: "cancelled" });
-      }
-      for (const entry of running) {
-        this.writer.adopt(roomId, entry);
-        this.endCard(entry.id, entry.agent!, "interrupted");
       }
       if (busy)
         this.writer.append(roomId, tabId, {
@@ -145,7 +133,7 @@ export class TabHost {
   private liveOf(tabId: string): Live {
     let live = this.live.get(tabId);
     if (!live) {
-      live = { requests: new Map(), cards: new Map() };
+      live = { requests: new Map() };
       this.live.set(tabId, live);
     }
     return live;
@@ -174,7 +162,7 @@ export class TabHost {
               : tab.status;
         const loadout =
           !tab.loadout.model && !tabBusy(tab.status)
-            ? this.withDefaultModel(tab.loadout)
+            ? withDefaultModel(this.registry, tab.loadout)
             : undefined;
         if (status !== tab.status || (loadout && loadout.model))
           changes.push({
@@ -193,35 +181,6 @@ export class TabHost {
         tab.updatedAt = now();
       }
     });
-  }
-
-  private withDefaultModel(loadout: Loadout): Loadout {
-    const models = this.registry.state(loadout.harness).models;
-    const model = models.find((model) => model.isDefault) ?? models[0];
-    if (!model) return loadout;
-    const effort =
-      model.defaultEffort && model.efforts.includes(model.defaultEffort)
-        ? model.defaultEffort
-        : model.efforts[0];
-    return { ...loadout, model: model.id, ...(effort ? { effort } : {}) };
-  }
-
-  private validateLoadout(loadout: Loadout) {
-    const models = this.registry.state(loadout.harness).models;
-    if (!models.length) return;
-    const model = models.find((model) => model.id === loadout.model);
-    if (!model)
-      throw new Error(
-        `${loadout.model || "The selected model"} is not offered by ${HARNESS_LABELS[loadout.harness]} right now. Choose a model again.`,
-      );
-    if (
-      loadout.effort &&
-      model.efforts.length &&
-      !model.efforts.includes(loadout.effort)
-    )
-      throw new Error(
-        `${model.name} does not support ${loadout.effort} effort.`,
-      );
   }
 
   async handle(command: TabCommand): Promise<TranscriptPage | undefined> {
@@ -308,7 +267,7 @@ export class TabHost {
         id: randomUUID(),
         roomId,
         title: title ?? `${HARNESS_LABELS[harness]} ${count + 1}`,
-        loadout: this.withDefaultModel(DEFAULT_LOADOUT(harness)),
+        loadout: withDefaultModel(this.registry, DEFAULT_LOADOUT(harness)),
         status: this.registry.ready(harness) ? "idle" : "unavailable",
         readAlong: false,
         createdAt: now(),
@@ -343,6 +302,7 @@ export class TabHost {
       room.tabs = room.tabs.filter((item) => item.id !== tabId);
     });
     this.writer.forget(tabId);
+    this.cards.forget(tabId);
     this.store.deleteTranscript(tabId);
     this.live.delete(tabId);
     clearTimeout(live?.stopTimer);
@@ -360,11 +320,13 @@ export class TabHost {
         "This tab's sub-agents are still running. Wait for them or stop them before switching harness.",
       );
     this.registry.adapter(loadout.harness);
-    if (loadout.model) this.validateLoadout(loadout);
+    if (loadout.model) validateLoadout(this.registry, loadout);
     if (harnessChanged) this.dropSession(roomId, tabId);
     this.store.transaction((draft) => {
       const { tab } = findTab(draft, roomId, tabId);
-      tab.loadout = loadout.model ? loadout : this.withDefaultModel(loadout);
+      tab.loadout = loadout.model
+        ? loadout
+        : withDefaultModel(this.registry, loadout);
       if (harnessChanged) {
         delete tab.sessionId;
         delete tab.resumed;
@@ -412,11 +374,7 @@ export class TabHost {
         this.writer.update(entryId, { state: "cancelled" });
         live.requests.delete(entryId);
       }
-    for (const { entryId } of live.cards.values()) {
-      const agent = this.writer.entry(entryId)?.agent;
-      if (agent?.status === "running") this.endCard(entryId, agent, outcome);
-    }
-    live.cards.clear();
+    this.cards.settle(tabId, outcome);
     this.counts(roomId, tabId);
   }
 
@@ -467,7 +425,7 @@ export class TabHost {
         `${label} is not ready. Open Harness settings to finish setup.`,
       );
     if (!tab.loadout.model) throw new Error(`Choose a ${label} model first.`);
-    this.validateLoadout(tab.loadout);
+    validateLoadout(this.registry, tab.loadout);
     if (!room.workspace || !this.store.workspacePath(room.id))
       throw new Error("Select a local Git repository before sending.");
     const suggestion = command.suggestionId
@@ -595,7 +553,7 @@ export class TabHost {
     }
   }
 
-  /** Events a session reports outside the owner's turn iterator (KTD4, KTD14). */
+  /** Events a session reports outside the owner's turn iterator. */
   private sessionEvent(roomId: string, tabId: string, event: SessionEvent) {
     if (this.closed || !this.exists(roomId, tabId)) return;
     const live = this.liveOf(tabId);
@@ -645,12 +603,10 @@ export class TabHost {
     }
   }
 
-  /** The turn a sub-agent's entries file under: its card's, else the running turn (KTD4). */
+  /** The turn a sub-agent's entries file under: its card's, else the running turn. */
   private filing(tabId: string, turn: Turn | undefined, agentKey?: string) {
-    const card = agentKey
-      ? this.live.get(tabId)?.cards.get(agentKey)
-      : undefined;
-    return card ? card.turnId : (turn?.id ?? null);
+    const filed = agentKey ? this.cards.turnOf(tabId, agentKey) : undefined;
+    return filed !== undefined ? filed : (turn?.id ?? null);
   }
 
   private event(
@@ -690,16 +646,8 @@ export class TabHost {
           event.detail,
           event.agent,
         );
-        const card = event.agent ? live.cards.get(event.agent) : undefined;
-        const agent = card && this.writer.entry(card.entryId)?.agent;
-        if (created && card && agent?.status === "running")
-          this.writer.update(card.entryId, {
-            agent: {
-              ...agent,
-              toolUses: agent.toolUses + 1,
-              latestTool: oneLine(event.summary, 200),
-            },
-          });
+        if (created && event.agent)
+          this.cards.toolUsed(tabId, event.agent, event.summary);
         return;
       }
       case "notice":
@@ -711,8 +659,17 @@ export class TabHost {
           ...(event.agent ? { agentKey: event.agent } : {}),
         });
         return;
-      case "agent":
-        return this.agent(roomId, tabId, turn, event);
+      case "agent": {
+        const status = this.cards.apply(roomId, tabId, turn?.id, event);
+        if (status !== "running")
+          for (const [entryId, request] of live.requests)
+            if (request.agentKey === event.key) {
+              this.writer.update(entryId, { state: "cancelled" });
+              live.requests.delete(entryId);
+            }
+        this.counts(roomId, tabId);
+        return;
+      }
       case "steps":
         this.store.transaction((draft) => {
           const { tab } = findTab(draft, roomId, tabId);
@@ -750,7 +707,7 @@ export class TabHost {
               });
         live.requests.set(entry.id, { request: event.request, ...agentKey });
         this.writer.flush();
-        // Only the lead's own requests hold its turn (KTD5).
+        // Only the lead's own requests hold its turn.
         if (event.agent) this.counts(roomId, tabId);
         else if (turn) this.setStatus(roomId, tabId, "awaiting_host");
         return;
@@ -758,126 +715,11 @@ export class TabHost {
     }
   }
 
-  /** Creates or updates a sub-agent card (KTD1, KTD15). */
-  private agent(
-    roomId: string,
-    tabId: string,
-    turn: Turn | undefined,
-    event: AgentEvent,
-  ) {
-    const live = this.liveOf(tabId);
-    const known = live.cards.get(event.key);
-    const entry = known && this.cardEntry(roomId, tabId, known.entryId);
-    const fields: Partial<AgentCard> = {
-      ...(event.agentType !== undefined ? { type: event.agentType } : {}),
-      ...(event.name !== undefined ? { name: event.name } : {}),
-      ...(event.model !== undefined ? { model: event.model } : {}),
-      ...(event.background !== undefined
-        ? { background: event.background }
-        : {}),
-      ...(event.toolUses !== undefined ? { toolUses: event.toolUses } : {}),
-      ...(event.latestTool !== undefined
-        ? { latestTool: oneLine(event.latestTool, 200) }
-        : {}),
-    };
-    if (!known || !entry?.agent) {
-      const parent = event.parentKey
-        ? live.cards.get(event.parentKey)
-        : undefined;
-      const turnId = turn?.id ?? parent?.turnId ?? null;
-      const created = this.writer.append(roomId, tabId, {
-        turnId,
-        kind: "agent",
-        summary: oneLine(event.description ?? "Sub-agent", 2_000),
-        agent: {
-          key: event.key,
-          ...(event.parentKey ? { parentKey: event.parentKey } : {}),
-          status: "running",
-          background: false,
-          startedAt: now(),
-          toolUses: 0,
-          ...fields,
-        },
-      });
-      live.cards.set(event.key, { entryId: created.id, turnId });
-      if (event.status && event.status !== "running")
-        this.endCard(created.id, created.agent!, event.status, event.summary);
-    } else {
-      const agent = { ...entry.agent, ...fields };
-      const status = event.status ?? agent.status;
-      const patch = {
-        ...(event.description
-          ? { summary: oneLine(event.description, 2_000) }
-          : {}),
-      };
-      if (status === "running" && agent.status !== "running") {
-        // Re-engaged: new entries file under the turn that re-engaged it.
-        known.turnId = turn?.id ?? known.turnId;
-        delete agent.endedAt;
-        this.writer.update(entry.id, {
-          ...patch,
-          agent: { ...agent, status },
-        });
-      } else if (status !== "running" && agent.status === "running") {
-        this.writer.update(entry.id, { ...patch, agent });
-        this.endCard(entry.id, agent, status, event.summary);
-      } else
-        this.writer.update(entry.id, {
-          ...patch,
-          ...(event.summary !== undefined ? { detail: event.summary } : {}),
-          agent: { ...agent, status },
-        });
-    }
-    const status = this.writer.entry(live.cards.get(event.key)!.entryId)?.agent
-      ?.status;
-    if (status !== "running")
-      for (const [entryId, request] of live.requests)
-        if (request.agentKey === event.key) {
-          this.writer.update(entryId, { state: "cancelled" });
-          live.requests.delete(entryId);
-        }
-    this.counts(roomId, tabId);
-  }
-
-  /** A card entry, reloaded from the journal when the writer already released it. */
-  private cardEntry(roomId: string, tabId: string, entryId: string) {
-    const entry = this.writer.entry(entryId);
-    if (entry) return entry;
-    const stored = this.store
-      .agentCards(tabId)
-      .find((item) => item.id === entryId);
-    if (!stored) return undefined;
-    this.writer.adopt(roomId, stored);
-    return this.writer.entry(entryId);
-  }
-
-  /** Settles a running card; stopped and interrupted cards get a note in place of a summary. */
-  private endCard(
-    entryId: string,
-    agent: AgentCard,
-    status: Exclude<AgentCard["status"], "running">,
-    summary?: string,
-  ) {
-    const detail =
-      summary ??
-      (status === "stopped" || status === "interrupted"
-        ? NOTES[status]
-        : undefined);
-    this.writer.update(entryId, {
-      agent: { ...agent, status, endedAt: now() },
-      ...(detail !== undefined ? { detail } : {}),
-    });
-  }
-
   private runningAgents(tabId: string) {
-    const live = this.live.get(tabId);
-    if (!live) return 0;
-    return [...live.cards.values()].filter(
-      (card) => this.writer.entry(card.entryId)?.agent?.status === "running",
-    ).length;
+    return this.cards.running(tabId);
   }
 
-  /** Mirrors running sub-agents and their waiting requests onto the tab (KTD6). */
+  /** Mirrors running sub-agents and their waiting requests onto the tab. */
   private counts(roomId: string, tabId: string) {
     if (!this.exists(roomId, tabId)) return;
     const live = this.live.get(tabId);
@@ -1002,7 +844,7 @@ export class TabHost {
     return undefined;
   }
 
-  /** Stops the running turn and every running sub-agent (KTD7). */
+  /** Stops the running turn and every running sub-agent. */
   private stop(roomId: string, tabId: string) {
     const live = this.liveOf(tabId);
     const turn = live.turn && !live.turn.finished ? live.turn : undefined;
@@ -1124,7 +966,7 @@ export class TabHost {
     });
   }
 
-  /** Ends a turn; only the lead's requests go with it (KTD5). */
+  /** Ends a turn; only the lead's requests go with it. */
   private end(tabId: string, turn: Turn) {
     turn.finished = true;
     clearTimeout(turn.stopTimer);

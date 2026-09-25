@@ -34,7 +34,7 @@ Stopping an execution aborts its runner and preserves all recorded events. A sup
 
 ## What remains outside the foundation
 
-Shared-room integration adds desktop GitHub OAuth, encrypted Supabase session storage, authenticated database functions, shared chat, invitations, and shared suggestion persistence. See [shared-rooms.md](shared-rooms.md) for setup and validation. The [Codex runner](codex-runner.md) now provides local subscription authentication, lead and specialist sessions, command evidence, approval prompts, and isolated worktree integration. Shared execution events, host leases, and ownership transfer remain separate work. Joining a room grants no command execution rights on another host.
+Shared-room integration adds desktop GitHub OAuth, encrypted Supabase session storage, authenticated database functions, shared chat, invitations, and shared suggestion persistence. See [shared-rooms.md](shared-rooms.md) for setup and validation. Shared execution events, host leases, and ownership transfer remain separate work. Joining a room grants no command execution rights on another host.
 
 The desktop never imports the old privileged Supabase client. The renderer's network policy permits only packaged assets or the explicit loopback development origin. Main owns the authenticated Supabase transport. Only public project settings are bundled; server keys and `.vercel` metadata are excluded. The app archive contains only `out`, runtime dependencies, and its package manifest.
 

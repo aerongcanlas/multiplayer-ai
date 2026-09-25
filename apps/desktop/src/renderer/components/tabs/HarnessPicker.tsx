@@ -6,31 +6,8 @@ import {
   type HarnessId,
   type HarnessState,
 } from "../../../shared/tabs";
+import { readiness } from "../../lib/harness-status";
 import { Button } from "../ui/Button";
-
-/** One line telling whether a harness can start a tab right away. */
-function readiness(harness: HarnessState | undefined) {
-  if (!harness) return { ready: false, text: "Checking…" };
-  const { program, auth } = harness;
-  if (["failed", "custom_invalid", "unsupported"].includes(program.state))
-    return { ready: false, text: "Program needs attention" };
-  if (program.state === "downloading")
-    return {
-      ready: false,
-      text: `Downloading… ${Math.round((program.progress ?? 0) * 100)}%`,
-    };
-  if (auth.state === "signed_out")
-    return { ready: false, text: "Sign in required" };
-  if (program.state === "missing")
-    return { ready: true, text: "Installs on first use" };
-  const models = harness.models.length;
-  return {
-    ready: true,
-    text: models
-      ? `Ready · ${models} model${models === 1 ? "" : "s"}`
-      : "Ready",
-  };
-}
 
 /** The "+" button that opens a new chat tab, with a keyboard-navigable harness menu. */
 export function HarnessPicker({

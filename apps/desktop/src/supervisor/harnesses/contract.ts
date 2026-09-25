@@ -87,17 +87,17 @@ export type HarnessEvent =
   // The lead's own plan, replacing the previous one.
   | { type: "steps"; steps: PlanStep[]; explanation?: string };
 
-/** What a session reports outside the turn iterator (KTD4). */
+/** What a session reports outside the turn iterator. */
 export type SessionEvent =
   | HarnessEvent
-  // A lead turn the harness started by itself (KTD14); its lead events follow on the listener.
+  // A lead turn the harness started by itself; its lead events follow on the listener.
   | { type: "turn.started" }
   | { type: "turn.completed" }
   | { type: "turn.failed"; error: HarnessError }
   // The harness process or query ended with no turn running.
   | { type: "crashed"; message: string };
 
-export type HarnessErrorKind =
+type HarnessErrorKind =
   // The program is missing, failed to download, or is not signed in.
   | "unavailable"
   | "failed"
@@ -145,7 +145,7 @@ export interface OpenRequest extends LaunchContext {
 export interface HarnessAdapter {
   readonly id: HarnessId;
   readonly signIn: "in_app" | "guidance";
-  /** Whether sessions report sub-agents on the session listener (KTD12). */
+  /** Whether sessions report sub-agents on the session listener. */
   readonly reportsAgents: boolean;
   /** Checks that a custom executable speaks the harness protocol. Returns its version. */
   handshake(context: LaunchContext): Promise<{ version: string | null }>;

@@ -1,6 +1,6 @@
-import type { AgentStatus, Tab } from "../../../shared/tabs";
+import type { AgentStatus, TabStatus } from "../../../shared/tabs";
 
-export const STATUS_LABELS: Record<Tab["status"], string> = {
+export const STATUS_LABELS: Record<TabStatus, string> = {
   unavailable: "Needs setup",
   idle: "Ready",
   running: "Running",

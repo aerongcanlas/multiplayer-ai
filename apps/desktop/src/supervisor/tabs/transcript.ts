@@ -21,7 +21,7 @@ const itemKey = (
   item: string,
 ) => `${tabId}\0${turnId ?? ""}\0${agentKey ?? ""}\0${item}`;
 
-export type EntryInput = Pick<TranscriptEntry, "turnId" | "kind" | "summary"> &
+type EntryInput = Pick<TranscriptEntry, "turnId" | "kind" | "summary"> &
   Partial<
     Omit<
       TranscriptEntry,
@@ -193,8 +193,7 @@ export class TranscriptWriter {
       [...this.live.values()]
         .map((live) => live.entry)
         .filter(
-          (entry) =>
-            entry.tabId === tabId && entry.agent?.status === "running",
+          (entry) => entry.tabId === tabId && entry.agent?.status === "running",
         )
         .map((entry) => entry.agent!.key),
     );

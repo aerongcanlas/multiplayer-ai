@@ -1,12 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
 
-export const object = (value: unknown): Record<string, unknown> =>
-  value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-export const string = (value: unknown): string =>
-  typeof value === "string" ? value : "";
+import { object, string } from "../json";
 
 export type RpcRequest = {
   id: string | number;

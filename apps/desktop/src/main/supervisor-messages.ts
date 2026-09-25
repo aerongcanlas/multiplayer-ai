@@ -25,7 +25,7 @@ export function parseTranscript(value: unknown): TranscriptBatch[] | null {
   return parsed.success ? parsed.data : null;
 }
 
-// Hosts main may open for each harness's in-app sign-in. Claude Code offers none (R11).
+// Hosts main may open for each harness's in-app sign-in. Claude Code offers none.
 const LOGIN_HOSTS: Record<HarnessId, string[]> = {
   codex: ["auth.openai.com", "chatgpt.com"],
   claude: [],

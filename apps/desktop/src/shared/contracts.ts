@@ -227,7 +227,7 @@ export interface SupervisorRequest {
       }
     // Main-only: a path chosen in a native dialog, or null for the managed program.
     | { type: "harness.setExecutable"; harness: HarnessId; path: string | null }
-    // Main-only: the host's login-shell environment for harness launches (KTD15).
+    // Main-only: the host's login-shell environment for harness launches.
     | { type: "host.environment"; env: Record<string, string> };
 }
 export type SupervisorMessage =
