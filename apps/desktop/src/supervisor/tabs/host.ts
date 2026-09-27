@@ -247,6 +247,8 @@ export class TabHost {
         return this.resetSession(command.roomId, command.tabId);
       case "tab.reopen":
         return this.reopen(command.roomId, command.tabId);
+      case "tab.delete":
+        return this.deleteClosed(command.roomId, command.tabId);
       case "tab.setReadAlong":
         this.setReadAlong(
           command.roomId,
@@ -425,6 +427,18 @@ export class TabHost {
       tab.updatedAt = now();
       room.tabs.push(tab);
     });
+    return undefined;
+  }
+
+  private deleteClosed(roomId: string, tabId: string) {
+    this.store.transaction((draft) => {
+      const room = draft.rooms.find((room) => room.id === roomId);
+      if (!room?.closedTabs?.some((item) => item.id === tabId))
+        throw new Error("Only a closed chat can be deleted.");
+      room.closedTabs = room.closedTabs.filter((item) => item.id !== tabId);
+    });
+    this.release(tabId);
+    this.store.deleteTranscript(tabId);
     return undefined;
   }
 

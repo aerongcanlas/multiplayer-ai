@@ -128,6 +128,7 @@ await run.execute(
         "sendToTab",
         "stopTab",
         "reopenTab",
+        "deleteClosedTab",
         "setReadAlong",
         "watchSharedTab",
         "unwatchSharedTab",

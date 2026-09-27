@@ -203,6 +203,7 @@ export interface DesktopBridge {
   ): Promise<Result>;
   stopTab(roomId: string, tabId: string): Promise<Result>;
   reopenTab(roomId: string, tabId: string): Promise<Result>;
+  deleteClosedTab(roomId: string, tabId: string): Promise<Result>;
   setReadAlong(roomId: string, tabId: string, on: boolean): Promise<Result>;
   // The page arrives in the Result's `transcript` field.
   loadTranscript(

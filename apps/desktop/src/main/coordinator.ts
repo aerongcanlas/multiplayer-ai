@@ -18,6 +18,8 @@ const DIRECT = new Set([
   "tab.transcript",
   "tab.agents",
   "tab.resetSession",
+  // Deleting a closed chat touches only this desktop's journal.
+  "tab.delete",
   "approval.respond",
   "question.answer",
 ]);

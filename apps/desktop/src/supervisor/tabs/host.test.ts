@@ -1097,3 +1097,22 @@ test("a discarding switch-off closes the window where it began, with no paused n
     ).transcript!.entries;
     assert.deepEqual(entries, []);
   }));
+
+test("only a closed chat can be deleted, and deleting removes its transcript", () =>
+  withHost(async (setup) => {
+    const tab = await setup.open();
+    await setup.send(tab.id, "Hello there");
+    await setup.settled(tab.id);
+    const remove = () =>
+      setup.dispatch({
+        type: "tab.delete",
+        roomId: setup.roomId,
+        tabId: tab.id,
+      });
+    await assert.rejects(remove(), /Only a closed chat/);
+    await setup.closeTab(tab.id);
+    assert.ok(setup.journal.lastSeq(tab.id) > 0);
+    await remove();
+    assert.deepEqual(setup.service.snapshot().rooms[0].closedTabs, []);
+    assert.equal(setup.journal.lastSeq(tab.id), 0);
+  }));

@@ -344,6 +344,8 @@ export const tabCommandSchemas = [
   z.object({ type: z.literal("tab.stop"), ...tabRef }).strict(),
   // Reopens a closed tab with its transcript and harness session.
   z.object({ type: z.literal("tab.reopen"), ...tabRef }).strict(),
+  // Permanently deletes a closed tab and its transcript.
+  z.object({ type: z.literal("tab.delete"), ...tabRef }).strict(),
   z
     .object({
       type: z.literal("tab.transcript"),

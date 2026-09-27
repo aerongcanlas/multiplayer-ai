@@ -68,6 +68,8 @@ const bridge: DesktopBridge = {
   sendToTab: (input) => invoke({ ...input, type: "tab.send" }),
   stopTab: (roomId, tabId) => invoke({ type: "tab.stop", roomId, tabId }),
   reopenTab: (roomId, tabId) => invoke({ type: "tab.reopen", roomId, tabId }),
+  deleteClosedTab: (roomId, tabId) =>
+    invoke({ type: "tab.delete", roomId, tabId }),
   setReadAlong: (roomId, tabId, on) =>
     invoke({ type: "tab.setReadAlong", roomId, tabId, on }),
   loadTranscript: (roomId, tabId, beforeSeq, agentKey) =>
