@@ -1,5 +1,10 @@
 import { useSyncExternalStore } from "react";
-import type { Health, Result, Snapshot } from "../../shared/contracts";
+import {
+  PROTOCOL_VERSION,
+  type Health,
+  type Result,
+  type Snapshot,
+} from "../../shared/contracts";
 import type { RoomNotice } from "../../shared/collaboration";
 
 interface ViewState {
@@ -22,7 +27,7 @@ const emit = (patch: Partial<ViewState>) => {
 
 export function acceptSnapshot(snapshot: Snapshot) {
   // A delayed command reply must never roll the UI back over newer supervisor events.
-  if (snapshot.protocolVersion !== 1) {
+  if (snapshot.protocolVersion !== PROTOCOL_VERSION) {
     emit({ error: "Desktop protocol mismatch. Restart the updated app." });
     return;
   }

@@ -13,3 +13,4 @@ packages/db/src/generated/
 .lavish/
 .playwright-cli/
 .vercel/
+apps/desktop/src/supervisor/harnesses/codex/generated/

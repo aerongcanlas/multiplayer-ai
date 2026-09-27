@@ -1,7 +1,7 @@
 "use client";
 
 import { cn } from "../lib/utils";
-import type { Components } from "streamdown";
+import type { Components, LinkSafetyConfig } from "streamdown";
 import { Streamdown } from "streamdown";
 
 const components: Components = {
@@ -120,17 +120,25 @@ const components: Components = {
   ),
 };
 
+// Streamdown's own link renderer applies linkSafety, so the styled override steps aside.
+const withoutLinks: Components = Object.fromEntries(
+  Object.entries(components).filter(([tag]) => tag !== "a"),
+);
+
 interface Props {
   children: string;
   className?: string;
   isAnimating?: boolean;
+  // Checks links before they open, for markdown written by someone else.
+  linkSafety?: LinkSafetyConfig;
 }
 
-function Markdown({ children, className, isAnimating }: Props) {
+function Markdown({ children, className, isAnimating, linkSafety }: Props) {
   return (
     <Streamdown
       className={cn("text-sm leading-normal", className)}
-      components={components}
+      components={linkSafety ? withoutLinks : components}
+      {...(linkSafety ? { linkSafety } : {})}
       skipHtml
       controls={false}
       caret="block"

@@ -7,6 +7,8 @@ import type {
   SupervisorMessage,
   SupervisorRequest,
 } from "../shared/contracts";
+import type { HarnessId, TranscriptBatch } from "../shared/tabs";
+import { parseTranscript, requestTimeout } from "./supervisor-messages";
 
 export class SupervisorClient {
   private child: UtilityProcess;
@@ -29,10 +31,15 @@ export class SupervisorClient {
     directory: string,
     private onSnapshot: (snapshot: Snapshot) => void,
     private onHealth: (health: Health) => void,
-    private openProviderLogin?: (url: string) => void,
     codexFixture?: string,
+    private tabs: {
+      onTranscript?: (batches: TranscriptBatch[]) => void;
+      openLogin?: (harness: HarnessId, url: string) => void;
+      claudeFixture?: string;
+      harnessManifest?: string;
+    } = {},
   ) {
-    // Credentials and provider keys from the launching terminal are not inherited by the mock supervisor.
+    // Credentials and provider keys from the launching terminal are not inherited by the supervisor.
     const env = Object.fromEntries(
       Object.entries(process.env).filter(([key]) =>
         /^(PATH|SYSTEMROOT|WINDIR|TEMP|TMP|HOME|USERPROFILE|LOCALAPPDATA|APPDATA|COMSPEC|PATHEXT)$/i.test(
@@ -40,11 +47,20 @@ export class SupervisorClient {
         ),
       ),
     );
-    this.child = utilityProcess.fork(entry, [directory, codexFixture ?? ""], {
-      serviceName: "Multiplayer AI Supervisor",
-      stdio: "pipe",
-      env,
-    });
+    this.child = utilityProcess.fork(
+      entry,
+      [
+        directory,
+        codexFixture ?? "",
+        tabs.claudeFixture ?? "",
+        tabs.harnessManifest ?? "",
+      ],
+      {
+        serviceName: "Multiplayer AI Supervisor",
+        stdio: "pipe",
+        env,
+      },
+    );
     this.ready = new Promise((resolve, reject) => {
       const timer = setTimeout(
         () =>
@@ -55,8 +71,13 @@ export class SupervisorClient {
       );
       this.child.on("message", (message: SupervisorMessage) => {
         this.heartbeatAt = Date.now();
-        if (message.type === "open-provider-login")
-          this.openProviderLogin?.(message.url);
+        if (message.type === "open-login")
+          this.tabs.openLogin?.(message.harness, message.url);
+        if (message.type === "transcript") {
+          // A batch of unknown shape is dropped rather than forwarded to the renderer.
+          const batches = parseTranscript(message.batches);
+          if (batches) this.tabs.onTranscript?.(batches);
+        }
         if (message.type === "ready") {
           clearTimeout(timer);
           resolve();
@@ -141,17 +162,14 @@ export class SupervisorClient {
       return { ok: false, error: this.health.message };
     const id = randomUUID();
     return new Promise((resolve) => {
-      const timer = setTimeout(
-        () => {
-          this.pending.delete(id);
-          resolve({
-            ok: false,
-            error:
-              "The local operation timed out. Refresh state before retrying a mutation.",
-          });
-        },
-        command.type.startsWith("provider.") ? 90_000 : 20_000,
-      );
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        resolve({
+          ok: false,
+          error:
+            "The local operation timed out. Refresh state before retrying a mutation.",
+        });
+      }, requestTimeout(command.type));
       this.pending.set(id, { resolve, timer });
       this.child.postMessage({ id, command } satisfies SupervisorRequest);
     });

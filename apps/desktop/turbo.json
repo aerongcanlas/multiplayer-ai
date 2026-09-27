@@ -32,6 +32,10 @@
     "test:packaged": {
       "dependsOn": ["package"],
       "cache": false
+    },
+    "test:tabs": {
+      "dependsOn": ["build"],
+      "cache": false
     }
   }
 }
