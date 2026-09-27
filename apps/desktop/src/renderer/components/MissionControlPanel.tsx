@@ -107,6 +107,7 @@ export function MissionControlPanel({
   onSelectAgent,
   onUseSuggestion,
   disabled,
+  watching,
 }: {
   room: Room;
   tab: Tab | undefined;
@@ -115,6 +116,8 @@ export function MissionControlPanel({
   onSelectAgent: (key: string | null) => void;
   onUseSuggestion: (suggestion: Suggestion) => void;
   disabled: boolean;
+  // The shared tab filling the main area; Mission Control keeps following your own tab.
+  watching?: string;
 }) {
   const running = tab?.runningAgents ?? 0;
   return (
@@ -128,6 +131,7 @@ export function MissionControlPanel({
           {tab
             ? `${tab.title}${running ? ` · ${plural(running, "sub-agent")} running` : ""}`
             : "Follows the active chat tab"}
+          {watching && ` · you are watching ${watching}`}
         </span>
       </header>
       <div className="mission-grid">

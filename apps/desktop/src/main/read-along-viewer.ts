@@ -130,7 +130,7 @@ export class ReadAlongViewer {
   /** The window was shown: pull at once. */
   visibilityChanged() {
     const watch = this.watching;
-    if (watch && this.visible() && !watch.timer) void this.pull(watch);
+    if (watch && this.visible()) void this.pull(watch);
   }
 
   private async request(

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   AlertCircle,
   ChevronRight,
@@ -11,7 +11,7 @@ import {
   X,
   Users,
 } from "lucide-react";
-import type { Room, Suggestion } from "../shared/contracts";
+import type { Room, Snapshot, Suggestion } from "../shared/contracts";
 import { tabBusy, type HarnessState } from "../shared/tabs";
 import { dismissError, perform, useDesktop } from "./lib/desktop-store";
 import { getStored, setStored } from "./lib/storage";
@@ -33,11 +33,15 @@ function RoomView({
   disabled,
   stale,
   harnesses,
+  readAlong,
+  collaboration,
 }: {
   room: Room;
   disabled: boolean;
   stale: boolean;
   harnesses: HarnessState[];
+  readAlong: Snapshot["readAlong"];
+  collaboration: Snapshot["collaboration"];
 }) {
   const [draft, setDraft] = useState("");
   const [source, setSource] = useState<Suggestion | null>(null);
@@ -47,6 +51,8 @@ function RoomView({
   const [selectedTab, setSelectedTab] = useState<string | null>(() =>
     getStored(tabKey(room.id)),
   );
+  // Another host's read-along tab open in the main area.
+  const [sharedTabId, setSharedTabId] = useState<string | null>(null);
   const [viewing, setViewing] = useState<{
     tabId: string;
     key: string;
@@ -55,10 +61,12 @@ function RoomView({
   const harness = harnesses.find((item) => item.id === tab?.loadout.harness);
   const agentKey = viewing && viewing.tabId === tab?.id ? viewing.key : null;
   function selectTab(id: string) {
+    setSharedTabId(null);
     setSelectedTab(id);
     setViewing(null);
     setStored(tabKey(room.id), id);
   }
+  const leaveShared = useCallback(() => setSharedTabId(null), []);
   function leaveAgent() {
     const key = agentKey;
     setViewing(null);
@@ -167,6 +175,15 @@ function RoomView({
                 setDraft("");
                 setAnnouncement(message);
               }}
+              sharedTabId={sharedTabId}
+              onSelectShared={(id) => {
+                setViewing(null);
+                setSharedTabId(id);
+              }}
+              onLeaveShared={leaveShared}
+              readAlong={readAlong}
+              connected={collaboration?.status === "connected"}
+              clockOffsetMs={collaboration?.clockOffsetMs}
             />
           }
           memberChatPanel={<GroupChatPanel room={room} disabled={disabled} />}
@@ -180,6 +197,11 @@ function RoomView({
                 key && tab ? setViewing({ tabId: tab.id, key }) : leaveAgent()
               }
               disabled={disabled}
+              watching={
+                room.shared?.sharedTabs?.find(
+                  (item) => item.tabId === sharedTabId,
+                )?.title
+              }
               onUseSuggestion={(suggestion) => {
                 setDraft(suggestion.prompt);
                 setSource(suggestion);
@@ -464,6 +486,8 @@ export default function App() {
             }
             stale={health.status !== "live"}
             harnesses={snapshot?.harnesses ?? []}
+            readAlong={snapshot?.readAlong}
+            collaboration={snapshot?.collaboration}
           />
         ) : (
           <main className="loading-screen">

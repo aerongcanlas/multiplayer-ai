@@ -1,5 +1,10 @@
 import { useEffect, useSyncExternalStore } from "react";
 import type {
+  SharedEntry,
+  SharedTab,
+  SharedTranscriptMessage,
+} from "../../shared/collaboration";
+import type {
   AgentEntry,
   TranscriptBatch,
   TranscriptEntry,
@@ -197,7 +202,95 @@ export function useAgents(roomId: string, tabId: string | null) {
   return state;
 }
 
+// Another host's read-along tab, keyed `shared:<tabId>` apart from this desktop's own tabs.
+export interface SharedTranscript {
+  entries: SharedEntry[];
+  record: SharedTab | null;
+  state: Extract<SharedTranscriptMessage, { type: "status" }>["state"];
+  // The seq to page back from, or null once the start is loaded.
+  earlierSeq: number | null;
+  loadingEarlier: boolean;
+}
+const emptyShared: SharedTranscript = {
+  entries: [],
+  record: null,
+  state: "loading",
+  earlierSeq: null,
+  loadingEarlier: false,
+};
+const shared = new Map<string, SharedTranscript>();
+const sharedKey = (tabId: string) => `shared:${tabId}`;
+
+/** Merges by seq, keeping the higher version, so a delayed older publish never regresses text. */
+function mergeShared(current: SharedEntry[], incoming: SharedEntry[]) {
+  const bySeq = new Map(current.map((entry) => [entry.seq, entry]));
+  for (const entry of incoming) {
+    const held = bySeq.get(entry.seq);
+    if (!held || entry.version >= held.version) bySeq.set(entry.seq, entry);
+  }
+  return [...bySeq.values()].sort((a, b) => a.seq - b.seq);
+}
+
+export function acceptShared(message: SharedTranscriptMessage) {
+  if (message.type === "clear") {
+    shared.clear();
+    for (const listener of listeners) listener();
+    return;
+  }
+  const key = sharedKey(message.tabId);
+  const current = shared.get(key) ?? emptyShared;
+  if (message.type === "status") {
+    set(shared, key, { ...current, state: message.state });
+    return;
+  }
+  set(shared, key, {
+    ...current,
+    entries: mergeShared(current.entries, message.entries),
+    record: message.record,
+    ...(message.earlierSeq !== undefined
+      ? { earlierSeq: message.earlierSeq, loadingEarlier: false }
+      : {}),
+  });
+}
+
+export const sharedTranscript = (tabId: string) =>
+  shared.get(sharedKey(tabId)) ?? emptyShared;
+
+export async function loadEarlierShared(roomId: string, tabId: string) {
+  const key = sharedKey(tabId);
+  const current = sharedTranscript(tabId);
+  if (current.earlierSeq === null || current.loadingEarlier) return;
+  set(shared, key, { ...current, loadingEarlier: true });
+  const result = await window.desktop.loadSharedTranscript(
+    roomId,
+    tabId,
+    current.earlierSeq,
+  );
+  if (!result.ok)
+    set(shared, key, { ...sharedTranscript(tabId), loadingEarlier: false });
+}
+
+/** Watches one shared tab while mounted; its entries arrive from main. */
+export function useSharedTranscript(roomId: string, tabId: string) {
+  const transcript = useSyncExternalStore(subscribe, () =>
+    sharedTranscript(tabId),
+  );
+  useEffect(() => {
+    void window.desktop.watchSharedTab(roomId, tabId).then((result) => {
+      if (!result.ok)
+        acceptShared({ type: "status", roomId, tabId, state: "unshared" });
+    });
+    return () => void window.desktop.unwatchSharedTab();
+  }, [roomId, tabId]);
+  return transcript;
+}
+
 export function connectTranscripts() {
   if (!window.desktop) return () => {};
-  return window.desktop.onTranscript(acceptTranscript);
+  const local = window.desktop.onTranscript(acceptTranscript);
+  const remote = window.desktop.onSharedTranscript(acceptShared);
+  return () => {
+    local();
+    remote();
+  };
 }
