@@ -202,6 +202,8 @@ test("a tick while a pull is in flight is skipped, and a hidden window pauses po
   await wait(30);
   assert.equal(s.calls.length, 2);
   s.setVisible(true);
+  // An idle reply keeps the 5 ms poll from adding a fourth pull on a slow machine.
+  s.replies.push(s.page([], { status: "idle" }));
   s.viewer.visibilityChanged();
   await idle();
   assert.equal(s.calls.length, 3);

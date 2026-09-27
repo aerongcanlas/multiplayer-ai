@@ -41,12 +41,17 @@ export class Journal {
           ...tab,
           readAlongWindows: tab.readAlongWindows ?? [],
         }));
+      const inRoom = (roomId: string, closed: boolean) =>
+        tabs.filter(
+          (tab) => tab.roomId === roomId && Boolean(tab.closedAt) === closed,
+        );
       return {
         ...stored,
         protocolVersion: PROTOCOL_VERSION,
         rooms: stored.rooms.map((room) => ({
           ...room,
-          tabs: tabs.filter((tab) => tab.roomId === room.id),
+          tabs: inRoom(room.id, false),
+          closedTabs: inRoom(room.id, true),
         })),
       };
     }
@@ -78,6 +83,7 @@ export class Journal {
         rooms: snapshot.rooms.map((room): Partial<Room> => ({
           ...room,
           tabs: undefined,
+          closedTabs: undefined,
         })),
       };
       this.db
@@ -91,7 +97,7 @@ export class Journal {
       );
       let position = 0;
       for (const room of snapshot.rooms)
-        for (const tab of room.tabs)
+        for (const tab of [...room.tabs, ...(room.closedTabs ?? [])])
           insertTab.run(tab.id, room.id, position++, JSON.stringify(tab));
       if (workspace)
         this.db

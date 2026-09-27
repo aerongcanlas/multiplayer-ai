@@ -85,6 +85,8 @@ export const tabSchema = z
       )
       .max(1_000)
       .default([]),
+    // Set when the tab was closed; closed tabs keep their transcript and can reopen.
+    closedAt: z.string().optional(),
     // The harness's own plan for the tab.
     plan: tabPlanSchema.optional(),
     // Sub-agents still running and sub-agent requests waiting on the owner.
@@ -340,6 +342,8 @@ export const tabCommandSchemas = [
     })
     .strict(),
   z.object({ type: z.literal("tab.stop"), ...tabRef }).strict(),
+  // Reopens a closed tab with its transcript and harness session.
+  z.object({ type: z.literal("tab.reopen"), ...tabRef }).strict(),
   z
     .object({
       type: z.literal("tab.transcript"),

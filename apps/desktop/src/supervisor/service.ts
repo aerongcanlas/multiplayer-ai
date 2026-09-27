@@ -289,14 +289,9 @@ export class SupervisorService {
     ) {
       if (previous.tabs.some((tab) => tabBusy(tab.status) || tab.runningAgents))
         throw new Error("Stop the previous account's running tabs first.");
-      // Close the previous account's tabs fully: sessions, live state, and transcripts.
-      for (const tab of previous.tabs)
-        await this.host?.handle({
-          type: "tab.close",
-          roomId: room.id,
-          tabId: tab.id,
-          confirm: true,
-        });
+      // Remove the previous account's tabs fully, closed ones included: sessions, live state,
+      // and transcripts.
+      this.host?.purge(room.id);
     }
     this.transaction((draft) => {
       const index = draft.rooms.findIndex((item) => item.id === room.id);
@@ -305,8 +300,13 @@ export class SupervisorService {
         old?.shared?.userId === room.shared?.userId &&
         old?.shared?.project === room.shared?.project;
       const next = sameAccount
-        ? { ...room, workspace: old.workspace, tabs: old.tabs }
-        : { ...room, tabs: [] };
+        ? {
+            ...room,
+            workspace: old.workspace,
+            tabs: old.tabs,
+            closedTabs: old.closedTabs ?? [],
+          }
+        : { ...room, tabs: [], closedTabs: [] };
       if (index < 0) draft.rooms.push(next);
       else draft.rooms[index] = next;
     });

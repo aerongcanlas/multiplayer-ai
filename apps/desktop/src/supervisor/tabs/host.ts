@@ -65,6 +65,8 @@ interface Live {
 }
 const now = () => new Date().toISOString();
 const STOP_TIMEOUT_MS = 10_000;
+// Closed tabs kept per room; older ones are deleted with their transcripts.
+const MAX_CLOSED_TABS = 100;
 
 function findTab(
   state: Snapshot,
@@ -243,6 +245,8 @@ export class TabHost {
         };
       case "tab.resetSession":
         return this.resetSession(command.roomId, command.tabId);
+      case "tab.reopen":
+        return this.reopen(command.roomId, command.tabId);
       case "tab.setReadAlong":
         this.setReadAlong(
           command.roomId,
@@ -368,17 +372,79 @@ export class TabHost {
       );
     if ((live?.turn && !live.turn.finished) || this.runningAgents(tabId))
       this.stop(roomId, tabId);
+    this.writer.flush();
+    const evicted: string[] = [];
+    // The tab moves to the room's closed list with its transcript and session, so it can reopen.
     this.store.transaction((draft) => {
       const room = draft.rooms.find((room) => room.id === roomId)!;
+      const closed = room.tabs.find((item) => item.id === tabId)!;
       room.tabs = room.tabs.filter((item) => item.id !== tabId);
+      // A closed tab stops sharing; viewers see it closed.
+      const open = closed.readAlongWindows.at(-1);
+      if (open && open.offSeq === null)
+        open.offSeq = this.writer.peekSeq(tabId);
+      closed.readAlong = false;
+      delete closed.runningAgents;
+      delete closed.agentRequests;
+      if (tabBusy(closed.status)) closed.status = "interrupted";
+      closed.closedAt = now();
+      closed.updatedAt = now();
+      room.closedTabs = [closed, ...(room.closedTabs ?? [])];
+      for (const old of room.closedTabs.splice(MAX_CLOSED_TABS))
+        evicted.push(old.id);
     });
+    this.release(tabId);
+    for (const id of evicted) this.store.deleteTranscript(id);
+    return undefined;
+  }
+
+  // Drops a tab's live state; its journal rows stay unless the caller deletes them.
+  private release(tabId: string) {
+    const live = this.live.get(tabId);
     this.writer.forget(tabId);
     this.cards.forget(tabId);
-    this.store.deleteTranscript(tabId);
     this.live.delete(tabId);
     clearTimeout(live?.stopTimer);
     live?.session?.close();
+  }
+
+  private reopen(roomId: string, tabId: string) {
+    this.store.transaction((draft) => {
+      const room = draft.rooms.find((room) => room.id === roomId);
+      const tab = room?.closedTabs?.find((item) => item.id === tabId);
+      if (!room || !tab)
+        throw new Error("That chat is no longer in this room's history.");
+      if (room.tabs.length >= 20)
+        throw new Error("Close a tab before reopening another.");
+      room.closedTabs = room.closedTabs!.filter((item) => item.id !== tabId);
+      delete tab.closedAt;
+      // A reopened tab resumes its harness session on the next message.
+      tab.status = this.registry.ready(tab.loadout.harness)
+        ? "idle"
+        : "unavailable";
+      tab.updatedAt = now();
+      room.tabs.push(tab);
+    });
     return undefined;
+  }
+
+  /** Removes every tab of a room, open and closed, with sessions and transcripts. */
+  purge(roomId: string) {
+    const room = this.store.read().rooms.find((room) => room.id === roomId);
+    if (!room) return;
+    const tabs = [...room.tabs, ...(room.closedTabs ?? [])];
+    for (const tab of room.tabs)
+      if (tabBusy(tab.status) || this.runningAgents(tab.id))
+        this.stop(roomId, tab.id);
+    this.store.transaction((draft) => {
+      const target = draft.rooms.find((item) => item.id === roomId)!;
+      target.tabs = [];
+      target.closedTabs = [];
+    });
+    for (const tab of tabs) {
+      this.release(tab.id);
+      this.store.deleteTranscript(tab.id);
+    }
   }
 
   private setLoadout(roomId: string, tabId: string, loadout: Loadout) {

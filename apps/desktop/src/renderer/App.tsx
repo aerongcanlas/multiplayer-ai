@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import {
   AlertCircle,
   ChevronRight,
@@ -12,7 +12,7 @@ import {
   Users,
 } from "lucide-react";
 import type { Room, Snapshot, Suggestion } from "../shared/contracts";
-import { tabBusy, type HarnessState } from "../shared/tabs";
+import { tabBusy, type HarnessState, type Tab } from "../shared/tabs";
 import { dismissError, perform, useDesktop } from "./lib/desktop-store";
 import { getStored, setStored } from "./lib/storage";
 import { Button } from "./components/ui/Button";
@@ -24,6 +24,7 @@ import { SharedConnection } from "./components/SharedConnection";
 import { SidebarSection } from "./components/SidebarSection";
 import { HarnessSettings } from "./components/HarnessSettings";
 import { TabsPanel } from "./components/tabs/TabsPanel";
+import { ChatList } from "./components/ChatList";
 
 const roomBusy = (room: Room) => room.tabs.some((tab) => tabBusy(tab.status));
 const tabKey = (roomId: string) => `multiplayer:tab:${roomId}`;
@@ -35,6 +36,10 @@ function RoomView({
   harnesses,
   readAlong,
   collaboration,
+  selectedTab,
+  onSelectTab,
+  sharedTabId,
+  onSelectShared,
 }: {
   room: Room;
   disabled: boolean;
@@ -42,17 +47,16 @@ function RoomView({
   harnesses: HarnessState[];
   readAlong: Snapshot["readAlong"];
   collaboration: Snapshot["collaboration"];
+  // The active tab and the shared tab open instead, owned by the app so the sidebar can select.
+  selectedTab: string | null;
+  onSelectTab: (tabId: string) => void;
+  sharedTabId: string | null;
+  onSelectShared: (tabId: string | null) => void;
 }) {
   const [draft, setDraft] = useState("");
   const [source, setSource] = useState<Suggestion | null>(null);
   const [announcement, setAnnouncement] = useState("");
   const [invite, setInvite] = useState<string | null>(null);
-  // Mission Control and the main area both follow the active tab.
-  const [selectedTab, setSelectedTab] = useState<string | null>(() =>
-    getStored(tabKey(room.id)),
-  );
-  // Another host's read-along tab open in the main area.
-  const [sharedTabId, setSharedTabId] = useState<string | null>(null);
   const [viewing, setViewing] = useState<{
     tabId: string;
     key: string;
@@ -60,13 +64,12 @@ function RoomView({
   const tab = room.tabs.find((item) => item.id === selectedTab) ?? room.tabs[0];
   const harness = harnesses.find((item) => item.id === tab?.loadout.harness);
   const agentKey = viewing && viewing.tabId === tab?.id ? viewing.key : null;
+  // Mission Control and the main area both follow the active tab.
   function selectTab(id: string) {
-    setSharedTabId(null);
-    setSelectedTab(id);
     setViewing(null);
-    setStored(tabKey(room.id), id);
+    onSelectTab(id);
   }
-  const leaveShared = useCallback(() => setSharedTabId(null), []);
+  const leaveShared = useCallback(() => onSelectShared(null), [onSelectShared]);
   function leaveAgent() {
     const key = agentKey;
     setViewing(null);
@@ -178,7 +181,7 @@ function RoomView({
               sharedTabId={sharedTabId}
               onSelectShared={(id) => {
                 setViewing(null);
-                setSharedTabId(id);
+                onSelectShared(id);
               }}
               onLeaveShared={leaveShared}
               readAlong={readAlong}
@@ -239,6 +242,13 @@ export default function App() {
   const [creating, setCreating] = useState(false);
   const [roomName, setRoomName] = useState("");
   const [roomScope, setRoomScope] = useState<"local" | "shared">("local");
+  // Each room's active tab, remembered across launches.
+  const [selectedTabs, setSelectedTabs] = useState<Record<string, string>>({});
+  // Another host's read-along tab open in a room's main area.
+  const [shared, setShared] = useState<{
+    roomId: string;
+    tabId: string;
+  } | null>(null);
   const room =
     snapshot?.rooms.find((room) => room.id === selectedRoomId) ??
     snapshot?.rooms[0];
@@ -262,6 +272,28 @@ export default function App() {
   function selectRoom(id: string) {
     setSelectedRoomId(id);
     setStored("multiplayer:room", id);
+  }
+  const selectedTab = (roomId: string) =>
+    selectedTabs[roomId] ?? getStored(tabKey(roomId));
+  function selectTab(roomId: string, tabId: string) {
+    setSelectedTabs((current) => ({ ...current, [roomId]: tabId }));
+    setStored(tabKey(roomId), tabId);
+    setShared(null);
+  }
+  const selectShared = useCallback(
+    (roomId: string, tabId: string | null) =>
+      setShared(tabId ? { roomId, tabId } : null),
+    [],
+  );
+  async function openChat(roomId: string, tab: Tab, closed: boolean) {
+    selectRoom(roomId);
+    if (closed) {
+      const result = await perform(() =>
+        window.desktop.reopenTab(roomId, tab.id),
+      );
+      if (!result) return;
+    }
+    selectTab(roomId, tab.id);
   }
   async function createRoom() {
     const result = await perform(
@@ -414,21 +446,46 @@ export default function App() {
                   )}
                   <nav className="room-list" aria-label="Rooms">
                     {snapshot?.rooms.map((item) => (
-                      <button
-                        type="button"
-                        key={item.id}
-                        aria-current={item.id === room?.id ? "page" : undefined}
-                        onClick={() => selectRoom(item.id)}
-                      >
-                        {item.shared ? <Users size={15} /> : <Hash size={15} />}
-                        <span>{item.name}</span>
-                        {roomBusy(item) && (
-                          <span
-                            className="room-running"
-                            aria-label="Tab running"
+                      <Fragment key={item.id}>
+                        <button
+                          type="button"
+                          aria-current={
+                            item.id === room?.id ? "page" : undefined
+                          }
+                          onClick={() => selectRoom(item.id)}
+                        >
+                          {item.shared ? (
+                            <Users size={15} />
+                          ) : (
+                            <Hash size={15} />
+                          )}
+                          <span>{item.name}</span>
+                          {roomBusy(item) && (
+                            <span
+                              className="room-running"
+                              aria-label="Tab running"
+                            />
+                          )}
+                        </button>
+                        {item.id === room?.id && (
+                          <ChatList
+                            room={item}
+                            activeTab={
+                              shared?.roomId === item.id
+                                ? null
+                                : (item.tabs.find(
+                                    (tab) => tab.id === selectedTab(item.id),
+                                  )?.id ??
+                                  item.tabs[0]?.id ??
+                                  null)
+                            }
+                            disabled={disabled}
+                            onOpen={(tab, closed) =>
+                              void openChat(item.id, tab, closed)
+                            }
                           />
                         )}
-                      </button>
+                      </Fragment>
                     ))}
                   </nav>
                 </SidebarSection>
@@ -488,6 +545,10 @@ export default function App() {
             harnesses={snapshot?.harnesses ?? []}
             readAlong={snapshot?.readAlong}
             collaboration={snapshot?.collaboration}
+            selectedTab={selectedTab(room.id)}
+            onSelectTab={(tabId) => selectTab(room.id, tabId)}
+            sharedTabId={shared?.roomId === room.id ? shared.tabId : null}
+            onSelectShared={(tabId) => selectShared(room.id, tabId)}
           />
         ) : (
           <main className="loading-screen">

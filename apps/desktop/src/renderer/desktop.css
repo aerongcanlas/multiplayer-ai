@@ -1626,3 +1626,73 @@ summary:focus-visible {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* A room's chats under it in the sidebar: open tabs with status, closed chats hollow. */
+.chat-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0 0 4px 14px;
+  padding: 0;
+  list-style: none;
+}
+.room-list .chat-list button {
+  width: 100%;
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  color: #9d9da8;
+  font-size: 12px;
+  text-align: left;
+}
+.room-list .chat-list button[aria-current="true"] {
+  color: #eeeef2;
+  background: #26262b;
+}
+.room-list .chat-list button.chat-closed {
+  color: #6f6f78;
+}
+.room-list .chat-list button:hover {
+  background: #232328;
+}
+.room-list .chat-list button > .chat-title {
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.room-list .chat-list button > .chat-dot {
+  flex: 0 0 7px;
+}
+.chat-dot {
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: #6f6f78;
+}
+.chat-dot.status-idle {
+  background: #7ea88a;
+}
+.chat-dot.status-running {
+  background: #7fa6e0;
+  animation: tab-pulse 1.4s ease-in-out infinite;
+}
+.chat-dot.status-awaiting_host {
+  background: #e0b15a;
+}
+.chat-dot.status-error,
+.chat-dot.status-resume_failed {
+  background: #e06c6c;
+}
+.chat-dot.status-interrupted {
+  background: #b38c5a;
+}
+.chat-dot.chat-closed,
+.chat-dot.status-unavailable {
+  background: transparent;
+  border: 1px solid #6f6f78;
+}

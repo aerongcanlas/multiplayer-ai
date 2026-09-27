@@ -107,6 +107,7 @@ export class DesktopCoordinator {
             ...remote,
             workspace: cached.workspace,
             tabs: cached.tabs,
+            closedTabs: cached.closedTabs,
           }
         : remote;
     });

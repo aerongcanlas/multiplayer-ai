@@ -228,7 +228,7 @@ test("a suggestion is validated, stored on the user entry, and marked submitted 
     );
   }));
 
-test("closing a running tab needs confirmation, then stops the turn and removes the tab", () =>
+test("closing a running tab needs confirmation, then stops the turn and keeps the chat closed", () =>
   withHost(async (setup, fake) => {
     const tab = await setup.open();
     await setup.send(tab.id, "FAKE_SLOW");
@@ -241,8 +241,55 @@ test("closing a running tab needs confirmation, then stops the turn and removes 
     assert.equal(setup.tabs().length, 0);
     assert.ok(fake.calls.includes("stop"));
     assert.ok(fake.calls.includes("close"));
-    assert.equal(setup.journal.lastSeq(tab.id), 0);
+    const room = setup.service.snapshot().rooms[0];
+    assert.equal(room.closedTabs?.[0].id, tab.id);
+    assert.ok(room.closedTabs?.[0].closedAt);
+    assert.equal(room.closedTabs?.[0].status, "interrupted");
+    assert.ok(setup.journal.lastSeq(tab.id) > 0);
   }));
+
+test("a closed chat survives a restart and reopens with its transcript and session", async () => {
+  const fake = new FakeHarness("codex");
+  const setup = await start(fake);
+  let tabId = "";
+  let before = 0;
+  try {
+    const tab = await setup.open();
+    tabId = tab.id;
+    await setup.send(tab.id, "Hello there");
+    await setup.settled(tab.id);
+    before = (await setup.transcript(tab.id)).length;
+    await setup.closeTab(tab.id);
+    assert.deepEqual(setup.tabs(), []);
+  } finally {
+    setup.close();
+  }
+  const restarted = await start(new FakeHarness("codex"), setup);
+  try {
+    const room = () => restarted.service.snapshot().rooms[0];
+    assert.equal(room().closedTabs?.[0].id, tabId);
+    await restarted.dispatch({
+      type: "tab.reopen",
+      roomId: restarted.roomId,
+      tabId,
+    });
+    assert.deepEqual(room().closedTabs, []);
+    const reopened = restarted.tab(tabId);
+    assert.equal(reopened.closedAt, undefined);
+    assert.ok(reopened.sessionId);
+    assert.equal((await restarted.transcript(tabId)).length, before);
+    await assert.rejects(
+      restarted.dispatch({
+        type: "tab.reopen",
+        roomId: restarted.roomId,
+        tabId,
+      }),
+      /no longer in this room's history/,
+    );
+  } finally {
+    restarted.close();
+  }
+});
 
 test("a harness failure mid-turn ends the turn with an error entry", () =>
   withHost(async (setup) => {
@@ -432,11 +479,16 @@ test("a shared-room import keeps local tabs for the same account and project", (
     });
     assert.equal(room().name, "Renamed");
     assert.equal(room().tabs[0].id, tabId);
+    await setup.dispatch({ type: "tab.close", roomId: shared.id, tabId });
+    assert.equal(room().closedTabs?.[0].id, tabId);
     await setup.dispatch({
       type: "shared.import",
       room: { ...shared, shared: { ...shared.shared, userId: randomUUID() } },
     });
+    // Another account never sees the previous account's chats, closed ones included.
     assert.deepEqual(room().tabs, []);
+    assert.deepEqual(room().closedTabs, []);
+    assert.equal(setup.journal.lastSeq(tabId), 0);
   }));
 
 test("restored tabs become ready again without a manual refresh", async () => {

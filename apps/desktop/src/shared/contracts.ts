@@ -143,6 +143,8 @@ export interface Room {
   messages: ChatMessage[];
   suggestions: Suggestion[];
   tabs: Tab[];
+  // Closed tabs, newest first; each keeps its transcript and can reopen.
+  closedTabs?: Tab[];
 }
 
 export interface Snapshot {
@@ -200,6 +202,7 @@ export interface DesktopBridge {
     input: Omit<Extract<Command, { type: "tab.send" }>, "type">,
   ): Promise<Result>;
   stopTab(roomId: string, tabId: string): Promise<Result>;
+  reopenTab(roomId: string, tabId: string): Promise<Result>;
   setReadAlong(roomId: string, tabId: string, on: boolean): Promise<Result>;
   // The page arrives in the Result's `transcript` field.
   loadTranscript(
