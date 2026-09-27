@@ -244,7 +244,12 @@ export class TabHost {
       case "tab.resetSession":
         return this.resetSession(command.roomId, command.tabId);
       case "tab.setReadAlong":
-        this.setReadAlong(command.roomId, command.tabId, command.on);
+        this.setReadAlong(
+          command.roomId,
+          command.tabId,
+          command.on,
+          command.discard === true,
+        );
         return;
       case "approval.respond":
         return this.respond(
@@ -304,7 +309,12 @@ export class TabHost {
    * appends a "paused" notice and flushes it before the snapshot that closes the window, so the
    * notice's batch reaches main while its seq is still inside the window.
    */
-  private setReadAlong(roomId: string, tabId: string, on: boolean) {
+  private setReadAlong(
+    roomId: string,
+    tabId: string,
+    on: boolean,
+    discard: boolean,
+  ) {
     const { room, tab } = findTab(this.store.read(), roomId, tabId);
     if (tab.readAlong === on) return;
     if (on) {
@@ -327,17 +337,20 @@ export class TabHost {
         });
       return;
     }
-    const notice = this.writer.append(roomId, tabId, {
-      turnId: null,
-      kind: "notice",
-      summary: "Read-along paused.",
-    });
+    const notice = discard
+      ? undefined
+      : this.writer.append(roomId, tabId, {
+          turnId: null,
+          kind: "notice",
+          summary: "Read-along paused.",
+        });
     this.writer.flush();
     this.store.transaction((draft) => {
       const { tab } = findTab(draft, roomId, tabId);
       tab.readAlong = false;
       const open = tab.readAlongWindows.at(-1);
-      if (open && open.offSeq === null) open.offSeq = notice.seq + 1;
+      if (open && open.offSeq === null)
+        open.offSeq = notice ? notice.seq + 1 : open.onSeq;
       tab.updatedAt = now();
     });
   }

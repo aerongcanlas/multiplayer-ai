@@ -353,7 +353,14 @@ export const tabCommandSchemas = [
     })
     .strict(),
   z
-    .object({ type: z.literal("tab.setReadAlong"), ...tabRef, on: z.boolean() })
+    .object({
+      type: z.literal("tab.setReadAlong"),
+      ...tabRef,
+      on: z.boolean(),
+      // Stops without the paused notice and closes the open window where it began, so entries
+      // not yet published never publish (used when the host lost room membership).
+      discard: z.literal(true).optional(),
+    })
     .strict(),
   // Every sub-agent card of the tab, in the transcript result.
   z.object({ type: z.literal("tab.agents"), ...tabRef }).strict(),

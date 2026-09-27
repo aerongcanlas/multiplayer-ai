@@ -35,6 +35,8 @@ export class DesktopCoordinator {
   private local?: Snapshot;
   private view?: Snapshot;
   private revision = 0;
+  // The read-along publisher's per-tab status, shown by the host's switch.
+  readAlongStatus?: () => NonNullable<Snapshot["readAlong"]>;
   constructor(
     private supervisor: Supervisor,
     private shared: Pick<
@@ -86,6 +88,7 @@ export class DesktopCoordinator {
         ...sharedRooms,
       ],
       collaboration: structuredClone(this.shared.state),
+      ...(this.readAlongStatus ? { readAlong: this.readAlongStatus() } : {}),
     };
     this.publish(this.view);
     // A revoked membership or sign-out also stops running tabs associated with that account.

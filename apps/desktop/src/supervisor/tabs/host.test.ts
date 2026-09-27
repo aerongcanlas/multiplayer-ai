@@ -1005,3 +1005,43 @@ test("read-along windows open at the next seq, close after a flushed paused noti
     restarted.close();
   }
 });
+
+test("a discarding switch-off closes the window where it began, with no paused notice", () =>
+  withHost(async (setup) => {
+    const room = {
+      ...structuredClone(setup.service.snapshot().rooms[0]),
+      id: randomUUID(),
+      workspace: null,
+      tabs: [],
+      shared: {
+        userId: randomUUID(),
+        project: "test",
+        isAdmin: true,
+        members: [],
+      },
+    };
+    await setup.dispatch({ type: "shared.import", room });
+    await setup.dispatch({
+      type: "tab.open",
+      roomId: room.id,
+      harness: "codex",
+    });
+    const tabId = setup.tabs(room.id)[0].id;
+    const toggle = (on: boolean, discard?: true) =>
+      setup.dispatch({
+        type: "tab.setReadAlong",
+        roomId: room.id,
+        tabId,
+        on,
+        ...(discard ? { discard } : {}),
+      });
+    await toggle(true);
+    await toggle(false, true);
+    const tab = setup.tab(tabId, room.id);
+    assert.equal(tab.readAlong, false);
+    assert.deepEqual(tab.readAlongWindows, [{ onSeq: 1, offSeq: 1 }]);
+    const entries = (
+      await setup.dispatch({ type: "tab.transcript", roomId: room.id, tabId })
+    ).transcript!.entries;
+    assert.deepEqual(entries, []);
+  }));
