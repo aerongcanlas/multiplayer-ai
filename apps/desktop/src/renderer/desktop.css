@@ -1514,3 +1514,221 @@ summary:focus-visible {
   font-size: 10px;
   color: #b9d0f3;
 }
+
+/* Read-along: other hosts' shared tabs after this desktop's own, and the host's switch. */
+.tab-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  margin-left: 6px;
+  padding-left: 8px;
+  border-left: 1px solid #ffffff14;
+}
+.tab-group-label {
+  max-width: 110px;
+  overflow: hidden;
+  padding-right: 2px;
+  color: #77777f;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tab-chip.tab-shared > button:first-child {
+  padding-right: 9px;
+  font-style: italic;
+}
+.tab-dot.shared-status-running {
+  background: #7fa6e0;
+  animation: tab-pulse 1.4s ease-in-out infinite;
+}
+.tab-dot.shared-status-awaiting_host {
+  background: #e0b15a;
+}
+.tab-dot.shared-status-idle {
+  background: #7ea88a;
+}
+.tab-dot.shared-status-interrupted {
+  background: #b38c5a;
+}
+.tab-dot.shared-status-ended {
+  background: transparent;
+  border: 1px solid #77777f;
+}
+.agent-status.shared-status-running {
+  color: #b9d0f3;
+  background: #7fa6e022;
+}
+.agent-status.shared-status-awaiting_host {
+  color: #ecc98a;
+  background: #e0b15a22;
+}
+.agent-status.shared-status-interrupted,
+.agent-status.shared-status-ended,
+.agent-status.shared-status-closed {
+  color: #d6b98f;
+  background: #b38c5a22;
+}
+.shared-header > svg {
+  flex-shrink: 0;
+  color: #9d9da8;
+}
+.read-along-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  flex-shrink: 0;
+  padding: 6px 14px;
+  border-bottom: 1px solid #ffffff0d;
+  font-size: 11px;
+}
+.read-along-bar .subtle {
+  min-width: 0;
+  flex-basis: 100%;
+}
+.read-along-switch {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #ececf1;
+  cursor: pointer;
+}
+.read-along-caption {
+  color: #9d9da8;
+}
+.read-along-caption.state-publishing {
+  color: #a9cdb2;
+}
+.read-along-caption.state-paused {
+  color: #ecc98a;
+}
+.read-along-caption.state-stopped {
+  color: #eba3a3;
+}
+.read-along-ended {
+  flex-shrink: 0;
+  margin: 8px 14px 0;
+  padding: 6px 10px;
+  border-radius: 6px;
+  color: #b9b9c4;
+  background: #222228;
+  font-size: 11px;
+}
+.turn-tool.turn-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-geist-mono);
+}
+.turn-tool.turn-summary span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A room's chats under it in the sidebar: open tabs with status, closed chats hollow. */
+.chat-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0 0 4px 14px;
+  padding: 0;
+  list-style: none;
+}
+.room-list .chat-list button {
+  width: 100%;
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  color: #9d9da8;
+  font-size: 12px;
+  text-align: left;
+}
+.room-list .chat-list button[aria-current="true"] {
+  color: #eeeef2;
+  background: #26262b;
+}
+.room-list .chat-list button.chat-closed {
+  color: #6f6f78;
+}
+.room-list .chat-list button:hover {
+  background: #232328;
+}
+.room-list .chat-list button > .chat-title {
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.room-list .chat-list button > .chat-dot {
+  flex: 0 0 7px;
+}
+.chat-dot {
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: #6f6f78;
+}
+.chat-dot.status-idle {
+  background: #7ea88a;
+}
+.chat-dot.status-running {
+  background: #7fa6e0;
+  animation: tab-pulse 1.4s ease-in-out infinite;
+}
+.chat-dot.status-awaiting_host {
+  background: #e0b15a;
+}
+.chat-dot.status-error,
+.chat-dot.status-resume_failed {
+  background: #e06c6c;
+}
+.chat-dot.status-interrupted {
+  background: #b38c5a;
+}
+.chat-dot.chat-closed,
+.chat-dot.status-unavailable {
+  background: transparent;
+  border: 1px solid #6f6f78;
+}
+.chat-menu {
+  position: fixed;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 220px;
+  padding: 5px;
+  border: 1px solid #4a4a55;
+  border-radius: 9px;
+  background: #232329;
+  box-shadow: 0 12px 32px #000a;
+}
+.chat-menu button {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  color: #d6d6de;
+  font-size: 12px;
+  text-align: left;
+}
+.chat-menu button:hover,
+.chat-menu button:focus-visible {
+  background: #2f2f37;
+}
+.chat-menu .chat-menu-danger {
+  color: #f0a4a4;
+}
+.chat-menu-note {
+  margin: 2px 4px 4px;
+  color: #a9a9b3;
+  font-size: 11px;
+  line-height: 1.45;
+}

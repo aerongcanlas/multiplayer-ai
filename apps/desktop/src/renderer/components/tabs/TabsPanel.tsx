@@ -1,5 +1,6 @@
-import { ArrowLeft, Bot, CircleStop, Plus, X } from "lucide-react";
+import { ArrowLeft, Bot, CircleStop, Eye, Plus, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import type { ReadAlongStatus } from "../../../shared/collaboration";
 import type { Room, Suggestion } from "../../../shared/contracts";
 import {
   HARNESS_IDS,
@@ -14,6 +15,12 @@ import {
 } from "../../../shared/tabs";
 import { perform } from "../../lib/desktop-store";
 import { programLabel } from "../../lib/harness-status";
+import {
+  ageLabel,
+  SHARED_STATUS_LABELS,
+  sharedGroups,
+  switchCaption,
+} from "../../lib/read-along";
 import { useAgents } from "../../lib/transcript-store";
 import { plural } from "../../lib/utils";
 import { HarnessStatus } from "../HarnessSettings";
@@ -21,8 +28,49 @@ import { HarnessPicker } from "./HarnessPicker";
 import { PromptInput } from "../PromptInput";
 import { Button } from "../ui/Button";
 import { LoadoutBar } from "./LoadoutBar";
+import { SharedTabView } from "./SharedTabView";
 import { TranscriptView, type Actions } from "./TranscriptView";
 import { AGENT_STATUS_LABELS, STATUS_LABELS } from "./labels";
+
+/** The host's read-along switch for a tab in a shared room, with what it shares. */
+function ReadAlongSwitch({
+  roomId,
+  tab,
+  status,
+  disabled,
+}: {
+  roomId: string;
+  tab: Tab;
+  status: ReadAlongStatus | undefined;
+  disabled: boolean;
+}) {
+  return (
+    <div className="read-along-bar">
+      <label className="read-along-switch">
+        <input
+          type="checkbox"
+          role="switch"
+          checked={tab.readAlong}
+          disabled={disabled}
+          onChange={() =>
+            void perform(() =>
+              window.desktop.setReadAlong(roomId, tab.id, !tab.readAlong),
+            )
+          }
+        />
+        <Eye size={12} aria-hidden />
+        Read-along
+      </label>
+      <span className={`read-along-caption state-${status?.state ?? "off"}`}>
+        {switchCaption(status, tab.readAlong)}
+      </span>
+      <span className="subtle">
+        Room members see your prompts and the agent&apos;s messages, masked.
+        Tool output and files stay on this desktop.
+      </span>
+    </div>
+  );
+}
 
 /** One sub-agent's transcript in the main area, read-only, with a way back to the lead. */
 function AgentDrillIn({
@@ -88,6 +136,12 @@ export function TabsPanel({
   source,
   onSourceClear,
   onSent,
+  sharedTabId,
+  onSelectShared,
+  onLeaveShared,
+  readAlong,
+  connected,
+  clockOffsetMs,
 }: {
   room: Room;
   // The active tab and the sub-agent open in the main area, owned by the room view.
@@ -103,7 +157,15 @@ export function TabsPanel({
   source: Suggestion | null;
   onSourceClear: () => void;
   onSent: (message: string) => void;
+  // Another host's read-along tab open in the main area instead of `tab`.
+  sharedTabId: string | null;
+  onSelectShared: (tabId: string) => void;
+  onLeaveShared: () => void;
+  readAlong: Record<string, ReadAlongStatus> | undefined;
+  connected: boolean;
+  clockOffsetMs: number | undefined;
 }) {
+  const sharedTabs = room.shared?.sharedTabs ?? [];
   const [closing, setClosing] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [title, setTitle] = useState("");
@@ -216,12 +278,12 @@ export function TabsPanel({
             ) : (
               <div
                 key={item.id}
-                className={`tab-chip ${item.id === tab?.id ? "tab-active" : ""}`}
+                className={`tab-chip ${item.id === tab?.id && !sharedTabId ? "tab-active" : ""}`}
               >
                 <button
                   type="button"
                   role="tab"
-                  aria-selected={item.id === tab?.id}
+                  aria-selected={item.id === tab?.id && !sharedTabId}
                   title={`${item.title} · ${STATUS_LABELS[item.status]} · double-click to rename`}
                   onClick={() => onSelect(item.id)}
                   onDoubleClick={() => {
@@ -263,13 +325,43 @@ export function TabsPanel({
               </div>
             ),
           )}
+          {sharedGroups(sharedTabs).map((group) => (
+            <div
+              key={group.key}
+              className="tab-group"
+              role="group"
+              aria-label={`Shared by ${group.label}`}
+            >
+              <span className="tab-group-label">{group.label}</span>
+              {group.tabs.map((item) => (
+                <div
+                  key={item.tabId}
+                  className={`tab-chip tab-shared ${item.tabId === sharedTabId ? "tab-active" : ""}`}
+                >
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={item.tabId === sharedTabId}
+                    title={`${item.title} · ${SHARED_STATUS_LABELS[item.status]} · ${ageLabel(item.updatedAt, connected, clockOffsetMs)}`}
+                    onClick={() => onSelectShared(item.tabId)}
+                  >
+                    <span
+                      className={`tab-dot shared-status-${item.status}`}
+                      aria-label={SHARED_STATUS_LABELS[item.status]}
+                    />
+                    <span className="tab-title">{item.title}</span>
+                  </button>
+                </div>
+              ))}
+            </div>
+          ))}
         </div>
         <HarnessPicker
           harnesses={harnesses}
           disabled={disabled}
           onPick={(id) => void open(id)}
         />
-        {tab && stoppable && (
+        {tab && stoppable && !sharedTabId && (
           <Button
             size="xs"
             variant="outline"
@@ -303,7 +395,17 @@ export function TabsPanel({
           </Button>
         </div>
       )}
-      {!tab ? (
+      {sharedTabId ? (
+        <SharedTabView
+          key={sharedTabId}
+          roomId={room.id}
+          tabId={sharedTabId}
+          listed={sharedTabs.find((item) => item.tabId === sharedTabId)}
+          connected={connected}
+          clockOffsetMs={clockOffsetMs}
+          onLeave={onLeaveShared}
+        />
+      ) : !tab ? (
         <div className="panel-scroll">
           <div className="empty-state">
             <div className="empty-agent-icon">
@@ -331,6 +433,14 @@ export function TabsPanel({
         </div>
       ) : (
         <>
+          {room.shared && !agentKey && (
+            <ReadAlongSwitch
+              roomId={room.id}
+              tab={tab}
+              status={readAlong?.[tab.id]}
+              disabled={disabled || stale}
+            />
+          )}
           {harness &&
             (tab.status === "unavailable" || harness.noticePending) && (
               <HarnessStatus harness={harness} disabled={disabled} compact />

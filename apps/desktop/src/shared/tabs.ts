@@ -71,7 +71,22 @@ export const tabSchema = z
     sessionId: z.string().min(1).max(200).optional(),
     // Set after a resume until the first turn on the resumed session completes.
     resumed: z.boolean().optional(),
-    readAlong: z.literal(false),
+    // The host's read-along switch. Entries publish only inside an on-window: `onSeq` is the
+    // first seq shared and `offSeq`, once the switch turns off, the first seq not shared.
+    readAlong: z.boolean(),
+    readAlongWindows: z
+      .array(
+        z
+          .object({
+            onSeq: z.number().int().positive(),
+            offSeq: z.number().int().positive().nullable(),
+          })
+          .strict(),
+      )
+      .max(1_000)
+      .default([]),
+    // Set when the tab was closed; closed tabs keep their transcript and can reopen.
+    closedAt: z.string().optional(),
     // The harness's own plan for the tab.
     plan: tabPlanSchema.optional(),
     // Sub-agents still running and sub-agent requests waiting on the owner.
@@ -327,6 +342,10 @@ export const tabCommandSchemas = [
     })
     .strict(),
   z.object({ type: z.literal("tab.stop"), ...tabRef }).strict(),
+  // Reopens a closed tab with its transcript and harness session.
+  z.object({ type: z.literal("tab.reopen"), ...tabRef }).strict(),
+  // Permanently deletes a closed tab and its transcript.
+  z.object({ type: z.literal("tab.delete"), ...tabRef }).strict(),
   z
     .object({
       type: z.literal("tab.transcript"),
@@ -335,6 +354,18 @@ export const tabCommandSchemas = [
       limit: z.number().int().min(1).max(500).optional(),
       // Pages one sub-agent's entries instead of the lead's.
       agentKey: agentKey.optional(),
+      // Pages the lead's entries after this seq, oldest first, instead of before `beforeSeq`.
+      afterSeq: z.number().int().nonnegative().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("tab.setReadAlong"),
+      ...tabRef,
+      on: z.boolean(),
+      // Stops without the paused notice and closes the open window where it began, so entries
+      // not yet published never publish (used when the host lost room membership).
+      discard: z.literal(true).optional(),
     })
     .strict(),
   // Every sub-agent card of the tab, in the transcript result.
@@ -378,6 +409,13 @@ export const DEFAULT_LOADOUT = (harness: HarnessId): Loadout => ({
   planMode: false,
   access: "ask",
 });
+
+export type ReadAlongWindow = Tab["readAlongWindows"][number];
+export const inReadAlongWindow = (windows: ReadAlongWindow[], seq: number) =>
+  windows.some(
+    (window) =>
+      window.onSeq <= seq && (window.offSeq === null || seq < window.offSeq),
+  );
 
 export const tabBusy = (status: TabStatus) =>
   status === "running" || status === "awaiting_host";

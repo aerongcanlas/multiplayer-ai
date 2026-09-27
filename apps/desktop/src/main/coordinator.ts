@@ -18,9 +18,15 @@ const DIRECT = new Set([
   "tab.transcript",
   "tab.agents",
   "tab.resetSession",
+  // Deleting a closed chat touches only this desktop's journal.
+  "tab.delete",
   "approval.respond",
   "question.answer",
 ]);
+// Turning read-along off never waits on the network, so an offline host can always stop sharing.
+const isDirect = (command: Command) =>
+  DIRECT.has(command.type) ||
+  (command.type === "tab.setReadAlong" && !command.on);
 
 interface Supervisor {
   request(command: SupervisorRequest["command"]): Promise<Result>;
@@ -31,6 +37,18 @@ export class DesktopCoordinator {
   private local?: Snapshot;
   private view?: Snapshot;
   private revision = 0;
+  // The read-along publisher's per-tab status, shown by the host's switch.
+  readAlongStatus?: () => NonNullable<Snapshot["readAlong"]>;
+  // Main's viewer for other hosts' read-along tabs.
+  viewer?: {
+    watch(roomId: string, tabId: string): Promise<void>;
+    unwatch(): void;
+    loadEarlier(
+      roomId: string,
+      tabId: string,
+      beforeSeq: number,
+    ): Promise<void>;
+  };
   constructor(
     private supervisor: Supervisor,
     private shared: Pick<
@@ -59,7 +77,27 @@ export class DesktopCoordinator {
   }
   changed() {
     if (!this.local) return;
+    const account = this.shared.state.account?.id;
     const sharedRooms = this.shared.rooms.map((remote) => {
+      // This desktop's own rows never list; this account's other desktops are labelled.
+      if (remote.shared?.sharedTabs)
+        remote = {
+          ...remote,
+          shared: {
+            ...remote.shared,
+            sharedTabs: remote.shared.sharedTabs
+              .filter(
+                (tab) =>
+                  !(
+                    tab.hostId === account &&
+                    tab.deviceId === this.local!.hostId
+                  ),
+              )
+              .map((tab) =>
+                tab.hostId === account ? { ...tab, sameUser: true } : tab,
+              ),
+          },
+        };
       const cached = this.local!.rooms.find(
         (room) =>
           room.id === remote.id &&
@@ -71,6 +109,7 @@ export class DesktopCoordinator {
             ...remote,
             workspace: cached.workspace,
             tabs: cached.tabs,
+            closedTabs: cached.closedTabs,
           }
         : remote;
     });
@@ -82,6 +121,7 @@ export class DesktopCoordinator {
         ...sharedRooms,
       ],
       collaboration: structuredClone(this.shared.state),
+      ...(this.readAlongStatus ? { readAlong: this.readAlongStatus() } : {}),
     };
     this.publish(this.view);
     // A revoked membership or sign-out also stops running tabs associated with that account.
@@ -123,7 +163,18 @@ export class DesktopCoordinator {
       else if (command.type === "auth.signOut") await this.shared.signOut();
       else if (command.type === "auth.cancel") await this.shared.cancelSignIn();
       else if (command.type === "shared.refresh") await this.shared.refresh();
-      else if (command.type === "snapshot") {
+      else if (command.type === "sharedTab.watch") {
+        if (!this.viewer) throw new Error("Read-along is unavailable.");
+        await this.viewer.watch(command.roomId, command.tabId);
+      } else if (command.type === "sharedTab.unwatch") this.viewer?.unwatch();
+      else if (command.type === "sharedTab.load") {
+        if (!this.viewer) throw new Error("Read-along is unavailable.");
+        await this.viewer.loadEarlier(
+          command.roomId,
+          command.tabId,
+          command.beforeSeq,
+        );
+      } else if (command.type === "snapshot") {
         /* Return the current projection. */
       } else if (
         command.type === "room.join" ||
@@ -150,14 +201,23 @@ export class DesktopCoordinator {
         } else {
           if (command.type === "invite.create")
             throw new Error("Invitations are available in shared rooms.");
-          if (room.shared && !DIRECT.has(command.type)) {
+          if (command.type === "tab.setReadAlong" && command.on && !room.shared)
+            throw new Error("Read-along needs a shared room.");
+          if (room.shared && !isDirect(command)) {
             await this.shared.refresh();
             room = this.shared.rooms.find((item) => item.id === command.roomId);
             if (!room || this.shared.state.status !== "connected")
               throw new Error(
                 "Reconnect and confirm room membership before running locally.",
               );
-            await this.localCommand({ type: "shared.import", room });
+            // Other hosts' read-along tabs stay in main; the journal never stores them.
+            await this.localCommand({
+              type: "shared.import",
+              room: {
+                ...room,
+                shared: { ...room.shared!, sharedTabs: undefined },
+              },
+            });
           }
           if (command.type === "workspace.select") {
             const workspace = await this.chooseWorkspace();

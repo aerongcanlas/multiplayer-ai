@@ -88,7 +88,7 @@ test("cards share in full and sub-agent entries keep their kind's level", () => 
   assert.equal(reasoning.share, "none");
 });
 
-test("tabs start without read-along", () => {
+test("tabs validate read-along state", () => {
   const base = {
     id: randomUUID(),
     roomId: randomUUID(),
@@ -117,8 +117,19 @@ test("tabs start without read-along", () => {
     tabSchema.safeParse({ ...base, runningAgents: -1 }).success,
     false,
   );
+  // The switch may be on, and bodies from older builds default to no windows.
+  const parsed = tabSchema.parse({
+    ...base,
+    readAlong: true,
+    readAlongWindows: [{ onSeq: 3, offSeq: null }],
+  });
+  assert.deepEqual(parsed.readAlongWindows, [{ onSeq: 3, offSeq: null }]);
+  assert.deepEqual(tabSchema.parse(base).readAlongWindows, []);
   assert.equal(
-    tabSchema.safeParse({ ...base, readAlong: true }).success,
+    tabSchema.safeParse({
+      ...base,
+      readAlongWindows: [{ onSeq: 0, offSeq: null }],
+    }).success,
     false,
   );
   assert.equal(

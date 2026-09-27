@@ -53,8 +53,13 @@ export class TranscriptWriter {
     private interval = 100,
   ) {}
 
+  /** The seq the tab's next entry will take. */
+  peekSeq(tabId: string) {
+    return (this.seqs.get(tabId) ?? this.store.lastSeq(tabId)) + 1;
+  }
+
   private nextSeq(tabId: string) {
-    const seq = (this.seqs.get(tabId) ?? this.store.lastSeq(tabId)) + 1;
+    const seq = this.peekSeq(tabId);
     this.seqs.set(tabId, seq);
     return seq;
   }

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { FakeHarness } from "../harnesses/fake";
 import { start, withHost } from "../test-support";
+import { inspectWorkspace } from "../workspace";
 import type { Tab } from "../../shared/tabs";
 
 test("a send streams deltas into one assistant entry and ends the turn idle", () =>
@@ -227,7 +228,7 @@ test("a suggestion is validated, stored on the user entry, and marked submitted 
     );
   }));
 
-test("closing a running tab needs confirmation, then stops the turn and removes the tab", () =>
+test("closing a running tab needs confirmation, then stops the turn and keeps the chat closed", () =>
   withHost(async (setup, fake) => {
     const tab = await setup.open();
     await setup.send(tab.id, "FAKE_SLOW");
@@ -240,8 +241,58 @@ test("closing a running tab needs confirmation, then stops the turn and removes 
     assert.equal(setup.tabs().length, 0);
     assert.ok(fake.calls.includes("stop"));
     assert.ok(fake.calls.includes("close"));
-    assert.equal(setup.journal.lastSeq(tab.id), 0);
+    const room = setup.service.snapshot().rooms[0];
+    assert.equal(room.closedTabs?.[0].id, tab.id);
+    assert.ok(room.closedTabs?.[0].closedAt);
+    assert.equal(room.closedTabs?.[0].status, "interrupted");
+    assert.ok(setup.journal.lastSeq(tab.id) > 0);
   }));
+
+test("a closed chat survives a restart and reopens with its transcript and session", async () => {
+  const fake = new FakeHarness("codex");
+  const setup = await start(fake);
+  let tabId = "";
+  let before = 0;
+  try {
+    const tab = await setup.open();
+    tabId = tab.id;
+    await setup.send(tab.id, "Hello there");
+    await setup.settled(tab.id);
+    before = (await setup.transcript(tab.id)).length;
+    await setup.closeTab(tab.id);
+    assert.deepEqual(setup.tabs(), []);
+  } finally {
+    setup.close();
+  }
+  const restarted = await start(new FakeHarness("codex"), setup);
+  try {
+    const room = () => restarted.service.snapshot().rooms[0];
+    assert.equal(room().closedTabs?.[0].id, tabId);
+    await restarted.dispatch({
+      type: "tab.reopen",
+      roomId: restarted.roomId,
+      tabId,
+    });
+    assert.deepEqual(room().closedTabs, []);
+    const reopened = restarted.tab(tabId);
+    assert.equal(reopened.closedAt, undefined);
+    assert.ok(reopened.sessionId);
+    // A reopened chat is private until the host shares it again.
+    assert.equal(reopened.readAlong, false);
+    assert.deepEqual(reopened.readAlongWindows, []);
+    assert.equal((await restarted.transcript(tabId)).length, before);
+    await assert.rejects(
+      restarted.dispatch({
+        type: "tab.reopen",
+        roomId: restarted.roomId,
+        tabId,
+      }),
+      /no longer in this room's history/,
+    );
+  } finally {
+    restarted.close();
+  }
+});
 
 test("a harness failure mid-turn ends the turn with an error entry", () =>
   withHost(async (setup) => {
@@ -431,11 +482,16 @@ test("a shared-room import keeps local tabs for the same account and project", (
     });
     assert.equal(room().name, "Renamed");
     assert.equal(room().tabs[0].id, tabId);
+    await setup.dispatch({ type: "tab.close", roomId: shared.id, tabId });
+    assert.equal(room().closedTabs?.[0].id, tabId);
     await setup.dispatch({
       type: "shared.import",
       room: { ...shared, shared: { ...shared.shared, userId: randomUUID() } },
     });
+    // Another account never sees the previous account's chats, closed ones included.
     assert.deepEqual(room().tabs, []);
+    assert.deepEqual(room().closedTabs, []);
+    assert.equal(setup.journal.lastSeq(tabId), 0);
   }));
 
 test("restored tabs become ready again without a manual refresh", async () => {
@@ -866,4 +922,200 @@ test("the lead plan lands on the tab, sub-agent plans stay off it, and a reset c
     session.emit({ type: "agent", key: "planner", status: "completed" });
     await setup.resetSession(tab.id);
     assert.equal(setup.tab(tab.id).plan, undefined);
+  }));
+
+test("read-along windows open at the next seq, close after a flushed paused notice, and persist", async () => {
+  const fake = new FakeHarness("codex");
+  const setup = await start(fake);
+  const shared = {
+    ...structuredClone(setup.service.snapshot().rooms[0]),
+    id: randomUUID(),
+    workspace: null,
+    tabs: [],
+    shared: {
+      userId: randomUUID(),
+      project: "test",
+      isAdmin: true,
+      members: [],
+    },
+  };
+  const roomId = shared.id;
+  let tabId = "";
+  const room = () =>
+    setup.service.snapshot().rooms.find((item) => item.id === roomId)!;
+  const tab = () => room().tabs.find((item) => item.id === tabId)!;
+  const toggle = (on: boolean) =>
+    setup.dispatch({ type: "tab.setReadAlong", roomId, tabId, on });
+  const lead = async () =>
+    (await setup.dispatch({ type: "tab.transcript", roomId, tabId }))
+      .transcript!.entries;
+  try {
+    // Local rooms cannot share.
+    const local = await setup.open();
+    await assert.rejects(
+      setup.dispatch({
+        type: "tab.setReadAlong",
+        roomId: setup.roomId,
+        tabId: local.id,
+        on: true,
+      }),
+      /needs a shared room/,
+    );
+    await setup.dispatch({ type: "shared.import", room: shared });
+    await setup.dispatch({
+      type: "workspace.register",
+      roomId,
+      workspace: await inspectWorkspace(setup.repo),
+    });
+    await setup.dispatch({ type: "tab.open", roomId, harness: "codex" });
+    tabId = room().tabs[0].id;
+    assert.equal(tab().readAlong, false);
+    assert.deepEqual(tab().readAlongWindows, []);
+    await setup.send(tabId, "Before sharing", { roomId });
+    await setup.settled(tabId, roomId);
+    const before = await lead();
+
+    // Covers AE1: the window starts at the next entry's seq.
+    await toggle(true);
+    assert.equal(tab().readAlong, true);
+    assert.deepEqual(tab().readAlongWindows, [
+      { onSeq: before.at(-1)!.seq + 1, offSeq: null },
+    ]);
+    await setup.send(tabId, "While sharing", { roomId });
+    await setup.settled(tabId, roomId);
+    const shared1 = (await lead()).filter(
+      (entry) => entry.seq >= tab().readAlongWindows[0].onSeq,
+    );
+    assert.equal(shared1[0].kind, "user");
+    assert.ok(
+      before.every((entry) => entry.seq < tab().readAlongWindows[0].onSeq),
+    );
+
+    // Covers AE11: off appends the paused notice inside the window, emitted before the closing snapshot.
+    const mark = setup.emitted.length;
+    await toggle(false);
+    const paused = (await lead()).at(-1)!;
+    assert.equal(paused.summary, "Read-along paused.");
+    assert.deepEqual(tab().readAlongWindows[0].offSeq, paused.seq + 1);
+    const after = setup.emitted.slice(mark);
+    const batchAt = after.findIndex(
+      (item) =>
+        item.kind === "batch" &&
+        item.batch.entries.some((entry) => entry.id === paused.id),
+    );
+    const closedAt = after.findIndex(
+      (item) =>
+        item.kind === "snapshot" &&
+        item.snapshot.rooms.find((r) => r.id === roomId)?.tabs[0]
+          .readAlongWindows[0].offSeq != null,
+    );
+    assert.ok(batchAt >= 0 && batchAt < closedAt);
+
+    await setup.send(tabId, "Private turn", { roomId });
+    await setup.settled(tabId, roomId);
+    const privateSeqs = (await lead())
+      .filter((entry) => entry.seq > paused.seq)
+      .map((entry) => entry.seq);
+    await toggle(true);
+    await setup.until(
+      async () => (await lead()).at(-1)!.summary === "Read-along resumed.",
+      "resumed notice",
+    );
+    const resumed = (await lead()).at(-1)!;
+    const windows = tab().readAlongWindows;
+    assert.equal(windows.length, 2);
+    assert.equal(windows[1].onSeq, resumed.seq);
+    for (const seq of privateSeqs)
+      assert.ok(
+        !windows.some(
+          (w) => w.onSeq <= seq && (w.offSeq === null || seq < w.offSeq),
+        ),
+      );
+
+    // An ascending page after a seq, as the publisher's backfill reads it.
+    const since = await setup.dispatch({
+      type: "tab.transcript",
+      roomId,
+      tabId,
+      afterSeq: paused.seq,
+      limit: 2,
+    });
+    assert.deepEqual(
+      since.transcript!.entries.map((entry) => entry.seq),
+      privateSeqs.slice(0, 2),
+    );
+    assert.equal(since.transcript!.nextSeq, privateSeqs[1]);
+  } finally {
+    setup.close();
+  }
+  // Covers R16: the switch and its windows survive a restart.
+  const restarted = await start(new FakeHarness("codex"), setup);
+  try {
+    const restored = restarted.service
+      .snapshot()
+      .rooms.find((item) => item.id === roomId)!.tabs[0];
+    assert.equal(restored.readAlong, true);
+    assert.equal(restored.readAlongWindows.length, 2);
+  } finally {
+    restarted.close();
+  }
+});
+
+test("a discarding switch-off closes the window where it began, with no paused notice", () =>
+  withHost(async (setup) => {
+    const room = {
+      ...structuredClone(setup.service.snapshot().rooms[0]),
+      id: randomUUID(),
+      workspace: null,
+      tabs: [],
+      shared: {
+        userId: randomUUID(),
+        project: "test",
+        isAdmin: true,
+        members: [],
+      },
+    };
+    await setup.dispatch({ type: "shared.import", room });
+    await setup.dispatch({
+      type: "tab.open",
+      roomId: room.id,
+      harness: "codex",
+    });
+    const tabId = setup.tabs(room.id)[0].id;
+    const toggle = (on: boolean, discard?: true) =>
+      setup.dispatch({
+        type: "tab.setReadAlong",
+        roomId: room.id,
+        tabId,
+        on,
+        ...(discard ? { discard } : {}),
+      });
+    await toggle(true);
+    await toggle(false, true);
+    const tab = setup.tab(tabId, room.id);
+    assert.equal(tab.readAlong, false);
+    assert.deepEqual(tab.readAlongWindows, [{ onSeq: 1, offSeq: 1 }]);
+    const entries = (
+      await setup.dispatch({ type: "tab.transcript", roomId: room.id, tabId })
+    ).transcript!.entries;
+    assert.deepEqual(entries, []);
+  }));
+
+test("only a closed chat can be deleted, and deleting removes its transcript", () =>
+  withHost(async (setup) => {
+    const tab = await setup.open();
+    await setup.send(tab.id, "Hello there");
+    await setup.settled(tab.id);
+    const remove = () =>
+      setup.dispatch({
+        type: "tab.delete",
+        roomId: setup.roomId,
+        tabId: tab.id,
+      });
+    await assert.rejects(remove(), /Only a closed chat/);
+    await setup.closeTab(tab.id);
+    assert.ok(setup.journal.lastSeq(tab.id) > 0);
+    await remove();
+    assert.deepEqual(setup.service.snapshot().rooms[0].closedTabs, []);
+    assert.equal(setup.journal.lastSeq(tab.id), 0);
   }));

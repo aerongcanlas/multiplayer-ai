@@ -98,6 +98,7 @@ const tabRoom = (userId: string, status: Tab["status"] = "idle"): Room => {
         },
         status,
         readAlong: false,
+        readAlongWindows: [],
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       },
@@ -223,4 +224,105 @@ test("losing membership stops running tabs in that room", async () => {
   assert.deepEqual(requests, [
     { type: "tab.stop", roomId: room.id, tabId: room.tabs[0].id },
   ]);
+});
+
+test("read-along turns on only after a membership check and turns off while offline", async () => {
+  let online = true;
+  const room = tabRoom(randomUUID());
+  const tabId = room.tabs[0].id;
+  const { coordinator, requests, shared } = sharedSetup(room, async () => {
+    if (!online) throw new Error("offline");
+  });
+  const toggle = (on: boolean) =>
+    coordinator.dispatch({
+      type: "tab.setReadAlong",
+      roomId: room.id,
+      tabId,
+      on,
+    });
+  assert.equal((await toggle(true)).ok, true);
+  assert.deepEqual(
+    requests.map((request) => request.type),
+    ["shared.import", "tab.setReadAlong"],
+  );
+  // Other hosts' read-along rows never reach the journal.
+  const imported = requests[0] as Extract<
+    SupervisorRequest["command"],
+    { type: "shared.import" }
+  >;
+  assert.equal(imported.room.shared?.sharedTabs, undefined);
+  requests.length = 0;
+  online = false;
+  (shared.state as { status: string }).status = "offline";
+  assert.equal((await toggle(true)).ok, false);
+  assert.equal((await toggle(false)).ok, true);
+  assert.deepEqual(
+    requests.map((request) => request.type),
+    ["tab.setReadAlong"],
+  );
+  shared.rooms = [];
+  online = true;
+  assert.equal((await toggle(true)).ok, false);
+  const local = tabRoom(randomUUID());
+  delete local.shared;
+  const { coordinator: localOnly, requests: localRequests } =
+    sharedSetup(local);
+  const refused = await localOnly.dispatch({
+    type: "tab.setReadAlong",
+    roomId: local.id,
+    tabId: local.tabs[0].id,
+    on: true,
+  });
+  assert.deepEqual(refused, {
+    ok: false,
+    error: "Read-along needs a shared room.",
+  });
+  assert.deepEqual(localRequests, []);
+});
+
+test("own-device rows are hidden and this account's other desktops are labelled", () => {
+  const userId = randomUUID();
+  const room = tabRoom(userId);
+  const { coordinator, shared } = sharedSetup(room);
+  const hostId = coordinator.snapshot()!.hostId;
+  const row = (hostIdValue: string, deviceId: string) => ({
+    tabId: randomUUID(),
+    roomId: room.id,
+    hostId: hostIdValue,
+    hostName: "Name",
+    deviceId,
+    title: "Tab",
+    harness: "codex" as const,
+    model: "m",
+    status: "running" as const,
+    switchOn: true,
+    rev: 1,
+    updatedAt: "now",
+  });
+  const own = row(userId, hostId);
+  const otherDevice = row(userId, "second-desktop");
+  const spoofed = row(randomUUID(), hostId);
+  shared.state = {
+    ...shared.state,
+    auth: "signed_in",
+    account: { id: userId, name: "Me" },
+  } as never;
+  shared.rooms = [
+    {
+      ...shared.rooms[0],
+      shared: {
+        ...shared.rooms[0].shared!,
+        sharedTabs: [own, otherDevice, spoofed],
+      },
+    },
+  ];
+  coordinator.changed();
+  const listed = coordinator.snapshot()!.rooms[0].shared!.sharedTabs!;
+  assert.deepEqual(
+    listed.map((tab) => [tab.tabId, tab.sameUser ?? false]),
+    [
+      [otherDevice.tabId, true],
+      [spoofed.tabId, false],
+    ],
+  );
 });

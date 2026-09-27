@@ -8,7 +8,7 @@ import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { Journal } from "./journal";
 import { JOURNAL_SCHEMA_VERSION, migrate, steps } from "./migrations";
-import type { TranscriptEntry } from "../shared/tabs";
+import { tabSchema, type Tab, type TranscriptEntry } from "../shared/tabs";
 
 const directory = () => mkdtemp(join(tmpdir(), "multiplayer-journal-"));
 const version = (file: string) => {
@@ -275,7 +275,8 @@ test("tabs, transcript pages, and settings persist", async () => {
     readAlong: false,
     createdAt: now,
     updatedAt: now,
-  });
+    // A tab saved before read-along windows existed.
+  } as Omit<Tab, "readAlongWindows"> as Tab);
   journal.save(snapshot);
   const entries: TranscriptEntry[] = Array.from({ length: 5 }, (_, index) => ({
     id: randomUUID(),
@@ -295,6 +296,11 @@ test("tabs, transcript pages, and settings persist", async () => {
 
   const reopened = new Journal(file);
   assert.equal(reopened.load().rooms[0].tabs[0].id, tabId);
+  assert.deepEqual(reopened.load().rooms[0].tabs[0].readAlongWindows, []);
+  assert.equal(
+    tabSchema.safeParse(reopened.load().rooms[0].tabs[0]).success,
+    true,
+  );
   const latest = reopened.transcriptPage(tabId, undefined, 2);
   assert.deepEqual(
     latest.entries.map((entry) => entry.summary),
@@ -400,6 +406,18 @@ test("sub-agent entries page by agent key and cards load apart from both", async
     journal.transcriptPage(tabId).entries.map((entry) => entry.seq),
     [1, 5, 6],
   );
+  // The ascending page skips cards and sub-agent entries other than requests, like the lead page.
+  const since = journal.transcriptSince(tabId, 1, 1);
+  assert.deepEqual(
+    since.entries.map((entry) => entry.seq),
+    [5],
+  );
+  assert.equal(since.nextSeq, 5);
+  assert.deepEqual(
+    journal.transcriptSince(tabId, 5).entries.map((entry) => entry.seq),
+    [6],
+  );
+  assert.equal(journal.transcriptSince(tabId, 5).nextSeq, null);
   assert.deepEqual(
     journal
       .transcriptPage(tabId, undefined, 200, "task-1")

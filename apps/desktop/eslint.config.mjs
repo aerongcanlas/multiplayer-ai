@@ -36,4 +36,23 @@ export default tseslint.config(
       ],
     },
   },
+  // Renderer unit tests run under node:test but may still not reach main, preload, or Electron.
+  {
+    files: ["src/renderer/**/*.test.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            "electron",
+            "next/*",
+            "@supabase/*",
+            "**/main/*",
+            "**/supervisor/*",
+            "**/preload/*",
+          ],
+        },
+      ],
+    },
+  },
 );

@@ -1,26 +1,14 @@
 import { GitBranch } from "lucide-react";
-import { useEffect, useState } from "react";
 import {
   HARNESS_LABELS,
   type AgentEntry,
   type HarnessState,
   type Tab,
 } from "../../shared/tabs";
-import { durationLabel, timeLabel } from "../lib/time";
+import { durationLabel, timeLabel, useNow } from "../lib/time";
 import { useAgents } from "../lib/transcript-store";
 import { plural } from "../lib/utils";
 import { AGENT_STATUS_LABELS } from "./tabs/labels";
-
-/** A clock that ticks every second while `active`, for running cards' elapsed time. */
-function useNow(active: boolean) {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!active) return;
-    const timer = setInterval(() => setNow(Date.now()), 1_000);
-    return () => clearInterval(timer);
-  }, [active]);
-  return now;
-}
 
 /** A turn's cards, newest turn first, each card followed by the sub-agents it spawned. */
 function groupByTurn(cards: AgentEntry[]) {
