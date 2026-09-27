@@ -127,6 +127,7 @@ await run.execute(
         "setLoadout",
         "sendToTab",
         "stopTab",
+        "setReadAlong",
         "loadTranscript",
         "loadAgents",
         "resetTabSession",

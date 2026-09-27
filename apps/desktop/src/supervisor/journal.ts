@@ -35,7 +35,12 @@ export class Journal {
       const tabs = this.db
         .prepare("SELECT body FROM tabs ORDER BY position")
         .all()
-        .map((tab) => JSON.parse(tab.body as string) as Tab);
+        .map((tab) => JSON.parse(tab.body as string) as Tab)
+        // Tabs saved before read-along windows existed have none.
+        .map((tab) => ({
+          ...tab,
+          readAlongWindows: tab.readAlongWindows ?? [],
+        }));
       return {
         ...stored,
         protocolVersion: PROTOCOL_VERSION,
@@ -158,6 +163,27 @@ export class Journal {
       tabId,
       entries,
       nextSeq: rows.length > limit ? (entries[0]?.seq ?? null) : null,
+    };
+  }
+
+  /** The lead's entries after a seq, oldest first; `nextSeq` is the last one when more remain. */
+  transcriptSince(
+    tabId: string,
+    afterSeq: number,
+    limit = 200,
+  ): TranscriptPage {
+    const rows = this.db
+      .prepare(
+        "SELECT body FROM transcript_entries WHERE tab_id = ? AND kind <> 'agent' AND seq > ? AND (agent_key IS NULL OR kind IN ('approval', 'question')) ORDER BY seq LIMIT ?",
+      )
+      .all(tabId, afterSeq, limit + 1);
+    const entries = rows
+      .slice(0, limit)
+      .map((row) => JSON.parse(row.body as string) as TranscriptEntry);
+    return {
+      tabId,
+      entries,
+      nextSeq: rows.length > limit ? (entries.at(-1)?.seq ?? null) : null,
     };
   }
 

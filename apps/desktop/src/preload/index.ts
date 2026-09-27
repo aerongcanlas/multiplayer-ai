@@ -65,6 +65,8 @@ const bridge: DesktopBridge = {
     invoke({ type: "tab.setLoadout", roomId, tabId, loadout }),
   sendToTab: (input) => invoke({ ...input, type: "tab.send" }),
   stopTab: (roomId, tabId) => invoke({ type: "tab.stop", roomId, tabId }),
+  setReadAlong: (roomId, tabId, on) =>
+    invoke({ type: "tab.setReadAlong", roomId, tabId, on }),
   loadTranscript: (roomId, tabId, beforeSeq, agentKey) =>
     invoke({
       type: "tab.transcript",

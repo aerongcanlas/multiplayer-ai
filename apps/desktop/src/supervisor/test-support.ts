@@ -10,7 +10,7 @@ import { HarnessRegistry } from "./harnesses/registry";
 import { FakeHarness } from "./harnesses/fake";
 import { ProgramManager } from "./programs/manager";
 import { HARNESS_MANIFEST } from "./programs/manifest";
-import type { SupervisorRequest } from "../shared/contracts";
+import type { Snapshot, SupervisorRequest } from "../shared/contracts";
 import type {
   HarnessId,
   Loadout,
@@ -57,6 +57,11 @@ export async function start(
   const journal = new Journal(join(dir, "journal.sqlite"));
   journal.setSetting(`harness.${fake.id}.executable`, executable);
   const batches: TranscriptBatch[] = [];
+  // Snapshots and transcript batches in the order the supervisor emitted them.
+  const emitted: (
+    | { kind: "snapshot"; snapshot: Snapshot }
+    | { kind: "batch"; batch: TranscriptBatch }
+  )[] = [];
   let changed = () => {};
   const registry = new HarnessRegistry({
     adapters: [fake],
@@ -66,12 +71,19 @@ export async function start(
     environmentTimeoutMs: 0,
   });
   registry.setEnvironment({ PATH: process.env.PATH ?? "" });
-  const service = new SupervisorService(journal, () => {}, {
-    registry,
-    publishTranscript: (items) => batches.push(...items),
-    transcriptInterval: 5,
-    stopTimeoutMs: 300,
-  });
+  const service = new SupervisorService(
+    journal,
+    (snapshot) => emitted.push({ kind: "snapshot", snapshot }),
+    {
+      registry,
+      publishTranscript: (items) => {
+        batches.push(...items);
+        for (const batch of items) emitted.push({ kind: "batch", batch });
+      },
+      transcriptInterval: 5,
+      stopTimeoutMs: 300,
+    },
+  );
   changed = () => service.harnessesChanged();
   await registry.refresh(fake.id);
   const roomId = service.snapshot().rooms[0].id;
@@ -166,6 +178,7 @@ export async function start(
     registry,
     fake,
     batches,
+    emitted,
     roomId,
     dispatch,
     tabs,

@@ -62,6 +62,8 @@ export class SupervisorService {
         },
         transcriptPage: (tabId, beforeSeq, limit, agentKey) =>
           journal.transcriptPage(tabId, beforeSeq, limit, agentKey),
+        transcriptSince: (tabId, afterSeq, limit) =>
+          journal.transcriptSince(tabId, afterSeq, limit),
         agentCards: (tabId) => journal.agentCards(tabId),
         pendingEntries: (tabId) => journal.pendingEntries(tabId),
         deleteTranscript: (tabId) => journal.deleteTranscript(tabId),

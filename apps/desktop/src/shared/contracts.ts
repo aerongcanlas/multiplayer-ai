@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type {
   CollaborationState,
+  ReadAlongStatus,
   RoomNotice,
   SharedRoomScope,
 } from "./collaboration";
@@ -137,6 +138,8 @@ export interface Snapshot {
   hostId: string;
   rooms: Room[];
   sync: "local-only";
+  // Main's publisher status per read-along tab, keyed by tab ID.
+  readAlong?: Record<string, ReadAlongStatus>;
 }
 
 export type Result =
@@ -182,6 +185,7 @@ export interface DesktopBridge {
     input: Omit<Extract<Command, { type: "tab.send" }>, "type">,
   ): Promise<Result>;
   stopTab(roomId: string, tabId: string): Promise<Result>;
+  setReadAlong(roomId: string, tabId: string, on: boolean): Promise<Result>;
   // The page arrives in the Result's `transcript` field.
   loadTranscript(
     roomId: string,

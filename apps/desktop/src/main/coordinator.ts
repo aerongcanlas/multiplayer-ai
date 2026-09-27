@@ -21,6 +21,10 @@ const DIRECT = new Set([
   "approval.respond",
   "question.answer",
 ]);
+// Turning read-along off never waits on the network, so an offline host can always stop sharing.
+const isDirect = (command: Command) =>
+  DIRECT.has(command.type) ||
+  (command.type === "tab.setReadAlong" && !command.on);
 
 interface Supervisor {
   request(command: SupervisorRequest["command"]): Promise<Result>;
@@ -150,14 +154,23 @@ export class DesktopCoordinator {
         } else {
           if (command.type === "invite.create")
             throw new Error("Invitations are available in shared rooms.");
-          if (room.shared && !DIRECT.has(command.type)) {
+          if (command.type === "tab.setReadAlong" && command.on && !room.shared)
+            throw new Error("Read-along needs a shared room.");
+          if (room.shared && !isDirect(command)) {
             await this.shared.refresh();
             room = this.shared.rooms.find((item) => item.id === command.roomId);
             if (!room || this.shared.state.status !== "connected")
               throw new Error(
                 "Reconnect and confirm room membership before running locally.",
               );
-            await this.localCommand({ type: "shared.import", room });
+            // Other hosts' read-along tabs stay in main; the journal never stores them.
+            await this.localCommand({
+              type: "shared.import",
+              room: {
+                ...room,
+                shared: { ...room.shared!, sharedTabs: undefined },
+              },
+            });
           }
           if (command.type === "workspace.select") {
             const workspace = await this.chooseWorkspace();
