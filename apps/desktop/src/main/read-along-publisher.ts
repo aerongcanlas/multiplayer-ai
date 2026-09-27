@@ -16,6 +16,8 @@ const MAX_ENTRIES = 200;
 const MAX_BYTES = 1_000_000;
 const MAX_TEXT = 200_000;
 const MAX_DETAIL_BYTES = 65_000;
+// The transcript writer keeps only an entry's last 200k characters, so past that its start moves.
+const WRITER_CLAMP = 200_000;
 
 // The whitelisted body a viewer receives for one entry.
 export interface PublishedEntry {
@@ -124,6 +126,8 @@ interface Shared {
   // Per-entry version counters and the body last staged for each.
   versions: Map<number, { version: number; body?: string }>;
   staged: Map<number, PublishedEntry>;
+  // Held entries whose projection may have changed since it was last staged.
+  dirty: Set<number>;
   // Turns with a later entry or their turn marker, which complete earlier streaming entries.
   turnLast: Map<string, number>;
   ended: Set<string>;
@@ -132,6 +136,8 @@ interface Shared {
   inflight: boolean;
   timer?: ReturnType<typeof setTimeout>;
   stopped?: "not_member" | "migration_missing";
+  // The tab closed: every held entry counts as complete for its last publish.
+  closing?: boolean;
 }
 
 type Collaboration = Pick<
@@ -221,6 +227,7 @@ export class ReadAlongPublisher {
             raw: new Map(),
             versions: new Map(),
             staged: new Map(),
+            dirty: new Set(),
             turnLast: new Map(),
             ended: new Set(),
             seeded: false,
@@ -232,6 +239,8 @@ export class ReadAlongPublisher {
         }
         const reopened =
           tab.readAlongWindows.length > shared.tab.readAlongWindows.length;
+        // Leaving running completes every streaming entry held.
+        if (tab.status !== shared.tab.status) this.dirtyStreaming(shared);
         shared.tab = tab;
         if (reopened && shared.stopped) {
           shared.stopped = undefined;
@@ -267,6 +276,7 @@ export class ReadAlongPublisher {
         clearTimeout(shared.timer);
         shared.timer = undefined;
         shared.staged.clear();
+        shared.dirty.clear();
         shared.versions.clear();
         shared.raw.clear();
         shared.lastRecord = undefined;
@@ -305,19 +315,31 @@ export class ReadAlongPublisher {
   private ingest(shared: Shared, entry: TranscriptEntry) {
     if (!inReadAlongWindow(shared.tab.readAlongWindows, entry.seq)) return;
     const held = shared.raw.get(entry.seq);
-    if (held && held.updatedAt >= entry.updatedAt) return;
+    if (held && held.updatedAt > entry.updatedAt) return;
     if (entry.turnId && !entry.agentKey) {
       shared.turnLast.set(
         entry.turnId,
         Math.max(shared.turnLast.get(entry.turnId) ?? 0, entry.seq),
       );
       if (entry.kind === "turn") shared.ended.add(entry.turnId);
+      // A later entry of the turn may complete its earlier streaming entries.
+      this.dirtyStreaming(shared, entry.turnId);
     }
     shared.raw.set(entry.seq, entry);
+    shared.dirty.add(entry.seq);
+  }
+
+  private dirtyStreaming(shared: Shared, turnId?: string) {
+    for (const held of shared.raw.values())
+      if (
+        STREAMING_KINDS.has(held.kind) &&
+        (turnId === undefined || held.turnId === turnId)
+      )
+        shared.dirty.add(held.seq);
   }
 
   private complete(shared: Shared, entry: TranscriptEntry) {
-    if (!STREAMING_KINDS.has(entry.kind)) return true;
+    if (!STREAMING_KINDS.has(entry.kind) || shared.closing) return true;
     if (shared.tab.status !== "running") return true;
     if (!entry.turnId) return false;
     return (
@@ -339,25 +361,60 @@ export class ReadAlongPublisher {
     };
   }
 
-  // Projects every held entry, bumping a version only when its body changed.
+  // Schedules a tick when entries changed or the record differs from the last one published.
   private restage(shared: Shared) {
     if (shared.stopped) return;
-    if (shared.seeded)
-      for (const entry of shared.raw.values()) {
-        const body = projectEntry(entry, this.complete(shared, entry));
-        if (!body) continue;
-        const json = JSON.stringify(body);
-        const known = shared.versions.get(entry.seq);
-        if (known?.body === json) continue;
-        const version = (known?.version ?? 0) + 1;
-        shared.versions.set(entry.seq, { version, body: json });
-        shared.staged.set(entry.seq, { ...body, version });
-      }
     if (
+      shared.dirty.size ||
       shared.staged.size ||
       JSON.stringify(this.record(shared)) !== shared.lastRecord
     )
       this.schedule(shared);
+  }
+
+  // Projects and masks the changed entries once per tick, bumping a version only when a body
+  // changed.
+  private project(shared: Shared) {
+    if (!shared.seeded || shared.stopped) return;
+    for (const seq of shared.dirty) {
+      const entry = shared.raw.get(seq);
+      if (!entry) continue;
+      const known = shared.versions.get(seq);
+      // Past the writer's clamp the text no longer only grows; keep what was published.
+      if (
+        STREAMING_KINDS.has(entry.kind) &&
+        entry.summary.length >= WRITER_CLAMP &&
+        known
+      )
+        continue;
+      const body = projectEntry(entry, this.complete(shared, entry));
+      if (!body) continue;
+      const json = JSON.stringify(body);
+      if (known?.body === json) continue;
+      const version = (known?.version ?? 0) + 1;
+      shared.versions.set(seq, { version, body: json });
+      shared.staged.set(seq, { ...body, version });
+    }
+    shared.dirty.clear();
+  }
+
+  // Up to one publish's worth of staged entries, oldest first.
+  private batch(shared: Shared) {
+    const entries: PublishedEntry[] = [];
+    let bytes = 0;
+    for (const entry of [...shared.staged.values()].sort(
+      (a, b) => a.seq - b.seq,
+    )) {
+      const size = JSON.stringify(entry).length;
+      if (
+        entries.length === MAX_ENTRIES ||
+        (entries.length && bytes + size > MAX_BYTES)
+      )
+        break;
+      entries.push(entry);
+      bytes += size;
+    }
+    return entries;
   }
 
   private schedule(shared: Shared) {
@@ -373,33 +430,22 @@ export class ReadAlongPublisher {
   async flush(tabId: string) {
     const shared = this.tabs.get(tabId);
     if (!shared || shared.stopped) return;
+    this.project(shared);
     if (
       shared.inflight ||
       !this.ready ||
       !shared.seeded ||
       !this.accountRoom(shared.roomId)
     ) {
-      if (shared.inflight || shared.staged.size) this.schedule(shared);
+      if (shared.inflight || shared.staged.size || shared.dirty.size)
+        this.schedule(shared);
       this.notify();
       return;
     }
     const record = this.record(shared);
     if (!shared.staged.size && JSON.stringify(record) === shared.lastRecord)
       return;
-    const entries: PublishedEntry[] = [];
-    let bytes = 0;
-    for (const entry of [...shared.staged.values()].sort(
-      (a, b) => a.seq - b.seq,
-    )) {
-      const size = JSON.stringify(entry).length;
-      if (
-        entries.length === MAX_ENTRIES ||
-        (entries.length && bytes + size > MAX_BYTES)
-      )
-        break;
-      entries.push(entry);
-      bytes += size;
-    }
+    const entries = this.batch(shared);
     const epoch = this.epoch;
     shared.inflight = true;
     const outcome = await this.collaboration.readAlong<Head>(
@@ -443,6 +489,7 @@ export class ReadAlongPublisher {
     clearTimeout(shared.timer);
     shared.timer = undefined;
     shared.staged.clear();
+    shared.dirty.clear();
     shared.raw.clear();
     this.notify();
     if (shared.tab.readAlong)
@@ -459,16 +506,21 @@ export class ReadAlongPublisher {
   private async closeTab(tabId: string, shared: Shared) {
     this.tabs.delete(tabId);
     clearTimeout(shared.timer);
+    // The last publish carries every held entry in its final state, then the closed record.
+    shared.closing = true;
+    this.dirtyStreaming(shared);
+    this.project(shared);
     // Offline closes are caught by the next reconcile, which lists live tabs only.
     if (
       !this.ready ||
-      shared.lastRecord === undefined ||
+      !shared.seeded ||
+      (shared.lastRecord === undefined && !shared.staged.size) ||
       !this.accountRoom(shared.roomId)
     )
       return;
     await this.collaboration.readAlong("desktop_tab_share_publish", {
       p_tab: { ...this.record(shared), status: "closed", switchOn: false },
-      p_entries: [],
+      p_entries: this.batch(shared),
     });
   }
 
@@ -562,6 +614,7 @@ export class ReadAlongPublisher {
     }
     shared.seeded = true;
     shared.lastRecord = undefined;
+    for (const seq of shared.raw.keys()) shared.dirty.add(seq);
     this.restage(shared);
     this.notify();
   }

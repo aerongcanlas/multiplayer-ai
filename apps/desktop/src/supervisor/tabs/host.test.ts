@@ -277,6 +277,9 @@ test("a closed chat survives a restart and reopens with its transcript and sessi
     const reopened = restarted.tab(tabId);
     assert.equal(reopened.closedAt, undefined);
     assert.ok(reopened.sessionId);
+    // A reopened chat is private until the host shares it again.
+    assert.equal(reopened.readAlong, false);
+    assert.deepEqual(reopened.readAlongWindows, []);
     assert.equal((await restarted.transcript(tabId)).length, before);
     await assert.rejects(
       restarted.dispatch({

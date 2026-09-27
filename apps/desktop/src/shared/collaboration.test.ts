@@ -1,7 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { asSharedRoom, sharedSnapshotSchema } from "./collaboration";
+import {
+  asSharedRoom,
+  sharedPullSchema,
+  sharedSnapshotSchema,
+} from "./collaboration";
 
 const room = () => ({
   id: randomUUID(),
@@ -51,5 +55,51 @@ test("snapshots parse with and without read-along rows and server time", () => {
   assert.deepEqual(
     asSharedRoom(current.rooms[0], userId, "p").shared?.sharedTabs,
     [tab],
+  );
+});
+
+test("pull pages accept fields a newer server adds and a host without a name", () => {
+  const record = {
+    tabId: randomUUID(),
+    roomId: randomUUID(),
+    hostId: randomUUID(),
+    hostName: null,
+    deviceId: randomUUID(),
+    title: "Tab",
+    harness: "codex",
+    model: "m",
+    status: "idle",
+    switchOn: true,
+    rev: 1,
+    updatedAt: "now",
+  };
+  const page = sharedPullSchema.parse({
+    record,
+    entries: [],
+    next: null,
+    now: "now",
+    addedLater: true,
+  });
+  assert.equal(page.record.hostName, "A member");
+  // Rows stay strict.
+  assert.equal(
+    sharedPullSchema.safeParse({
+      record,
+      entries: [
+        {
+          seq: 1,
+          kind: "user",
+          share: "full",
+          summary: "s",
+          version: 1,
+          rev: 1,
+          updatedAt: "now",
+          agentKey: "leak",
+        },
+      ],
+      next: null,
+      now: "now",
+    }).success,
+    false,
   );
 });

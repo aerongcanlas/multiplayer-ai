@@ -109,7 +109,12 @@ export function ChatList({
   const chats = [
     ...room.tabs.map((tab) => ({ tab, closed: false })),
     ...(room.closedTabs ?? []).map((tab) => ({ tab, closed: true })),
-  ].sort((a, b) => b.tab.updatedAt.localeCompare(a.tab.updatedAt));
+    // Ordered by when a chat opened or closed, so status updates never reorder rows.
+  ].sort((a, b) =>
+    (b.tab.closedAt ?? b.tab.createdAt).localeCompare(
+      a.tab.closedAt ?? a.tab.createdAt,
+    ),
+  );
   if (!chats.length) return null;
   function openMenu(tab: Tab, event: React.MouseEvent<HTMLButtonElement>) {
     event.preventDefault();

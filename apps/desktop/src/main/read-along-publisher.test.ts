@@ -652,3 +652,48 @@ test("a migration missing from the project stops that tab only", async () => {
   assert.equal(s.collaboration.state.status, "connected");
   s.publisher.close();
 });
+
+test("an update stamped in the same millisecond still replaces the held entry", async () => {
+  const s = setup();
+  s.local();
+  await idle();
+  const first = s.entry(3, { summary: "Partial " });
+  s.emit(first);
+  s.emit({ ...first, summary: "Partial and final " });
+  await s.flush();
+  assert.equal(s.publishes()[0].entries[0].text, "Partial and final ");
+  s.publisher.close();
+});
+
+test("closing publishes the held entries in their final state with the closed record", async () => {
+  const s = setup();
+  s.local();
+  await idle();
+  s.emit(s.entry(3, { summary: "Streaming reply ends here" }));
+  s.room.tabs = [];
+  s.local();
+  await idle();
+  const closing = s.publishes().at(-1)!;
+  assert.equal(closing.record.status, "closed");
+  assert.deepEqual(
+    closing.entries.map((entry) => entry.text),
+    ["Streaming reply ends here"],
+  );
+  s.publisher.close();
+});
+
+test("text past the writer's clamp stops updating instead of shifting", async () => {
+  const s = setup();
+  s.local();
+  await idle();
+  const head = "a ".repeat(99_999);
+  s.emit(s.entry(3, { summary: head }));
+  await s.flush();
+  const published = s.publishes()[0].entries[0].text;
+  // The writer now keeps only the tail, so the start moves.
+  s.emit(s.entry(3, { summary: ("b " + head).slice(-200_000) + "more " }));
+  await s.flush();
+  assert.equal(s.publishes().length, 1);
+  assert.equal(published, head);
+  s.publisher.close();
+});

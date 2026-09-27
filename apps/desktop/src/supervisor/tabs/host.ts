@@ -420,6 +420,9 @@ export class TabHost {
         throw new Error("Close a tab before reopening another.");
       room.closedTabs = room.closedTabs!.filter((item) => item.id !== tabId);
       delete tab.closedAt;
+      // Its shared rows stay closed for viewers until the host turns read-along on again.
+      tab.readAlong = false;
+      tab.readAlongWindows = [];
       // A reopened tab resumes its harness session on the next message.
       tab.status = this.registry.ready(tab.loadout.harness)
         ? "idle"

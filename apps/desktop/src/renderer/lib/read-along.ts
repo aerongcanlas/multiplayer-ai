@@ -1,4 +1,3 @@
-import { useEffect, useState } from "react";
 import type {
   ReadAlongStatus,
   SharedEntry,
@@ -69,16 +68,6 @@ export const asTranscriptEntry = (
   createdAt: entry.updatedAt,
   updatedAt: entry.updatedAt,
 });
-
-/** Ticks once a second so ages stay current. */
-export function useNow() {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1_000);
-    return () => clearInterval(timer);
-  }, []);
-  return now;
-}
 
 /** The host's switch caption. */
 export function switchCaption(

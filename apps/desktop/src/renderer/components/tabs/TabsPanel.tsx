@@ -20,7 +20,6 @@ import {
   SHARED_STATUS_LABELS,
   sharedGroups,
   switchCaption,
-  useNow,
 } from "../../lib/read-along";
 import { useAgents } from "../../lib/transcript-store";
 import { plural } from "../../lib/utils";
@@ -166,7 +165,6 @@ export function TabsPanel({
   connected: boolean;
   clockOffsetMs: number | undefined;
 }) {
-  const now = useNow();
   const sharedTabs = room.shared?.sharedTabs ?? [];
   const [closing, setClosing] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -344,7 +342,7 @@ export function TabsPanel({
                     type="button"
                     role="tab"
                     aria-selected={item.tabId === sharedTabId}
-                    title={`${item.title} · ${SHARED_STATUS_LABELS[item.status]} · ${ageLabel(item.updatedAt, connected, clockOffsetMs, now)}`}
+                    title={`${item.title} · ${SHARED_STATUS_LABELS[item.status]} · ${ageLabel(item.updatedAt, connected, clockOffsetMs)}`}
                     onClick={() => onSelectShared(item.tabId)}
                   >
                     <span

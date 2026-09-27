@@ -1,13 +1,13 @@
 import { Eye } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import type { SharedTab } from "../../../shared/collaboration";
 import { HARNESS_LABELS } from "../../../shared/tabs";
 import {
   ageLabel,
   asTranscriptEntry,
   SHARED_STATUS_LABELS,
-  useNow,
 } from "../../lib/read-along";
+import { useNow } from "../../lib/time";
 import {
   loadEarlierShared,
   useSharedTranscript,
@@ -15,6 +15,20 @@ import {
 import { ReadOnlyTranscript } from "./TranscriptView";
 
 const LEAVE_AFTER_MS = 2_500;
+
+// Ticks on its own, so only the age re-renders each second, not the transcript.
+function Age({
+  updatedAt,
+  connected,
+  clockOffsetMs,
+}: {
+  updatedAt: string;
+  connected: boolean;
+  clockOffsetMs: number | undefined;
+}) {
+  const now = useNow();
+  return <>{ageLabel(updatedAt, connected, clockOffsetMs, now)}</>;
+}
 
 /**
  * Another host's read-along tab: a header with host, harness, status, and age, then the shared
@@ -38,7 +52,6 @@ export function SharedTabView({
   onLeave: () => void;
 }) {
   const transcript = useSharedTranscript(roomId, tabId);
-  const now = useNow();
   const record = transcript.record ?? listed ?? null;
   const closed =
     record?.status === "closed" ||
@@ -49,8 +62,9 @@ export function SharedTabView({
     const timer = setTimeout(onLeave, LEAVE_AFTER_MS);
     return () => clearTimeout(timer);
   }, [closed, onLeave]);
-  const entries = transcript.entries.map((entry) =>
-    asTranscriptEntry(tabId, entry),
+  const entries = useMemo(
+    () => transcript.entries.map((entry) => asTranscriptEntry(tabId, entry)),
+    [tabId, transcript.entries],
   );
   const live = record?.status === "running";
   return (
@@ -67,13 +81,16 @@ export function SharedTabView({
           {record
             ? `${record.sameUser ? "You on another desktop" : record.hostName} · ${HARNESS_LABELS[record.harness]}${record.model ? ` · ${record.model}` : ""}`
             : ""}
-          {record &&
-            ` · ${ageLabel(
-              record.updatedAt,
-              connected && transcript.state !== "reconnecting",
-              clockOffsetMs,
-              now,
-            )}`}
+          {record && (
+            <>
+              {" · "}
+              <Age
+                updatedAt={record.updatedAt}
+                connected={connected && transcript.state !== "reconnecting"}
+                clockOffsetMs={clockOffsetMs}
+              />
+            </>
+          )}
         </span>
         <span className="subtle">Read-only</span>
       </div>

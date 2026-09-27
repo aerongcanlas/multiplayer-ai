@@ -32,7 +32,12 @@ export const sharedTabSchema = z.object({
   tabId: z.uuid(),
   roomId: z.uuid(),
   hostId: z.uuid(),
-  hostName: z.string().max(200),
+  // A host without a profile row has no name.
+  hostName: z
+    .string()
+    .max(200)
+    .nullable()
+    .transform((name) => name ?? "A member"),
   deviceId: deviceIdSchema,
   title: z.string().max(200),
   harness: harnessIdSchema,
@@ -81,20 +86,19 @@ export const sharedEntrySchema = z
   })
   .strict();
 export type SharedEntry = z.infer<typeof sharedEntrySchema>;
-export const sharedPullSchema = z
-  .object({
-    record: sharedTabSchema,
-    entries: z.array(sharedEntrySchema).max(200),
-    next: z
-      .object({
-        rev: z.number().int().nonnegative(),
-        seq: z.number().int().nonnegative(),
-      })
-      .strict()
-      .nullable(),
-    now: z.string().max(64),
-  })
-  .strict();
+// The envelope ignores fields a newer server adds; rows stay strict.
+export const sharedPullSchema = z.object({
+  record: sharedTabSchema,
+  entries: z.array(sharedEntrySchema).max(200),
+  next: z
+    .object({
+      rev: z.number().int().nonnegative(),
+      seq: z.number().int().nonnegative(),
+    })
+    .strict()
+    .nullable(),
+  now: z.string().max(64),
+});
 
 // What main sends the renderer about the one watched shared tab.
 export type SharedTranscriptMessage =
