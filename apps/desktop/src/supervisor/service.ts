@@ -192,7 +192,10 @@ export class SupervisorService {
       command.type === "auth.signOut" ||
       command.type === "shared.refresh" ||
       command.type === "room.join" ||
-      command.type === "invite.create"
+      command.type === "invite.create" ||
+      command.type === "sharedTab.watch" ||
+      command.type === "sharedTab.unwatch" ||
+      command.type === "sharedTab.load"
     )
       throw new Error(
         "Shared room operations require the main-process connection.",

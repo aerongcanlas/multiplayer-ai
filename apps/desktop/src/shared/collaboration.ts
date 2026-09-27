@@ -47,6 +47,76 @@ export type SharedTab = z.infer<typeof sharedTabSchema> & {
   sameUser?: boolean;
 };
 
+// One published entry as a viewer receives it; main parses every pulled row with this schema.
+export const sharedEntrySchema = z
+  .object({
+    seq: z.number().int().positive(),
+    kind: z.enum([
+      "user",
+      "assistant",
+      "plan",
+      "tool",
+      "approval",
+      "notice",
+      "error",
+      "turn",
+    ]),
+    share: z.enum(["full", "summary"]),
+    summary: z.string().max(400),
+    text: z.string().max(200_000).optional(),
+    detail: z.string().max(65_536).optional(),
+    state: z
+      .enum(["pending", "accepted", "declined", "answered", "cancelled"])
+      .optional(),
+    outcome: z
+      .enum(["completed", "stopped", "failed", "interrupted"])
+      .optional(),
+    notice: z
+      .string()
+      .regex(/^[a-z_]{1,40}$/)
+      .optional(),
+    version: z.number().int().positive(),
+    rev: z.number().int().positive(),
+    updatedAt: z.string().max(64),
+  })
+  .strict();
+export type SharedEntry = z.infer<typeof sharedEntrySchema>;
+export const sharedPullSchema = z
+  .object({
+    record: sharedTabSchema,
+    entries: z.array(sharedEntrySchema).max(200),
+    next: z
+      .object({
+        rev: z.number().int().nonnegative(),
+        seq: z.number().int().nonnegative(),
+      })
+      .strict()
+      .nullable(),
+    now: z.string().max(64),
+  })
+  .strict();
+
+// What main sends the renderer about the one watched shared tab.
+export type SharedTranscriptMessage =
+  | {
+      type: "entries";
+      roomId: string;
+      tabId: string;
+      record: SharedTab;
+      entries: SharedEntry[];
+      // Set on the initial page and "load earlier" pages: the seq to page before, or null.
+      earlierSeq?: number | null;
+      now: string;
+    }
+  | {
+      type: "status";
+      roomId: string;
+      tabId: string;
+      state: "loading" | "failed" | "reconnecting" | "live" | "unshared";
+    }
+  // The account changed or signed out: drop every shared transcript.
+  | { type: "clear" };
+
 // What the host's switch caption shows for one tab.
 export type ReadAlongStatus =
   | { state: "publishing" }

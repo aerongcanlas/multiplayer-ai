@@ -279,3 +279,50 @@ test("read-along turns on only after a membership check and turns off while offl
   });
   assert.deepEqual(localRequests, []);
 });
+
+test("own-device rows are hidden and this account's other desktops are labelled", () => {
+  const userId = randomUUID();
+  const room = tabRoom(userId);
+  const { coordinator, shared } = sharedSetup(room);
+  const hostId = coordinator.snapshot()!.hostId;
+  const row = (hostIdValue: string, deviceId: string) => ({
+    tabId: randomUUID(),
+    roomId: room.id,
+    hostId: hostIdValue,
+    hostName: "Name",
+    deviceId,
+    title: "Tab",
+    harness: "codex" as const,
+    model: "m",
+    status: "running" as const,
+    switchOn: true,
+    rev: 1,
+    updatedAt: "now",
+  });
+  const own = row(userId, hostId);
+  const otherDevice = row(userId, "second-desktop");
+  const spoofed = row(randomUUID(), hostId);
+  shared.state = {
+    ...shared.state,
+    auth: "signed_in",
+    account: { id: userId, name: "Me" },
+  } as never;
+  shared.rooms = [
+    {
+      ...shared.rooms[0],
+      shared: {
+        ...shared.rooms[0].shared!,
+        sharedTabs: [own, otherDevice, spoofed],
+      },
+    },
+  ];
+  coordinator.changed();
+  const listed = coordinator.snapshot()!.rooms[0].shared!.sharedTabs!;
+  assert.deepEqual(
+    listed.map((tab) => [tab.tabId, tab.sameUser ?? false]),
+    [
+      [otherDevice.tabId, true],
+      [spoofed.tabId, false],
+    ],
+  );
+});

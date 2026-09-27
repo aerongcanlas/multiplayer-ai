@@ -37,6 +37,16 @@ export class DesktopCoordinator {
   private revision = 0;
   // The read-along publisher's per-tab status, shown by the host's switch.
   readAlongStatus?: () => NonNullable<Snapshot["readAlong"]>;
+  // Main's viewer for other hosts' read-along tabs.
+  viewer?: {
+    watch(roomId: string, tabId: string): Promise<void>;
+    unwatch(): void;
+    loadEarlier(
+      roomId: string,
+      tabId: string,
+      beforeSeq: number,
+    ): Promise<void>;
+  };
   constructor(
     private supervisor: Supervisor,
     private shared: Pick<
@@ -65,7 +75,27 @@ export class DesktopCoordinator {
   }
   changed() {
     if (!this.local) return;
+    const account = this.shared.state.account?.id;
     const sharedRooms = this.shared.rooms.map((remote) => {
+      // This desktop's own rows never list; this account's other desktops are labelled.
+      if (remote.shared?.sharedTabs)
+        remote = {
+          ...remote,
+          shared: {
+            ...remote.shared,
+            sharedTabs: remote.shared.sharedTabs
+              .filter(
+                (tab) =>
+                  !(
+                    tab.hostId === account &&
+                    tab.deviceId === this.local!.hostId
+                  ),
+              )
+              .map((tab) =>
+                tab.hostId === account ? { ...tab, sameUser: true } : tab,
+              ),
+          },
+        };
       const cached = this.local!.rooms.find(
         (room) =>
           room.id === remote.id &&
@@ -130,7 +160,18 @@ export class DesktopCoordinator {
       else if (command.type === "auth.signOut") await this.shared.signOut();
       else if (command.type === "auth.cancel") await this.shared.cancelSignIn();
       else if (command.type === "shared.refresh") await this.shared.refresh();
-      else if (command.type === "snapshot") {
+      else if (command.type === "sharedTab.watch") {
+        if (!this.viewer) throw new Error("Read-along is unavailable.");
+        await this.viewer.watch(command.roomId, command.tabId);
+      } else if (command.type === "sharedTab.unwatch") this.viewer?.unwatch();
+      else if (command.type === "sharedTab.load") {
+        if (!this.viewer) throw new Error("Read-along is unavailable.");
+        await this.viewer.loadEarlier(
+          command.roomId,
+          command.tabId,
+          command.beforeSeq,
+        );
+      } else if (command.type === "snapshot") {
         /* Return the current projection. */
       } else if (
         command.type === "room.join" ||

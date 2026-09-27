@@ -5,7 +5,9 @@ import {
   SNAPSHOT_CHANNEL,
   HEALTH_CHANNEL,
   TRANSCRIPT_CHANNEL,
+  SHARED_TRANSCRIPT_CHANNEL,
 } from "../shared/channels";
+import type { SharedTranscriptMessage } from "../shared/collaboration";
 import type {
   Command,
   DesktopBridge,
@@ -97,6 +99,20 @@ const bridge: DesktopBridge = {
     ) => listener(batches);
     ipcRenderer.on(TRANSCRIPT_CHANNEL, handler);
     return () => ipcRenderer.removeListener(TRANSCRIPT_CHANNEL, handler);
+  },
+  watchSharedTab: (roomId, tabId) =>
+    invoke({ type: "sharedTab.watch", roomId, tabId }),
+  unwatchSharedTab: () => invoke({ type: "sharedTab.unwatch" }),
+  loadSharedTranscript: (roomId, tabId, beforeSeq) =>
+    invoke({ type: "sharedTab.load", roomId, tabId, beforeSeq }),
+  // Delivers only the message data, never the IPC event.
+  onSharedTranscript: (listener) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      message: SharedTranscriptMessage,
+    ) => listener(message);
+    ipcRenderer.on(SHARED_TRANSCRIPT_CHANNEL, handler);
+    return () => ipcRenderer.removeListener(SHARED_TRANSCRIPT_CHANNEL, handler);
   },
 };
 contextBridge.exposeInMainWorld("desktop", Object.freeze(bridge));

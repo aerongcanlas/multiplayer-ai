@@ -19,6 +19,7 @@ import {
   SNAPSHOT_CHANNEL,
   HEALTH_CHANNEL,
   TRANSCRIPT_CHANNEL,
+  SHARED_TRANSCRIPT_CHANNEL,
   type Result,
 } from "../shared/contracts";
 import { HARNESS_LABELS } from "../shared/tabs";
@@ -31,6 +32,7 @@ import { AuthStorage } from "./auth-storage";
 import { CollaborationClient } from "./collaboration-client";
 import { DesktopCoordinator } from "./coordinator";
 import { ReadAlongPublisher } from "./read-along-publisher";
+import { ReadAlongViewer } from "./read-along-viewer";
 import supabaseConfig from "../../config/supabase.json";
 
 protocol.registerSchemesAsPrivileged([
@@ -68,6 +70,7 @@ let supervisor: SupervisorClient;
 let collaboration: CollaborationClient;
 let coordinator: DesktopCoordinator;
 let publisher: ReadAlongPublisher | undefined;
+let viewer: ReadAlongViewer | undefined;
 
 function createWindow() {
   window = new BrowserWindow({
@@ -101,6 +104,9 @@ function createWindow() {
   window.on("closed", () => {
     window = null;
   });
+  // A shown window resumes shared-tab polling at once.
+  window.on("show", () => viewer?.visibilityChanged());
+  window.on("restore", () => viewer?.visibilityChanged());
   void window.loadURL(documentUrl);
 }
 
@@ -199,6 +205,7 @@ else {
       () => {
         publisher?.collaborationChanged();
         coordinator?.changed();
+        viewer?.snapshotChanged();
       },
       testing,
     );
@@ -231,6 +238,22 @@ else {
       coordinator.changed(),
     );
     coordinator.readAlongStatus = () => publisher!.status();
+    viewer = new ReadAlongViewer(
+      collaboration,
+      (roomId) =>
+        coordinator.snapshot()?.rooms.find((room) => room.id === roomId)?.shared
+          ?.sharedTabs,
+      // Shared transcripts go only to the trusted main frame of the app window.
+      (message) => {
+        if (
+          window &&
+          isTrustedDocument(window.webContents.getURL(), documentUrl)
+        )
+          window.webContents.send(SHARED_TRANSCRIPT_CHANNEL, message);
+      },
+      () => Boolean(window?.isVisible() && !window.isMinimized()),
+    );
+    coordinator.viewer = viewer;
     ipcMain.handle(
       COMMAND_CHANNEL,
       async (event, input: unknown): Promise<Result> => {
@@ -286,6 +309,7 @@ app.on("window-all-closed", () => {
 });
 app.on("before-quit", () => {
   publisher?.close();
+  viewer?.close();
   collaboration?.close();
   supervisor?.stop();
 });

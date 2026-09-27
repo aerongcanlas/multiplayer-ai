@@ -4,6 +4,7 @@ import type {
   ReadAlongStatus,
   RoomNotice,
   SharedRoomScope,
+  SharedTranscriptMessage,
 } from "./collaboration";
 import {
   tabCommandSchemas,
@@ -22,6 +23,7 @@ export {
   SNAPSHOT_CHANNEL,
   HEALTH_CHANNEL,
   TRANSCRIPT_CHANNEL,
+  SHARED_TRANSCRIPT_CHANNEL,
 } from "./channels";
 
 const id = z.uuid();
@@ -78,6 +80,19 @@ export const commandSchema = z.discriminatedUnion("type", [
       suggestionId: id,
       prompt: text,
       expectedRevision: z.number().int().positive(),
+    })
+    .strict(),
+  // Viewing another host's read-along tab; handled by main, never the supervisor.
+  z
+    .object({ type: z.literal("sharedTab.watch"), roomId: id, tabId: id })
+    .strict(),
+  z.object({ type: z.literal("sharedTab.unwatch") }).strict(),
+  z
+    .object({
+      type: z.literal("sharedTab.load"),
+      roomId: id,
+      tabId: id,
+      beforeSeq: z.number().int().positive(),
     })
     .strict(),
   ...tabCommandSchemas,
@@ -214,6 +229,17 @@ export interface DesktopBridge {
   useManagedHarness(harness: HarnessId): Promise<Result>;
   acknowledgeHarnessNotice(harness: HarnessId): Promise<Result>;
   onTranscript(listener: (batches: TranscriptBatch[]) => void): () => void;
+  // Read-along: one watched shared tab at a time; entries arrive on onSharedTranscript.
+  watchSharedTab(roomId: string, tabId: string): Promise<Result>;
+  unwatchSharedTab(): Promise<Result>;
+  loadSharedTranscript(
+    roomId: string,
+    tabId: string,
+    beforeSeq: number,
+  ): Promise<Result>;
+  onSharedTranscript(
+    listener: (message: SharedTranscriptMessage) => void,
+  ): () => void;
 }
 
 export interface PrivateWorkspace extends Workspace {
