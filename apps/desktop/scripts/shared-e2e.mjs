@@ -15,7 +15,7 @@ const output = resolve(
     new Date().toISOString().replaceAll(":", "-"),
 );
 await mkdir(output, { recursive: true });
-const { db, rpc } = await sharedDatabase();
+const { db, rpc, call } = await sharedDatabase();
 const sessions = new Map();
 let offline = false;
 const calls = [];
@@ -96,6 +96,17 @@ const server = createServer(async (req, res) => {
       );
     else if (url.pathname === "/rest/v1/rpc/desktop_room_command")
       res.end(JSON.stringify(await rpc(id, body.p_command)));
+    // Read-along RPCs dispatch PostgREST's named arguments to the PGlite functions.
+    else if (
+      /^\/rest\/v1\/rpc\/desktop_tab_share_(publish|head|pull|reconcile)$/.test(
+        url.pathname,
+      )
+    )
+      res.end(
+        JSON.stringify(
+          await call(id, url.pathname.slice("/rest/v1/rpc/".length), body),
+        ),
+      );
     else
       res
         .writeHead(404)

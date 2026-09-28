@@ -10,6 +10,7 @@ import {
   safeStorage,
   shell,
 } from "electron";
+import { createHash } from "node:crypto";
 import { join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
@@ -17,14 +18,21 @@ import {
   COMMAND_CHANNEL,
   SNAPSHOT_CHANNEL,
   HEALTH_CHANNEL,
+  TRANSCRIPT_CHANNEL,
+  SHARED_TRANSCRIPT_CHANNEL,
   type Result,
 } from "../shared/contracts";
+import { HARNESS_LABELS } from "../shared/tabs";
+import { loginAllowed } from "./supervisor-messages";
+import { resolveLoginEnvironment } from "./login-environment";
 import { isLocalDevUrl, isTrustedDocument } from "../shared/security";
 import { inspectWorkspace } from "../supervisor/workspace";
 import { SupervisorClient } from "./supervisor-client";
 import { AuthStorage } from "./auth-storage";
 import { CollaborationClient } from "./collaboration-client";
 import { DesktopCoordinator } from "./coordinator";
+import { ReadAlongPublisher } from "./read-along-publisher";
+import { ReadAlongViewer } from "./read-along-viewer";
 import supabaseConfig from "../../config/supabase.json";
 
 protocol.registerSchemesAsPrivileged([
@@ -36,6 +44,18 @@ protocol.registerSchemesAsPrivileged([
 
 const testing = !app.isPackaged && process.env.MP_E2E === "1";
 const profileDirectory = app.commandLine.getSwitchValue("user-data-dir");
+// Each dev checkout (main, worktrees) gets its own profile so a branch with a newer
+// journal protocol cannot migrate data another checkout still reads.
+if (!app.isPackaged && !profileDirectory) {
+  const checkout = createHash("sha256")
+    .update(app.getAppPath())
+    .digest("hex")
+    .slice(0, 12);
+  app.setPath(
+    "userData",
+    join(app.getPath("appData"), "Multiplayer AI Dev", checkout),
+  );
+}
 if (profileDirectory) app.setPath("userData", resolve(profileDirectory));
 if (testing && process.env.MP_TEST_USER_DATA)
   app.setPath("userData", resolve(process.env.MP_TEST_USER_DATA));
@@ -49,6 +69,8 @@ let window: BrowserWindow | null = null;
 let supervisor: SupervisorClient;
 let collaboration: CollaborationClient;
 let coordinator: DesktopCoordinator;
+let publisher: ReadAlongPublisher | undefined;
+let viewer: ReadAlongViewer | undefined;
 
 function createWindow() {
   window = new BrowserWindow({
@@ -82,6 +104,9 @@ function createWindow() {
   window.on("closed", () => {
     window = null;
   });
+  // A shown window resumes shared-tab polling at once.
+  window.on("show", () => viewer?.visibilityChanged());
+  window.on("restore", () => viewer?.visibilityChanged());
   void window.loadURL(documentUrl);
 }
 
@@ -135,20 +160,38 @@ else {
     supervisor = new SupervisorClient(
       join(__dirname, "supervisor.cjs"),
       app.getPath("userData"),
-      (snapshot) => coordinator?.acceptLocal(snapshot),
-      (health) => window?.webContents.send(HEALTH_CHANNEL, health),
-      (value) => {
-        const url = new URL(value);
-        if (testing && process.env.MP_TEST_CODEX_FIXTURE) return;
-        if (
-          url.protocol === "https:" &&
-          ["auth.openai.com", "chatgpt.com"].includes(url.hostname) &&
-          !url.username &&
-          !url.password
-        )
-          void shell.openExternal(url.href);
+      (snapshot) => {
+        // The publisher sees each snapshot first, so the view carries its status.
+        publisher?.acceptLocal(snapshot);
+        coordinator?.acceptLocal(snapshot);
       },
+      (health) => window?.webContents.send(HEALTH_CHANNEL, health),
       testing ? process.env.MP_TEST_CODEX_FIXTURE : undefined,
+      {
+        // Read-along taps validated batches before the window guard; transcripts reach the
+        // renderer only in the trusted main frame of the app window.
+        onTranscript: (batches) => {
+          publisher?.acceptBatches(batches);
+          if (
+            window &&
+            isTrustedDocument(window.webContents.getURL(), documentUrl)
+          )
+            window.webContents.send(TRANSCRIPT_CHANNEL, batches);
+        },
+        openLogin: (harness, url) => {
+          if (loginAllowed(harness, url)) void shell.openExternal(url);
+        },
+        // Test fixtures and a local download manifest apply only to unpackaged E2E runs.
+        claudeFixture: testing ? process.env.MP_TEST_CLAUDE_FIXTURE : undefined,
+        harnessManifest: testing
+          ? process.env.MP_TEST_HARNESS_MANIFEST
+          : undefined,
+      },
+    );
+    // Harnesses launch with the host's login-shell environment; the supervisor strips provider
+    // credentials before any harness sees it.
+    void resolveLoginEnvironment().then((env) =>
+      supervisor.request({ type: "host.environment", env }),
     );
     collaboration = new CollaborationClient(
       testing && process.env.MP_TEST_SUPABASE_URL
@@ -159,7 +202,11 @@ else {
         : supabaseConfig,
       new AuthStorage(app.getPath("userData"), safeStorage),
       (url) => shell.openExternal(url),
-      () => coordinator?.changed(),
+      () => {
+        publisher?.collaborationChanged();
+        coordinator?.changed();
+        viewer?.snapshotChanged();
+      },
       testing,
     );
     coordinator = new DesktopCoordinator(
@@ -177,7 +224,36 @@ else {
           ? null
           : inspectWorkspace(filePaths[0]);
       },
+      async (harness) => {
+        if (!window) return null;
+        const { canceled, filePaths } = await dialog.showOpenDialog(window, {
+          title: `Choose the ${HARNESS_LABELS[harness]} executable`,
+          properties: ["openFile"],
+          buttonLabel: "Use executable",
+        });
+        return canceled || !filePaths[0] ? null : filePaths[0];
+      },
     );
+    publisher = new ReadAlongPublisher(collaboration, supervisor, () =>
+      coordinator.changed(),
+    );
+    coordinator.readAlongStatus = () => publisher!.status();
+    viewer = new ReadAlongViewer(
+      collaboration,
+      (roomId) =>
+        coordinator.snapshot()?.rooms.find((room) => room.id === roomId)?.shared
+          ?.sharedTabs,
+      // Shared transcripts go only to the trusted main frame of the app window.
+      (message) => {
+        if (
+          window &&
+          isTrustedDocument(window.webContents.getURL(), documentUrl)
+        )
+          window.webContents.send(SHARED_TRANSCRIPT_CHANNEL, message);
+      },
+      () => Boolean(window?.isVisible() && !window.isMinimized()),
+    );
+    coordinator.viewer = viewer;
     ipcMain.handle(
       COMMAND_CHANNEL,
       async (event, input: unknown): Promise<Result> => {
@@ -232,6 +308,8 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 app.on("before-quit", () => {
+  publisher?.close();
+  viewer?.close();
   collaboration?.close();
   supervisor?.stop();
 });

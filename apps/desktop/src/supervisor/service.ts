@@ -1,20 +1,22 @@
 import { randomUUID } from "node:crypto";
 import {
+  PROTOCOL_VERSION,
   commandSchema,
-  currentSummary,
-  type Command,
-  type Execution,
-  type Room,
+  isHarnessCommand,
   type Snapshot,
-  type ProgressEvent,
-  type Task,
   type PrivateWorkspace,
   type SupervisorRequest,
 } from "../shared/contracts";
+import {
+  tabBusy,
+  type TranscriptBatch,
+  type TranscriptPage,
+} from "../shared/tabs";
 import { Journal } from "./journal";
-import { MockRunner, type RunnerAdapter, type RunnerUpdate } from "./runner";
-import { inspectWorkspace, publicWorkspace } from "./workspace";
-import { CodexRunner, type CodexEvent } from "./codex-runner";
+import { publicWorkspace } from "./workspace";
+import type { HarnessRegistry } from "./harnesses/registry";
+import { TabHost, type TabCommand } from "./tabs/host";
+import { TranscriptWriter } from "./tabs/transcript";
 
 const now = () => new Date().toISOString();
 const findRoom = (state: Snapshot, id: string) => {
@@ -22,202 +24,188 @@ const findRoom = (state: Snapshot, id: string) => {
   if (!room) throw new Error("Room not found on this desktop.");
   return room;
 };
-const findExecution = (room: Room, id: string) => {
-  const execution = room.executions.find((execution) => execution.id === id);
-  if (!execution) throw new Error("Execution not found in this room.");
-  return execution;
-};
+const isTabCommand = (input: SupervisorRequest["command"]) =>
+  input.type.startsWith("tab.") ||
+  input.type === "question.answer" ||
+  input.type === "approval.respond";
 
 export class SupervisorService {
   private state: Snapshot;
-  private controllers = new Map<string, AbortController>();
   private closed = false;
+  private host?: TabHost;
+  private registry?: HarnessRegistry;
 
   constructor(
     private journal: Journal,
     private publish: (snapshot: Snapshot) => void,
-    private runner: RunnerAdapter = new MockRunner(),
-    private codex?: CodexRunner,
-    private openLogin?: (url: string) => void,
+    harnesses?: {
+      registry: HarnessRegistry;
+      publishTranscript: (batches: TranscriptBatch[]) => void;
+      transcriptInterval?: number;
+      stopTimeoutMs?: number;
+    },
   ) {
     this.state = journal.load();
-    this.transaction((draft, events) => {
-      for (const room of draft.rooms) {
-        for (const execution of room.executions.filter(
-          (run) => run.status === "running",
-        )) {
-          execution.status = "blocked";
-          execution.endedAt = now();
-          execution.approvals = [];
-          for (const task of execution.tasks.filter((task) =>
-            ["running", "queued", "waiting_for_input"].includes(task.status),
-          )) {
-            task.status = "blocked";
-            task.activity =
-              "Desktop restarted during execution. Review before starting another run; no actions were replayed.";
-            task.updatedAt = now();
-          }
-          this.record(
-            execution,
-            execution.tasks[0],
-            "recovery",
-            "Interrupted execution recovered as blocked. Automatic replay is disabled.",
-            events,
-          );
-        }
-      }
-    });
-    this.codex?.client.on("state", () => {
-      if (!this.closed) this.transaction(() => {});
-    });
+    if (!harnesses) return;
+    this.registry = harnesses.registry;
+    this.host = new TabHost(
+      {
+        read: () => this.state,
+        transaction: (mutate) => this.transaction(mutate),
+        workspacePath: (roomId) => {
+          const workspace = this.state.rooms.find(
+            (room) => room.id === roomId,
+          )?.workspace;
+          return workspace
+            ? (journal.getWorkspace(workspace.id)?.path ?? null)
+            : null;
+        },
+        transcriptPage: (tabId, beforeSeq, limit, agentKey) =>
+          journal.transcriptPage(tabId, beforeSeq, limit, agentKey),
+        transcriptSince: (tabId, afterSeq, limit) =>
+          journal.transcriptSince(tabId, afterSeq, limit),
+        agentCards: (tabId) => journal.agentCards(tabId),
+        pendingEntries: (tabId) => journal.pendingEntries(tabId),
+        deleteTranscript: (tabId) => journal.deleteTranscript(tabId),
+      },
+      harnesses.registry,
+      new TranscriptWriter(
+        journal,
+        harnesses.publishTranscript,
+        harnesses.transcriptInterval,
+      ),
+      harnesses.stopTimeoutMs,
+    );
+    this.host.recover();
+    // Restored tabs need their harness's sign-in and models before they can send again.
+    for (const harness of new Set(
+      this.state.rooms.flatMap((room) =>
+        room.tabs.map((tab) => tab.loadout.harness),
+      ),
+    ))
+      void harnesses.registry.refresh(harness);
   }
 
   snapshot(): Snapshot {
     return {
       ...structuredClone(this.state),
-      ...(this.codex ? { provider: this.codex.client.snapshot() } : {}),
+      protocolVersion: PROTOCOL_VERSION,
+      ...(this.registry ? { harnesses: this.registry.snapshot() } : {}),
     };
   }
 
+  /** Harness program, sign-in, or model state changed; it is not journaled. */
+  harnessesChanged() {
+    if (this.closed) return;
+    this.state = { ...this.state, revision: this.state.revision + 1 };
+    this.publish(this.snapshot());
+    this.host?.syncStatuses();
+  }
+
   private transaction(
-    mutate: (draft: Snapshot, events: ProgressEvent[]) => void,
+    mutate: (draft: Snapshot) => void,
     workspace?: PrivateWorkspace,
   ) {
     const draft = structuredClone(this.state);
-    const events: ProgressEvent[] = [];
-    mutate(draft, events);
+    mutate(draft);
     draft.revision += 1;
-    this.journal.save(draft, events, workspace);
+    this.journal.save(draft, workspace);
     this.state = draft;
     this.publish(this.snapshot());
   }
 
-  private record(
-    execution: Execution,
-    task: Task,
-    type: ProgressEvent["type"],
-    message: string,
-    events: ProgressEvent[],
-  ) {
-    const event: ProgressEvent = {
-      id: randomUUID(),
-      seq: execution.events.length + 1,
-      executionId: execution.id,
-      taskId: task.id,
-      agentId: task.agentId,
-      generation: execution.generation,
-      type,
-      message,
-      createdAt: now(),
-    };
-    execution.events.push(event);
-    events.push(event);
+  async dispatch(input: SupervisorRequest["command"]): Promise<Snapshot> {
+    return (await this.dispatchResult(input)).snapshot;
   }
 
-  async dispatch(input: SupervisorRequest["command"]): Promise<Snapshot> {
+  /** Dispatches a command and returns the snapshot plus a transcript page when one was asked for. */
+  async dispatchResult(
+    input: SupervisorRequest["command"],
+  ): Promise<{ snapshot: Snapshot; transcript?: TranscriptPage }> {
     if (this.closed) throw new Error("The supervisor is shutting down.");
+    // Main-only messages from the private transport.
+    if (input.type === "host.environment") {
+      this.registry?.setEnvironment(input.env);
+      return { snapshot: this.snapshot() };
+    }
+    if (input.type === "harness.setExecutable") {
+      if (!this.registry)
+        throw new Error("Harnesses are unavailable in this build.");
+      this.registry.setExecutable(input.harness, input.path);
+      void this.registry.refresh(input.harness);
+      return { snapshot: this.snapshot() };
+    }
     if (input.type === "shared.import") {
-      if (!input.room.shared)
-        throw new Error("Shared room identity is required.");
-      this.transaction((draft) => {
-        const index = draft.rooms.findIndex(
-          (room) => room.id === input.room.id,
-        );
-        const old = draft.rooms[index];
-        if (
-          old &&
-          (old.shared?.userId !== input.room.shared?.userId ||
-            old.shared?.project !== input.room.shared?.project)
-        ) {
-          if (old.executions.some((run) => run.status === "running"))
-            throw new Error("Stop the previous account execution first.");
-        }
-        const sameAccount =
-          old?.shared?.userId === input.room.shared?.userId &&
-          old?.shared?.project === input.room.shared?.project;
-        const room = sameAccount
-          ? {
-              ...input.room,
-              workspace: old.workspace,
-              executions: old.executions,
-              summaries: old.summaries,
-            }
-          : input.room;
-        if (index < 0) draft.rooms.push(room);
-        else draft.rooms[index] = room;
-      });
-      return this.snapshot();
+      await this.importShared(input.room);
+      return { snapshot: this.snapshot() };
     }
     // workspace.register is accepted only on the private main-to-supervisor transport.
     if (input.type === "workspace.register") {
       const room = findRoom(this.state, input.roomId);
-      if (room.executions.some((run) => run.status === "running"))
-        throw new Error("Stop the active run before changing the repository.");
+      if (room.tabs.some((tab) => tabBusy(tab.status)))
+        throw new Error("Stop running tabs before changing the repository.");
       this.transaction((draft) => {
         findRoom(draft, input.roomId).workspace = publicWorkspace(
           input.workspace,
         );
       }, input.workspace);
-      return this.snapshot();
+      return { snapshot: this.snapshot() };
+    }
+    if (isTabCommand(input)) {
+      if (!this.host)
+        throw new Error("Chat tabs are unavailable in this build.");
+      const transcript = await this.host.handle(
+        commandSchema.parse(input) as TabCommand,
+      );
+      return {
+        snapshot: this.snapshot(),
+        ...(transcript ? { transcript } : {}),
+      };
     }
     const command = commandSchema.parse(input);
-    if (command.type === "snapshot") return this.snapshot();
-    if (command.type.startsWith("provider.")) {
-      if (!this.codex) throw new Error("The Codex runtime is unavailable.");
-      if (command.type === "provider.refresh")
-        await this.codex.client.refresh();
-      if (command.type === "provider.connect") {
-        const url = await this.codex.client.connect();
-        if (url) this.openLogin?.(url);
-      }
-      if (command.type === "provider.cancel")
-        await this.codex.client.cancelLogin();
-      if (command.type === "provider.disconnect") {
-        if (this.controllers.size)
-          throw new Error("Stop active work before signing out of Codex.");
-        await this.codex.client.disconnect();
-      }
-      return this.snapshot();
+    if (command.type === "snapshot") return { snapshot: this.snapshot() };
+    if (isHarnessCommand(command)) {
+      const registry = this.registry;
+      if (!registry)
+        throw new Error("Harnesses are unavailable in this build.");
+      // Harness I/O runs in the background and reports through snapshots.
+      if (command.type === "harness.refresh")
+        void registry.refresh(command.harness);
+      else if (command.type === "harness.signIn")
+        void registry.signIn(command.harness).catch(() => {
+          /* The failure is recorded in the harness state. */
+        });
+      else if (command.type === "harness.useManaged") {
+        registry.setExecutable(command.harness, null);
+        void registry.refresh(command.harness);
+      } else if (command.type === "harness.acknowledgeNotice")
+        registry.acknowledgeNotice(command.harness);
+      else
+        throw new Error(
+          "Choosing an executable requires the desktop file dialog.",
+        );
+      return { snapshot: this.snapshot() };
     }
-    if (command.type === "approval.respond") {
-      const execution = findExecution(
-        findRoom(this.state, command.roomId),
-        command.executionId,
-      );
-      if (execution.status !== "running" || !this.codex)
-        throw new Error("This execution has stopped.");
-      this.codex.approve(
-        command.executionId,
-        command.approvalId,
-        command.decision,
-      );
-      return this.snapshot();
-    }
-    // Narrow the provider commands before resolving a room below.
-    if (
-      command.type === "provider.refresh" ||
-      command.type === "provider.connect" ||
-      command.type === "provider.cancel" ||
-      command.type === "provider.disconnect"
-    )
-      return this.snapshot();
     if (
       command.type === "auth.signIn" ||
       command.type === "auth.cancel" ||
       command.type === "auth.signOut" ||
       command.type === "shared.refresh" ||
       command.type === "room.join" ||
-      command.type === "invite.create"
+      command.type === "invite.create" ||
+      command.type === "sharedTab.watch" ||
+      command.type === "sharedTab.unwatch" ||
+      command.type === "sharedTab.load"
     )
       throw new Error(
         "Shared room operations require the main-process connection.",
       );
     if (command.type === "workspace.select")
       throw new Error("Repository selection requires the desktop file dialog.");
-    if (command.type === "execution.start") return this.start(command);
+    if (isTabCommand(command))
     if (command.type === "suggestion.create") return this.suggest(command);
-    let stoppedId: string | undefined;
-    this.transaction((draft, events) => {
+      throw new Error("Chat tabs are unavailable in this build.");
+    this.transaction((draft) => {
       if (command.type === "room.create") {
         draft.rooms.push({
           id: randomUUID(),
@@ -226,8 +214,7 @@ export class SupervisorService {
           workspace: null,
           messages: [],
           suggestions: [],
-          executions: [],
-          summaries: [],
+          tabs: [],
         });
         return;
       }
@@ -242,6 +229,32 @@ export class SupervisorService {
             createdAt: now(),
           });
           break;
+        case "suggestion.create": {
+          // Reload canonical messages; renderer-supplied transcripts and authors are never accepted.
+          const ids = new Set(command.messageIds);
+          const sources = room.messages.filter((message) =>
+            ids.has(message.id),
+          );
+          if (sources.length !== ids.size)
+            throw new Error("A selected message does not belong to this room.");
+          const prompt = `Consider this selected feedback from the room:\n\n${sources.map((source) => `${source.authorName}: ${source.text}`).join("\n\n")}\n\nKeep conflicting advice visible and ask about missing requirements before making changes.`;
+          if (prompt.length > 8_000)
+            throw new Error(
+              "Select fewer messages so the suggestion fits within 8,000 characters.",
+            );
+          room.suggestions.push({
+            id: randomUUID(),
+            prompt,
+            contextVersion: 0,
+            sourceMessageIds: sources.map((source) => source.id),
+            sources: structuredClone(sources),
+            revision: 1,
+            status: "draft",
+            createdAt: now(),
+            updatedAt: now(),
+          });
+          break;
+        }
         case "suggestion.edit": {
           const suggestion = room.suggestions.find(
             (suggestion) => suggestion.id === command.suggestionId,
@@ -250,7 +263,7 @@ export class SupervisorService {
             throw new Error("Suggestion not found in this room.");
           if (suggestion.status !== "draft")
             throw new Error(
-              "Submitted suggestions are retained as execution evidence. Create a new suggestion to revise direction.",
+              "Submitted suggestions are kept with the turn that used them. Create a new suggestion to revise direction.",
             );
           if (suggestion.revision !== command.expectedRevision)
             throw new Error(
@@ -261,6 +274,25 @@ export class SupervisorService {
           suggestion.updatedAt = now();
           break;
         }
+      }
+    });
+    return { snapshot: this.snapshot() };
+  }
+
+  // Shared rooms keep this host's private repository selection and tabs for the same account.
+  private async importShared(room: Snapshot["rooms"][number]) {
+    if (!room.shared) throw new Error("Shared room identity is required.");
+    const previous = this.state.rooms.find((item) => item.id === room.id);
+    if (
+      previous &&
+      (previous.shared?.userId !== room.shared.userId ||
+        previous.shared?.project !== room.shared.project)
+    ) {
+      if (previous.tabs.some((tab) => tabBusy(tab.status) || tab.runningAgents))
+        throw new Error("Stop the previous account's running tabs first.");
+      // Remove the previous account's tabs fully, closed ones included: sessions, live state,
+      // and transcripts.
+      this.host?.purge(room.id);
         case "execution.stop": {
           const execution = findExecution(room, command.executionId);
           if (execution.status !== "running")
@@ -532,208 +564,30 @@ export class SupervisorService {
       this.journal.saveSession(executionId, event.taskId, event.threadId);
       return;
     }
-    this.transaction((draft, events) => {
-      const room = findRoom(draft, roomId);
-      const execution = findExecution(room, executionId);
-      if (execution.status !== "running" && event.type !== "approval.resolved")
-        return;
-      if (event.type === "task") {
-        const index = execution.tasks.findIndex(
-          (task) => task.id === event.task.id,
-        );
-        if (index < 0) execution.tasks.push(event.task);
-        else execution.tasks[index] = event.task;
-        this.record(
-          execution,
-          event.task,
-          "status",
-          `${event.task.role} assigned: ${event.task.objective}`,
-          events,
-        );
-      } else if (event.type === "status" || event.type === "activity") {
-        const task = execution.tasks.find((task) => task.id === event.taskId);
-        if (!task) throw new Error("Unknown Codex task identity.");
-        task.activity = event.message;
-        task.updatedAt = now();
-        if (event.type === "status") {
-          task.status = event.status;
-          if (event.status === "running") task.startedAt ??= now();
-          if (["completed", "failed", "cancelled"].includes(event.status))
-            task.completedAt = now();
-        }
-        this.record(execution, task, event.type, event.message, events);
-      } else if (event.type === "evidence") {
-        execution.evidence.push(event.evidence);
-        const task = execution.tasks.find(
-          (task) => task.id === event.evidence.taskId,
-        )!;
-        this.record(
-          execution,
-          task,
-          "evidence",
-          `${event.evidence.label}: ${event.evidence.outcome}`,
-          events,
-        );
-      } else if (event.type === "approval")
-        execution.approvals = [...(execution.approvals ?? []), event.approval];
-      else if (event.type === "approval.resolved")
-        execution.approvals = (execution.approvals ?? []).filter(
-          (item) => item.id !== event.id,
-        );
-      else if (event.type === "artifact") execution.artifact = event.artifact;
-      else if (event.type === "summary") {
-        room.summaries.push({
-          ...event.summary,
-          version: (currentSummary(room)?.version ?? 0) + 1,
-          createdAt: now(),
-        });
-        this.record(
-          execution,
-          execution.tasks[0],
-          "summary",
-          event.summary.currentWork,
-          events,
-        );
-      } else if (event.type === "finished") {
-        execution.status = event.succeeded ? "completed" : "failed";
-        execution.endedAt = now();
-        execution.approvals = [];
-      }
-    });
-  }
-
-  private async run(
-    roomId: string,
-    executionId: string,
-    command: Extract<Command, { type: "execution.start" }>,
-    controller: AbortController,
-  ) {
-    try {
-      for await (const update of this.runner.run({
-        ...command,
-        signal: controller.signal,
-      })) {
-        if (this.closed || controller.signal.aborted) break;
-        this.applyUpdate(roomId, executionId, update);
-      }
-    } catch {
-      if (!controller.signal.aborted && !this.closed) {
-        this.transaction((draft, events) => {
-          const execution = findExecution(findRoom(draft, roomId), executionId);
-          execution.status = "failed";
-          execution.endedAt = now();
-          for (const task of execution.tasks.filter((task) =>
-            ["queued", "running"].includes(task.status),
-          )) {
-            task.status = "failed";
-            task.activity = "Runner stopped unexpectedly.";
-            task.updatedAt = now();
+    this.transaction((draft) => {
+      const index = draft.rooms.findIndex((item) => item.id === room.id);
+      const old = draft.rooms[index];
+      const sameAccount =
+        old?.shared?.userId === room.shared?.userId &&
+        old?.shared?.project === room.shared?.project;
+      const next = sameAccount
+        ? {
+            ...room,
+            workspace: old.workspace,
+            tabs: old.tabs,
+            closedTabs: old.closedTabs ?? [],
           }
-          this.record(
-            execution,
-            execution.tasks[0],
-            "status",
-            "Runner failed. Review the retained activity before starting another execution.",
-            events,
-          );
-        });
-      }
-    } finally {
-      this.controllers.delete(executionId);
-    }
-  }
-
-  private applyUpdate(
-    roomId: string,
-    executionId: string,
-    update: RunnerUpdate,
-  ) {
-    this.transaction((draft, events) => {
-      const room = findRoom(draft, roomId);
-      const execution = findExecution(room, executionId);
-      if (execution.status !== "running") return;
-      const task = execution.tasks[update.taskIndex];
-      if (!task) throw new Error("Runner referenced an unknown task.");
-      if (
-        update.status === "running" &&
-        task.dependencies.some(
-          (id) =>
-            execution.tasks.find((task) => task.id === id)?.status !==
-            "completed",
-        )
-      ) {
-        throw new Error("Task dependencies are not complete.");
-      }
-      task.status = update.status;
-      task.activity = update.message;
-      task.updatedAt = now();
-      if (update.status === "running") task.startedAt ??= now();
-      if (["completed", "failed"].includes(update.status))
-        task.completedAt = now();
-      this.record(execution, task, "activity", update.message, events);
-      if (update.evidence) {
-        execution.evidence.push({
-          id: randomUUID(),
-          taskId: task.id,
-          label: "Mock validation",
-          kind: "simulation",
-          ...update.evidence,
-          revision: execution.workspace.revision,
-          recordedAt: now(),
-        });
-        this.record(
-          execution,
-          task,
-          "evidence",
-          `Simulated validation ${update.evidence.outcome}.`,
-          events,
-        );
-      }
-      if (
-        update.taskIndex === 0 &&
-        ["completed", "failed"].includes(update.status)
-      ) {
-        const passed =
-          execution.tasks.every((task) => task.status === "completed") &&
-          execution.evidence.some((evidence) => evidence.outcome === "passed");
-        execution.status = passed ? "completed" : "failed";
-        execution.endedAt = now();
-        room.summaries.push({
-          version: (currentSummary(room)?.version ?? 0) + 1,
-          executionId,
-          goal: execution.prompt,
-          decisions: [
-            "Run remained local.",
-            "Mock tasks did not modify the repository.",
-          ],
-          currentWork: passed
-            ? "Simulation completed."
-            : "Simulation stopped after a failed validation.",
-          uncertainties: [
-            "Real code changes and repository validation require a production runner adapter.",
-          ],
-          questions: [
-            "What constraints or corrections should guide the next direction?",
-          ],
-          createdAt: now(),
-        });
-        this.record(
-          execution,
-          task,
-          "summary",
-          `Lead published context version ${currentSummary(room)?.version}.`,
-          events,
-        );
-      }
+        : { ...room, tabs: [], closedTabs: [] };
+      if (index < 0) draft.rooms.push(next);
+      else draft.rooms[index] = next;
     });
   }
 
   close() {
+    this.host?.close();
+    this.registry?.close();
     this.closed = true;
-    for (const controller of this.controllers.values()) controller.abort();
-    this.controllers.clear();
-    this.codex?.client.close();
-    // Running tasks stay recorded. Startup recovery marks them blocked instead of replaying actions.
+    // Running turns stay recorded; startup recovery marks them interrupted instead of replaying.
     this.journal.close();
   }
 }

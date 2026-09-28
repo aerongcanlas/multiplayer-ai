@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import {
   AlertCircle,
   ChevronRight,
@@ -11,90 +11,77 @@ import {
   X,
   Users,
 } from "lucide-react";
-import type { Room, Suggestion } from "../shared/contracts";
-import { currentExecution } from "../shared/selectors";
+import type { Room, Snapshot, Suggestion } from "../shared/contracts";
+import { tabBusy, type HarnessState, type Tab } from "../shared/tabs";
 import { dismissError, perform, useDesktop } from "./lib/desktop-store";
+import { getStored, setStored } from "./lib/storage";
 import { Button } from "./components/ui/Button";
 import { Input } from "./components/ui/Input";
 import { RoomWorkspace } from "@multiplayer-ai/ui/layouts/room-workspace";
-import { AIActivityPanel } from "./components/AIActivityPanel";
 import { GroupChatPanel } from "./components/GroupChatPanel";
 import { MissionControlPanel } from "./components/MissionControlPanel";
 import { SharedConnection } from "./components/SharedConnection";
-import { ProviderConnection } from "./components/ProviderConnection";
-import { RunControls } from "./components/RunControls";
-import type { ProviderState, RunConfiguration } from "../shared/provider";
+import { SidebarSection } from "./components/SidebarSection";
+import { HarnessSettings } from "./components/HarnessSettings";
+import { TabsPanel } from "./components/tabs/TabsPanel";
+import { ChatList } from "./components/ChatList";
+
+const roomBusy = (room: Room) => room.tabs.some((tab) => tabBusy(tab.status));
+const tabKey = (roomId: string) => `multiplayer:tab:${roomId}`;
 
 function RoomView({
   room,
   disabled,
-  active,
   stale,
-  provider,
+  harnesses,
+  readAlong,
+  collaboration,
+  selectedTab,
+  onSelectTab,
+  sharedTabId,
+  onSelectShared,
 }: {
   room: Room;
   disabled: boolean;
-  active: boolean;
   stale: boolean;
-  provider?: ProviderState;
+  harnesses: HarnessState[];
+  readAlong: Snapshot["readAlong"];
+  collaboration: Snapshot["collaboration"];
+  // The active tab and the shared tab open instead, owned by the app so the sidebar can select.
+  selectedTab: string | null;
+  onSelectTab: (tabId: string) => void;
+  sharedTabId: string | null;
+  onSelectShared: (tabId: string | null) => void;
 }) {
   const [draft, setDraft] = useState("");
   const [source, setSource] = useState<Suggestion | null>(null);
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
-  const [taskId, setTaskId] = useState<string | null>(null);
-  const [scenario, setScenario] = useState<"success" | "validation-failure">(
-    "success",
-  );
   const [announcement, setAnnouncement] = useState("");
   const [invite, setInvite] = useState<string | null>(null);
-  const [runnerChoice, setRunnerChoice] = useState<"mock" | "codex" | null>(
-    null,
-  );
-  const runner =
-    runnerChoice ?? (provider?.status === "connected" ? "codex" : "mock");
-  const [options, setOptions] = useState<RunConfiguration>({
-    model: "",
-    effort: "medium",
-    mode: "read-only",
-    concurrency: 2,
-  });
-  const selectedModel =
-    provider?.models.find((item) => item.id === options.model) ??
-    provider?.models.find((item) => item.isDefault) ??
-    provider?.models[0];
-  const configuration: RunConfiguration = {
-    ...options,
-    model: selectedModel?.id ?? "",
-    effort: selectedModel?.efforts.includes(options.effort)
-      ? options.effort
-      : ((selectedModel?.defaultEffort ??
-          "medium") as RunConfiguration["effort"]),
-  };
-  const execution =
-    room.executions.find((run) => run.id === selectedRunId) ??
-    currentExecution(room);
-  async function run(prompt: string) {
-    const result = await perform(() =>
-      window.desktop.startExecution({
-        roomId: room.id,
-        prompt,
-        scenario,
-        runner,
-        ...(runner === "codex" ? { configuration } : {}),
-        ...(source
-          ? { suggestionId: source.id, suggestionRevision: source.revision }
-          : {}),
-      }),
-    );
-    if (!result) return false;
-    setSource(null);
-    setSelectedRunId(null);
-    setTaskId(null);
-    setAnnouncement(
-      runner === "codex" ? "Codex execution started." : "Simulation started.",
-    );
-    return true;
+  const [viewing, setViewing] = useState<{
+    tabId: string;
+    key: string;
+  } | null>(null);
+  const tab = room.tabs.find((item) => item.id === selectedTab) ?? room.tabs[0];
+  const harness = harnesses.find((item) => item.id === tab?.loadout.harness);
+  const agentKey = viewing && viewing.tabId === tab?.id ? viewing.key : null;
+  // Mission Control and the main area both follow the active tab.
+  function selectTab(id: string) {
+    setViewing(null);
+    onSelectTab(id);
   }
+  const leaveShared = useCallback(() => onSelectShared(null), [onSelectShared]);
+  function leaveAgent() {
+    const key = agentKey;
+    setViewing(null);
+    // Focus returns to the card that opened the drill-in.
+    if (key)
+      requestAnimationFrame(() =>
+        document
+          .querySelector<HTMLElement>(`[data-agent-card="${CSS.escape(key)}"]`)
+          ?.focus(),
+      );
+  }
+  const active = roomBusy(room);
   return (
     <main className="room-view">
       <header className="room-header">
@@ -174,62 +161,64 @@ function RoomView({
           mode="window"
           promptResizeLabel="Resize Mission Control"
           aiPanel={
-            <AIActivityPanel
+            <TabsPanel
               room={room}
-              execution={execution}
-              taskId={taskId}
-              onTaskSelect={setTaskId}
-              onExecutionSelect={(id) => {
-                setSelectedRunId(id);
-                setTaskId(null);
-              }}
+              tab={tab}
+              agentKey={agentKey}
+              onSelect={selectTab}
+              onAgentBack={leaveAgent}
+              harnesses={harnesses}
+              disabled={disabled}
+              stale={stale}
               draft={draft}
               onDraftChange={setDraft}
               source={source}
               onSourceClear={() => setSource(null)}
-              scenario={scenario}
-              onScenarioChange={setScenario}
-              onSubmit={run}
-              disabled={disabled}
-              active={active}
-              stale={stale}
-              runner={runner}
-              ready={
-                runner === "mock" ||
-                (provider?.status === "connected" && Boolean(selectedModel))
-              }
-              controls={
-                <RunControls
-                  runner={runner}
-                  onRunner={setRunnerChoice}
-                  provider={provider}
-                  configuration={configuration}
-                  onConfiguration={setOptions}
-                  disabled={active || disabled}
-                />
-              }
+              onSent={(message) => {
+                setDraft("");
+                setAnnouncement(message);
+              }}
+              sharedTabId={sharedTabId}
+              onSelectShared={(id) => {
+                setViewing(null);
+                onSelectShared(id);
+              }}
+              onLeaveShared={leaveShared}
+              readAlong={readAlong}
+              connected={collaboration?.status === "connected"}
+              clockOffsetMs={collaboration?.clockOffsetMs}
             />
           }
           memberChatPanel={<GroupChatPanel room={room} disabled={disabled} />}
           promptPanel={
             <MissionControlPanel
               room={room}
-              execution={execution}
-              selectedTaskId={taskId}
-              onTaskSelect={setTaskId}
+              tab={tab}
+              harness={harness}
+              agentKey={agentKey}
+              onSelectAgent={(key) =>
+                key && tab ? setViewing({ tabId: tab.id, key }) : leaveAgent()
+              }
               disabled={disabled}
-              stale={stale}
+              watching={
+                room.shared?.sharedTabs?.find(
+                  (item) => item.tabId === sharedTabId,
+                )?.title
+              }
               onUseSuggestion={(suggestion) => {
                 setDraft(suggestion.prompt);
                 setSource(suggestion);
+                setViewing(null);
                 setAnnouncement(
-                  "Prompt added to the composer. Review it, then start the run.",
+                  "Prompt added to the active tab's composer. Review it, then send.",
                 );
-                document
-                  .querySelector<HTMLTextAreaElement>(
-                    '[aria-label="Agent direction"]',
-                  )
-                  ?.focus();
+                requestAnimationFrame(() =>
+                  document
+                    .querySelector<HTMLTextAreaElement>(
+                      '[aria-label="Message"]',
+                    )
+                    ?.focus(),
+                );
               }}
             />
           }
@@ -245,26 +234,28 @@ function RoomView({
 export default function App() {
   const { snapshot, health, pending, error } = useDesktop();
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(() =>
-    localStorage.getItem("multiplayer:room"),
+    getStored("multiplayer:room"),
   );
   const [sidebarOpen, setSidebarOpen] = useState(
-    () => localStorage.getItem("multiplayer:sidebar") !== "closed",
+    () => getStored("multiplayer:sidebar") !== "closed",
   );
   const [creating, setCreating] = useState(false);
   const [roomName, setRoomName] = useState("");
   const [roomScope, setRoomScope] = useState<"local" | "shared">("local");
+  // Each room's active tab, remembered across launches.
+  const [selectedTabs, setSelectedTabs] = useState<Record<string, string>>({});
+  // Another host's read-along tab open in a room's main area.
+  const [shared, setShared] = useState<{
+    roomId: string;
+    tabId: string;
+  } | null>(null);
   const room =
     snapshot?.rooms.find((room) => room.id === selectedRoomId) ??
     snapshot?.rooms[0];
-  const active = Boolean(
-    snapshot?.rooms.some((room) =>
-      room.executions.some((run) => run.status === "running"),
-    ),
-  );
   const disabled = pending > 0 || health.status !== "live";
   function toggleSidebar() {
     setSidebarOpen((current) => {
-      localStorage.setItem("multiplayer:sidebar", current ? "closed" : "open");
+      setStored("multiplayer:sidebar", current ? "closed" : "open");
       return !current;
     });
   }
@@ -280,7 +271,29 @@ export default function App() {
   }, []);
   function selectRoom(id: string) {
     setSelectedRoomId(id);
-    localStorage.setItem("multiplayer:room", id);
+    setStored("multiplayer:room", id);
+  }
+  const selectedTab = (roomId: string) =>
+    selectedTabs[roomId] ?? getStored(tabKey(roomId));
+  function selectTab(roomId: string, tabId: string) {
+    setSelectedTabs((current) => ({ ...current, [roomId]: tabId }));
+    setStored(tabKey(roomId), tabId);
+    setShared(null);
+  }
+  const selectShared = useCallback(
+    (roomId: string, tabId: string | null) =>
+      setShared(tabId ? { roomId, tabId } : null),
+    [],
+  );
+  async function openChat(roomId: string, tab: Tab, closed: boolean) {
+    selectRoom(roomId);
+    if (closed) {
+      const result = await perform(() =>
+        window.desktop.reopenTab(roomId, tab.id),
+      );
+      if (!result) return;
+    }
+    selectTab(roomId, tab.id);
   }
   async function createRoom() {
     const result = await perform(
@@ -354,105 +367,146 @@ export default function App() {
         >
           {sidebarOpen ? (
             <>
-              <div className="sidebar-heading">
-                <span>ROOMS</span>
-                <Button
-                  size="icon-xs"
-                  variant="ghost"
-                  aria-label="New room"
-                  disabled={disabled}
-                  onClick={() => {
-                    setCreating(!creating);
-                    setRoomScope(
-                      snapshot?.collaboration?.auth === "signed_in"
-                        ? "shared"
-                        : "local",
-                    );
-                  }}
-                >
-                  <Plus size={16} />
-                </Button>
-              </div>
-              {creating && (
-                <form
-                  className="create-room"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    void createRoom();
-                  }}
-                >
-                  <Input
-                    autoFocus
-                    aria-label="Room name"
-                    maxLength={80}
-                    placeholder="Room name"
-                    value={roomName}
-                    onChange={(event) => setRoomName(event.target.value)}
-                  />
-                  <select
-                    aria-label="Room visibility"
-                    value={roomScope}
-                    onChange={(event) =>
-                      setRoomScope(event.target.value as "local" | "shared")
-                    }
-                  >
-                    <option value="local">Local to this desktop</option>
-                    <option
-                      value="shared"
-                      disabled={snapshot?.collaboration?.auth !== "signed_in"}
-                    >
-                      Shared with members
-                    </option>
-                  </select>
-                  <div>
+              <div className="sidebar-sections">
+                <SidebarSection
+                  id="rooms"
+                  title="Rooms"
+                  count={snapshot?.rooms.length}
+                  action={
                     <Button
-                      size="xs"
-                      type="submit"
-                      disabled={disabled || !roomName.trim()}
-                    >
-                      Create room
-                    </Button>
-                    <Button
-                      size="xs"
+                      size="icon-xs"
                       variant="ghost"
-                      onClick={() => setCreating(false)}
+                      aria-label="New room"
+                      title="New room"
+                      aria-expanded={creating}
+                      disabled={disabled}
+                      onClick={() => {
+                        setCreating(!creating);
+                        setRoomScope(
+                          snapshot?.collaboration?.auth === "signed_in"
+                            ? "shared"
+                            : "local",
+                        );
+                      }}
                     >
-                      Cancel
+                      <Plus size={16} />
                     </Button>
-                  </div>
-                </form>
-              )}
-              <nav className="room-list" aria-label="Rooms">
-                {snapshot?.rooms.map((item) => (
-                  <button
-                    type="button"
-                    key={item.id}
-                    aria-current={item.id === room?.id ? "page" : undefined}
-                    onClick={() => selectRoom(item.id)}
-                  >
-                    {item.shared ? <Users size={15} /> : <Hash size={15} />}
-                    <span>{item.name}</span>
-                    {item.executions.some(
-                      (run) => run.status === "running",
-                    ) && (
-                      <span
-                        className="room-running"
-                        aria-label="Execution running"
+                  }
+                >
+                  {creating && (
+                    <form
+                      className="create-room"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        void createRoom();
+                      }}
+                    >
+                      <Input
+                        autoFocus
+                        aria-label="Room name"
+                        maxLength={80}
+                        placeholder="Room name"
+                        value={roomName}
+                        onChange={(event) => setRoomName(event.target.value)}
                       />
-                    )}
-                  </button>
-                ))}
-              </nav>
-              <SharedConnection
-                connection={snapshot?.collaboration}
-                disabled={disabled}
-                onRoom={selectRoom}
-              />
-              <ProviderConnection
-                provider={snapshot?.provider}
-                disabled={disabled}
-                active={active}
-              />
+                      <select
+                        aria-label="Room visibility"
+                        value={roomScope}
+                        onChange={(event) =>
+                          setRoomScope(event.target.value as "local" | "shared")
+                        }
+                      >
+                        <option value="local">Local to this desktop</option>
+                        <option
+                          value="shared"
+                          disabled={
+                            snapshot?.collaboration?.auth !== "signed_in"
+                          }
+                        >
+                          Shared with members
+                        </option>
+                      </select>
+                      <div>
+                        <Button
+                          size="xs"
+                          type="submit"
+                          disabled={disabled || !roomName.trim()}
+                        >
+                          Create room
+                        </Button>
+                        <Button
+                          size="xs"
+                          variant="ghost"
+                          onClick={() => setCreating(false)}
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    </form>
+                  )}
+                  <nav className="room-list" aria-label="Rooms">
+                    {snapshot?.rooms.map((item) => (
+                      <Fragment key={item.id}>
+                        <button
+                          type="button"
+                          aria-current={
+                            item.id === room?.id ? "page" : undefined
+                          }
+                          onClick={() => selectRoom(item.id)}
+                        >
+                          {item.shared ? (
+                            <Users size={15} />
+                          ) : (
+                            <Hash size={15} />
+                          )}
+                          <span>{item.name}</span>
+                          {roomBusy(item) && (
+                            <span
+                              className="room-running"
+                              aria-label="Tab running"
+                            />
+                          )}
+                        </button>
+                        {item.id === room?.id && (
+                          <ChatList
+                            room={item}
+                            activeTab={
+                              shared?.roomId === item.id
+                                ? null
+                                : (item.tabs.find(
+                                    (tab) => tab.id === selectedTab(item.id),
+                                  )?.id ??
+                                  item.tabs[0]?.id ??
+                                  null)
+                            }
+                            disabled={disabled}
+                            onOpen={(tab, closed) =>
+                              void openChat(item.id, tab, closed)
+                            }
+                          />
+                        )}
+                      </Fragment>
+                    ))}
+                  </nav>
+                </SidebarSection>
+                <SidebarSection id="account" title="Account">
+                  <SharedConnection
+                    connection={snapshot?.collaboration}
+                    disabled={disabled}
+                    onRoom={selectRoom}
+                  />
+                </SidebarSection>
+                <SidebarSection
+                  id="harnesses"
+                  title="Harnesses"
+                  count={snapshot?.harnesses?.length}
+                >
+                  <HarnessSettings
+                    harnesses={snapshot?.harnesses ?? []}
+                    disabled={disabled}
+                  />
+                </SidebarSection>
+              </div>
               <div className="sidebar-footer">
                 <div className="local-avatar">Y</div>
                 <div>
@@ -487,9 +541,14 @@ export default function App() {
                 room.shared && snapshot?.collaboration?.status !== "connected",
               )
             }
-            active={active}
             stale={health.status !== "live"}
-            provider={snapshot?.provider}
+            harnesses={snapshot?.harnesses ?? []}
+            readAlong={snapshot?.readAlong}
+            collaboration={snapshot?.collaboration}
+            selectedTab={selectedTab(room.id)}
+            onSelectTab={(tabId) => selectTab(room.id, tabId)}
+            sharedTabId={shared?.roomId === room.id ? shared.tabId : null}
+            onSelectShared={(tabId) => selectShared(room.id, tabId)}
           />
         ) : (
           <main className="loading-screen">
@@ -512,7 +571,7 @@ export default function App() {
         </span>
         <span>
           {room?.shared
-            ? "Chat and suggestions shared · Runs stay on this desktop"
+            ? "Chat and suggestions shared · Tabs run on this desktop"
             : "Saved on this desktop · Private local room"}
         </span>
       </footer>

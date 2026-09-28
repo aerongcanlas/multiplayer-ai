@@ -12,6 +12,26 @@ import {
   type RoomNotice,
 } from "../shared/collaboration";
 import type { Command, Room } from "../shared/contracts";
+
+// How a read-along call ended. Read-along never reports through the room-wide status.
+export type ReadAlongOutcome<T> =
+  | { ok: true; data: T }
+  | { ok: false; reason: "not_member" | "migration_missing" | "retry" };
+export type ReadAlongRpc =
+  | "desktop_tab_share_publish"
+  | "desktop_tab_share_head"
+  | "desktop_tab_share_pull"
+  | "desktop_tab_share_reconcile";
+
+/** Maps a read-along RPC error without touching collaboration state. */
+export function readAlongFailure(error: {
+  code?: string;
+}): "not_member" | "migration_missing" | "retry" {
+  if (error.code === "42501") return "not_member";
+  if (["PGRST202", "42883", "42P01"].includes(error.code ?? ""))
+    return "migration_missing";
+  return "retry";
+}
 import type { AuthStorage } from "./auth-storage";
 import { OAuthCallback } from "./oauth-callback";
 
@@ -23,6 +43,8 @@ export class CollaborationClient {
   private epoch = 0;
   private refreshTimer?: ReturnType<typeof setInterval>;
   private queue: Promise<unknown> = Promise.resolve();
+  // Read-along publishes and pulls queue here, so they never delay refreshes or commands.
+  private readAlongQueue: Promise<unknown> = Promise.resolve();
   private refreshing?: Promise<void>;
   private closed = false;
   private allowSession = true;
@@ -203,6 +225,35 @@ export class CollaborationClient {
     this.queue = next.catch(() => {});
     return next;
   }
+  /** The account epoch; read-along results from an older epoch are dropped. */
+  get currentEpoch() {
+    return this.epoch;
+  }
+  /**
+   * Calls a read-along RPC on its own queue. Results for a changed account resolve as `retry`
+   * with the caller expected to check `currentEpoch`; failures never flip collaboration status.
+   */
+  readAlong<T>(
+    name: ReadAlongRpc,
+    args: Record<string, unknown>,
+  ): Promise<ReadAlongOutcome<T>> {
+    const epoch = this.epoch;
+    const work = async (): Promise<ReadAlongOutcome<T>> => {
+      if (this.state.auth !== "signed_in" || epoch !== this.epoch)
+        return { ok: false, reason: "retry" };
+      try {
+        const { data, error } = await this.client.rpc(name, args);
+        if (epoch !== this.epoch) return { ok: false, reason: "retry" };
+        if (error) return { ok: false, reason: readAlongFailure(error) };
+        return { ok: true, data: data as T };
+      } catch {
+        return { ok: false, reason: "retry" };
+      }
+    };
+    const next = this.readAlongQueue.then(work, work);
+    this.readAlongQueue = next.catch(() => {});
+    return next;
+  }
   private accept(data: unknown, epoch: number) {
     if (this.closed || epoch !== this.epoch)
       throw new Error(
@@ -214,11 +265,15 @@ export class CollaborationClient {
     this.rooms = snapshot.rooms.map((room) =>
       asSharedRoom(room, snapshot.userId, this.config.url),
     );
+    const serverNow = snapshot.now ? Date.parse(snapshot.now) : NaN;
     this.state = {
       ...this.state,
       status: "connected",
       message: null,
       lastSyncedAt: new Date().toISOString(),
+      ...(Number.isFinite(serverNow)
+        ? { clockOffsetMs: serverNow - Date.now() }
+        : {}),
     };
     this.changed();
   }

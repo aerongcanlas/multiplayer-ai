@@ -169,6 +169,110 @@ export type Database = {
           },
         ];
       };
+      desktop_tab_share: {
+        Row: {
+          created_at: string;
+          device_id: string;
+          harness: string;
+          host_id: string;
+          model: string;
+          rev: number;
+          room_id: string;
+          status: string;
+          switch_on: boolean;
+          tab_id: string;
+          title: string;
+          updated_at: string;
+        };
+        Insert: {
+          created_at?: string;
+          device_id: string;
+          harness: string;
+          host_id: string;
+          model: string;
+          rev?: number;
+          room_id: string;
+          status: string;
+          switch_on: boolean;
+          tab_id: string;
+          title: string;
+          updated_at?: string;
+        };
+        Update: {
+          created_at?: string;
+          device_id?: string;
+          harness?: string;
+          host_id?: string;
+          model?: string;
+          rev?: number;
+          room_id?: string;
+          status?: string;
+          switch_on?: boolean;
+          tab_id?: string;
+          title?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "desktop_tab_share_host_id_fkey";
+            columns: ["host_id"];
+            isOneToOne: false;
+            referencedRelation: "user_profile";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "desktop_tab_share_room_id_fkey";
+            columns: ["room_id"];
+            isOneToOne: false;
+            referencedRelation: "room";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      desktop_tab_share_entry: {
+        Row: {
+          body: Json;
+          kind: string;
+          rev: number;
+          seq: number;
+          share: string;
+          state: string | null;
+          tab_id: string;
+          updated_at: string;
+          version: number;
+        };
+        Insert: {
+          body: Json;
+          kind: string;
+          rev: number;
+          seq: number;
+          share: string;
+          state?: string | null;
+          tab_id: string;
+          updated_at?: string;
+          version: number;
+        };
+        Update: {
+          body?: Json;
+          kind?: string;
+          rev?: number;
+          seq?: number;
+          share?: string;
+          state?: string | null;
+          tab_id?: string;
+          updated_at?: string;
+          version?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "desktop_tab_share_entry_tab_id_fkey";
+            columns: ["tab_id"];
+            isOneToOne: false;
+            referencedRelation: "desktop_tab_share";
+            referencedColumns: ["tab_id"];
+          },
+        ];
+      };
       message: {
         Row: {
           author_id: string;
@@ -411,6 +515,30 @@ export type Database = {
       };
       desktop_room_command: { Args: { p_command: Json }; Returns: Json };
       desktop_room_snapshot: { Args: never; Returns: Json };
+      desktop_tab_share_head: { Args: { p_tab_id: string }; Returns: Json };
+      desktop_tab_share_json: {
+        Args: { t: Database["public"]["Tables"]["desktop_tab_share"]["Row"] };
+        Returns: Json;
+      };
+      desktop_tab_share_publish: {
+        Args: { p_entries: Json; p_tab: Json };
+        Returns: Json;
+      };
+      desktop_tab_share_pull: {
+        Args: {
+          p_after_rev: number;
+          p_after_seq: number;
+          p_before_seq: number;
+          p_byte_budget: number;
+          p_limit: number;
+          p_tab_id: string;
+        };
+        Returns: Json;
+      };
+      desktop_tab_share_reconcile: {
+        Args: { p_device_id: string; p_live_tab_ids: string[] };
+        Returns: undefined;
+      };
       desktop_save_generated_suggestions: {
         Args: {
           p_message_ids: string[];

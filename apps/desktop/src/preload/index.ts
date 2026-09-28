@@ -4,7 +4,10 @@ import {
   COMMAND_CHANNEL,
   SNAPSHOT_CHANNEL,
   HEALTH_CHANNEL,
+  TRANSCRIPT_CHANNEL,
+  SHARED_TRANSCRIPT_CHANNEL,
 } from "../shared/channels";
+import type { SharedTranscriptMessage } from "../shared/collaboration";
 import type {
   Command,
   DesktopBridge,
@@ -12,22 +15,11 @@ import type {
   Result,
   Snapshot,
 } from "../shared/contracts";
+import type { TranscriptBatch } from "../shared/tabs";
 
 const invoke = (command: Command): Promise<Result> =>
   ipcRenderer.invoke(COMMAND_CHANNEL, command);
 const bridge: DesktopBridge = {
-  refreshProvider: () => invoke({ type: "provider.refresh" }),
-  connectProvider: () => invoke({ type: "provider.connect" }),
-  cancelProviderLogin: () => invoke({ type: "provider.cancel" }),
-  disconnectProvider: () => invoke({ type: "provider.disconnect" }),
-  respondToApproval: (roomId, executionId, approvalId, decision) =>
-    invoke({
-      type: "approval.respond",
-      roomId,
-      executionId,
-      approvalId,
-      decision,
-    }),
   protocolVersion: PROTOCOL_VERSION,
   getSnapshot: () => invoke({ type: "snapshot" }),
   createRoom: (name, scope) => invoke({ type: "room.create", name, scope }),
@@ -49,9 +41,6 @@ const bridge: DesktopBridge = {
       prompt,
       expectedRevision,
     }),
-  startExecution: (input) => invoke({ ...input, type: "execution.start" }),
-  stopExecution: (roomId, executionId) =>
-    invoke({ type: "execution.stop", roomId, executionId }),
   onSnapshot: (listener) => {
     const handler = (_event: Electron.IpcRendererEvent, snapshot: Snapshot) =>
       listener(snapshot);
@@ -63,6 +52,70 @@ const bridge: DesktopBridge = {
       listener(health);
     ipcRenderer.on(HEALTH_CHANNEL, handler);
     return () => ipcRenderer.removeListener(HEALTH_CHANNEL, handler);
+  },
+  openTab: (roomId, harness) => invoke({ type: "tab.open", roomId, harness }),
+  renameTab: (roomId, tabId, title) =>
+    invoke({ type: "tab.rename", roomId, tabId, title }),
+  closeTab: (roomId, tabId, confirm) =>
+    invoke({
+      type: "tab.close",
+      roomId,
+      tabId,
+      ...(confirm ? { confirm: true as const } : {}),
+    }),
+  setLoadout: (roomId, tabId, loadout) =>
+    invoke({ type: "tab.setLoadout", roomId, tabId, loadout }),
+  sendToTab: (input) => invoke({ ...input, type: "tab.send" }),
+  stopTab: (roomId, tabId) => invoke({ type: "tab.stop", roomId, tabId }),
+  reopenTab: (roomId, tabId) => invoke({ type: "tab.reopen", roomId, tabId }),
+  deleteClosedTab: (roomId, tabId) =>
+    invoke({ type: "tab.delete", roomId, tabId }),
+  setReadAlong: (roomId, tabId, on) =>
+    invoke({ type: "tab.setReadAlong", roomId, tabId, on }),
+  loadTranscript: (roomId, tabId, beforeSeq, agentKey) =>
+    invoke({
+      type: "tab.transcript",
+      roomId,
+      tabId,
+      ...(beforeSeq ? { beforeSeq } : {}),
+      ...(agentKey ? { agentKey } : {}),
+    }),
+  loadAgents: (roomId, tabId) => invoke({ type: "tab.agents", roomId, tabId }),
+  resetTabSession: (roomId, tabId) =>
+    invoke({ type: "tab.resetSession", roomId, tabId }),
+  respondToTabApproval: (roomId, tabId, approvalId, decision) =>
+    invoke({ type: "approval.respond", roomId, tabId, approvalId, decision }),
+  answerQuestion: (roomId, tabId, questionId, answers) =>
+    invoke({ type: "question.answer", roomId, tabId, questionId, answers }),
+  refreshHarness: (harness) => invoke({ type: "harness.refresh", harness }),
+  signInHarness: (harness) => invoke({ type: "harness.signIn", harness }),
+  chooseHarnessExecutable: (harness) =>
+    invoke({ type: "harness.chooseExecutable", harness }),
+  useManagedHarness: (harness) =>
+    invoke({ type: "harness.useManaged", harness }),
+  acknowledgeHarnessNotice: (harness) =>
+    invoke({ type: "harness.acknowledgeNotice", harness }),
+  onTranscript: (listener) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      batches: TranscriptBatch[],
+    ) => listener(batches);
+    ipcRenderer.on(TRANSCRIPT_CHANNEL, handler);
+    return () => ipcRenderer.removeListener(TRANSCRIPT_CHANNEL, handler);
+  },
+  watchSharedTab: (roomId, tabId) =>
+    invoke({ type: "sharedTab.watch", roomId, tabId }),
+  unwatchSharedTab: () => invoke({ type: "sharedTab.unwatch" }),
+  loadSharedTranscript: (roomId, tabId, beforeSeq) =>
+    invoke({ type: "sharedTab.load", roomId, tabId, beforeSeq }),
+  // Delivers only the message data, never the IPC event.
+  onSharedTranscript: (listener) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      message: SharedTranscriptMessage,
+    ) => listener(message);
+    ipcRenderer.on(SHARED_TRANSCRIPT_CHANNEL, handler);
+    return () => ipcRenderer.removeListener(SHARED_TRANSCRIPT_CHANNEL, handler);
   },
 };
 contextBridge.exposeInMainWorld("desktop", Object.freeze(bridge));

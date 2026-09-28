@@ -17,7 +17,7 @@
     "test": "turbo run test test:threads",
     "test:desktop": "turbo run test --filter=@multiplayer-ai/desktop",
     "test:ui:e2e": "turbo run test:e2e --filter=@multiplayer-ai/ui",
-    "test:desktop:e2e": "turbo run test:e2e test:shared test:codex --filter=@multiplayer-ai/desktop --concurrency=1",
+    "test:desktop:e2e": "turbo run test:e2e test:shared test:codex test:tabs --filter=@multiplayer-ai/desktop --concurrency=1",
     "test:desktop:packaged": "turbo run test:packaged --filter=@multiplayer-ai/desktop",
     "package:desktop": "turbo run package --filter=@multiplayer-ai/desktop",
     "dist:desktop": "turbo run dist --filter=@multiplayer-ai/desktop",

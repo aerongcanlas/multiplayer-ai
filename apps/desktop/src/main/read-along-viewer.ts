@@ -1,0 +1,238 @@
+import {
+  sharedPullSchema,
+  type SharedTab,
+  type SharedTranscriptMessage,
+} from "../shared/collaboration";
+import type { CollaborationClient } from "./collaboration-client";
+
+const INTERVAL_MS = 1_000;
+const PAGE = 200;
+const BYTE_BUDGET = 1_048_576;
+// The initial page's cursor: every entry at or below the record's rev has been read.
+const MAX_SEQ = 2_147_483_647;
+
+type Collaboration = Pick<
+  CollaborationClient,
+  "state" | "currentEpoch" | "readAlong"
+>;
+interface Watch {
+  roomId: string;
+  tabId: string;
+  epoch: number;
+  cursor?: { rev: number; seq: number };
+  record?: SharedTab;
+  inflight: boolean;
+  timer?: ReturnType<typeof setTimeout>;
+}
+
+/**
+ * Pulls one watched shared tab for the renderer. It polls every second while the tab's record
+ * says running or awaiting the host and the window is visible, and otherwise pulls once per room
+ * snapshot. Every row is parsed with a strict schema here, and a batch that fails is dropped.
+ */
+export class ReadAlongViewer {
+  private watching?: Watch;
+  private epoch: number;
+
+  constructor(
+    private collaboration: Collaboration,
+    // The shared tabs listed for a room in the current view, after own-device filtering.
+    private listed: (roomId: string) => SharedTab[] | undefined,
+    private send: (message: SharedTranscriptMessage) => void,
+    private visible: () => boolean,
+    private interval = INTERVAL_MS,
+  ) {
+    this.epoch = collaboration.currentEpoch;
+  }
+
+  async watch(roomId: string, tabId: string) {
+    if (!this.listed(roomId)?.some((tab) => tab.tabId === tabId))
+      throw new Error("That shared tab is no longer available.");
+    if (
+      this.watching?.roomId === roomId &&
+      this.watching.tabId === tabId &&
+      this.watching.epoch === this.collaboration.currentEpoch
+    )
+      return;
+    this.unwatch();
+    const watch: Watch = {
+      roomId,
+      tabId,
+      epoch: this.collaboration.currentEpoch,
+      inflight: false,
+    };
+    this.watching = watch;
+    this.send({ type: "status", roomId, tabId, state: "loading" });
+    await this.pull(watch);
+  }
+
+  unwatch() {
+    if (this.watching) clearTimeout(this.watching.timer);
+    this.watching = undefined;
+  }
+
+  /** An older page of the watched tab, newest first below `beforeSeq`. */
+  async loadEarlier(roomId: string, tabId: string, beforeSeq: number) {
+    const watch = this.watching;
+    if (!watch || watch.roomId !== roomId || watch.tabId !== tabId)
+      throw new Error("Open the shared tab before loading its history.");
+    const page = await this.request(watch, {
+      p_after_rev: null,
+      p_after_seq: null,
+      p_before_seq: beforeSeq,
+    });
+    if (page === "stale") return;
+    if (!page.ok) throw new Error("Could not load earlier shared entries.");
+    this.send({
+      type: "entries",
+      roomId,
+      tabId,
+      record: page.data.record,
+      entries: page.data.entries,
+      earlierSeq: page.data.next?.seq ?? null,
+      now: page.data.now,
+    });
+  }
+
+  /** Called after each room snapshot or collaboration change. */
+  snapshotChanged() {
+    if (this.collaboration.currentEpoch !== this.epoch) {
+      this.epoch = this.collaboration.currentEpoch;
+      this.unwatch();
+      this.send({ type: "clear" });
+      return;
+    }
+    const watch = this.watching;
+    if (!watch) return;
+    if (this.collaboration.state.status !== "connected") {
+      this.send({
+        type: "status",
+        roomId: watch.roomId,
+        tabId: watch.tabId,
+        state: "reconnecting",
+      });
+      return;
+    }
+    if (!this.listed(watch.roomId)?.some((tab) => tab.tabId === watch.tabId)) {
+      // Closed, or the host left the room: the list drops the tab.
+      this.unwatch();
+      this.send({
+        type: "status",
+        roomId: watch.roomId,
+        tabId: watch.tabId,
+        state: "unshared",
+      });
+      return;
+    }
+    if (!watch.timer) void this.pull(watch);
+  }
+
+  /** The window was shown: pull at once. */
+  visibilityChanged() {
+    const watch = this.watching;
+    if (watch && this.visible()) void this.pull(watch);
+  }
+
+  private async request(
+    watch: Watch,
+    cursor: Record<string, number | null>,
+  ): Promise<
+    | "stale"
+    | { ok: true; data: ReturnType<typeof sharedPullSchema.parse> }
+    | { ok: false; reason: string }
+  > {
+    const outcome = await this.collaboration.readAlong<unknown>(
+      "desktop_tab_share_pull",
+      {
+        p_tab_id: watch.tabId,
+        p_before_seq: null,
+        p_limit: PAGE,
+        p_byte_budget: BYTE_BUDGET,
+        ...cursor,
+      },
+    );
+    if (
+      this.watching !== watch ||
+      watch.epoch !== this.collaboration.currentEpoch
+    )
+      return "stale";
+    if (!outcome.ok) return outcome;
+    const parsed = sharedPullSchema.safeParse(outcome.data);
+    if (!parsed.success) {
+      console.warn("Dropped a shared transcript page that failed validation.");
+      return { ok: false, reason: "invalid" };
+    }
+    return { ok: true, data: parsed.data };
+  }
+
+  private async pull(watch: Watch): Promise<void> {
+    if (watch.inflight || this.watching !== watch) return;
+    clearTimeout(watch.timer);
+    watch.timer = undefined;
+    watch.inflight = true;
+    const initial = !watch.cursor;
+    const page = await this.request(
+      watch,
+      watch.cursor
+        ? { p_after_rev: watch.cursor.rev, p_after_seq: watch.cursor.seq }
+        : { p_after_rev: null, p_after_seq: null },
+    );
+    watch.inflight = false;
+    if (page === "stale") return;
+    const { roomId, tabId } = watch;
+    if (!page.ok) {
+      if (page.reason === "not_member") {
+        this.unwatch();
+        this.send({ type: "status", roomId, tabId, state: "unshared" });
+      } else if (page.reason === "invalid") {
+        // Keep the cursor; a later pull may carry a valid page.
+      } else
+        this.send({
+          type: "status",
+          roomId,
+          tabId,
+          state:
+            initial || page.reason === "migration_missing"
+              ? "failed"
+              : "reconnecting",
+        });
+      if (page.reason === "retry" && !initial) this.schedule(watch);
+      return;
+    }
+    const { record, entries, next, now } = page.data;
+    watch.record = record;
+    if (initial) watch.cursor = { rev: record.rev, seq: MAX_SEQ };
+    else if (next) watch.cursor = next;
+    else if (entries.length)
+      watch.cursor = { rev: entries.at(-1)!.rev, seq: entries.at(-1)!.seq };
+    this.send({
+      type: "entries",
+      roomId,
+      tabId,
+      record,
+      entries,
+      ...(initial ? { earlierSeq: next?.seq ?? null } : {}),
+      now,
+    });
+    this.send({ type: "status", roomId, tabId, state: "live" });
+    // A page cut by the byte budget continues at once.
+    if (!initial && next) return this.pull(watch);
+    this.schedule(watch);
+  }
+
+  private schedule(watch: Watch) {
+    const active =
+      watch.record?.status === "running" ||
+      watch.record?.status === "awaiting_host";
+    if (!active || !this.visible() || this.watching !== watch) return;
+    watch.timer = setTimeout(() => {
+      watch.timer = undefined;
+      void this.pull(watch);
+    }, this.interval);
+    watch.timer.unref?.();
+  }
+
+  close() {
+    this.unwatch();
+  }
+}

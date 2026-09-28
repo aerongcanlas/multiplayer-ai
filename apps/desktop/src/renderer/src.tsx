@@ -2,6 +2,7 @@ import { Component, StrictMode, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
 import { connectDesktop } from "./lib/desktop-store";
+import { connectTranscripts } from "./lib/transcript-store";
 import "./globals.css";
 import "./desktop.css";
 
@@ -30,7 +31,12 @@ class ErrorBoundary extends Component<
 }
 
 const disconnect = connectDesktop();
-if (import.meta.hot) import.meta.hot.dispose(disconnect);
+const disconnectTranscripts = connectTranscripts();
+if (import.meta.hot)
+  import.meta.hot.dispose(() => {
+    disconnect();
+    disconnectTranscripts();
+  });
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <ErrorBoundary>
