@@ -198,8 +198,14 @@ else {
         ? {
             url: process.env.MP_TEST_SUPABASE_URL,
             publishableKey: "sb_publishable_local_test",
+            apiUrl: process.env.MP_TEST_API_URL,
           }
-        : supabaseConfig,
+        : {
+            ...supabaseConfig,
+            apiUrl:
+              (!app.isPackaged && process.env.MP_API_URL) ||
+              supabaseConfig.apiUrl,
+          },
       new AuthStorage(app.getPath("userData"), safeStorage),
       (url) => shell.openExternal(url),
       () => {
@@ -208,6 +214,7 @@ else {
         viewer?.snapshotChanged();
       },
       testing,
+      !app.isPackaged,
     );
     coordinator = new DesktopCoordinator(
       supervisor,

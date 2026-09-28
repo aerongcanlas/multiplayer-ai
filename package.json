@@ -9,6 +9,8 @@
     "dev": "turbo run dev --parallel",
     "dev:web": "pnpm --filter @multiplayer-ai/web dev",
     "dev:desktop": "pnpm --filter @multiplayer-ai/desktop dev",
+    "dev:shared": "set \"MP_API_URL=http://127.0.0.1:3001\" && turbo run dev --parallel --filter=@multiplayer-ai/api --filter=@multiplayer-ai/desktop --env-mode=loose",
+    "dev:api": "pnpm --filter @multiplayer-ai/api dev",
     "build": "turbo run build",
     "build:web": "turbo run build --filter=@multiplayer-ai/web",
     "build:desktop": "turbo run build --filter=@multiplayer-ai/desktop",

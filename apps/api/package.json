@@ -1,0 +1,32 @@
+{
+  "name": "@multiplayer-ai/api",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./dist/server.js",
+    "./testing": "./scripts/database.mjs"
+  },
+  "scripts": {
+    "dev": "node --env-file-if-exists=.env --import tsx --watch src/main.ts",
+    "start": "node --env-file-if-exists=.env dist/main.js",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "test": "pnpm build && node --test scripts/rooms.test.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.115.0",
+    "fastify": "5.12.5",
+    "pg": "^8.16.3",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@multiplayer-ai/db": "workspace:*",
+    "@multiplayer-ai/eslint-config": "workspace:*",
+    "@types/node": "^24",
+    "@types/pg": "^8.15.6",
+    "eslint": "^9",
+    "tsx": "^4.23.12",
+    "typescript": "^5.9.3"
+  }
+}

@@ -29,6 +29,8 @@ coverage/
 /output
 docs/
 scripts/
+!/apps/api/scripts/
+!/apps/api/scripts/**
 !/apps/desktop/scripts/
 !/apps/desktop/scripts/**
 !/packages/db/scripts/

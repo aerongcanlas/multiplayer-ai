@@ -7,6 +7,7 @@ import { join, resolve } from "node:path";
 import assert from "node:assert/strict";
 import { sharedDatabase, alice, bob } from "./shared-fixture.mjs";
 import { startProgramServer } from "./programs-fixture.mjs";
+import { buildServer } from "@multiplayer-ai/api";
 
 const require = createRequire(import.meta.url);
 const directory = resolve(fileURLToPath(new URL("..", import.meta.url)));
@@ -17,7 +18,7 @@ const output = resolve(
 );
 await mkdir(output, { recursive: true });
 const programs = await startProgramServer(join(output, "manifest.json"));
-const { db, rpc, call } = await sharedDatabase();
+const { db, pool, call } = await sharedDatabase();
 const sessions = new Map();
 let offline = false;
 const calls = [];
@@ -83,23 +84,18 @@ const server = createServer(async (req, res) => {
         .end(JSON.stringify({ message: "Missing authentication" }));
       return;
     }
-    if (url.pathname === "/rest/v1/rpc/desktop_room_snapshot")
-      res.end(JSON.stringify(await rpc(id)));
-    else if (url.pathname === "/rest/v1/rpc/desktop_save_generated_suggestions")
+    if (url.pathname === "/auth/v1/user") {
       res.end(
-        JSON.stringify(
-          await rpc(id, {
-            type: "suggestion.save-generated",
-            roomId: body.p_room_id,
-            messageIds: body.p_message_ids,
-            prompts: body.p_prompts,
-          }),
-        ),
+        JSON.stringify({
+          id,
+          email: `${id}@example.invalid`,
+          user_metadata: { name: id === alice ? "Alice" : "Bob" },
+        }),
       );
-    else if (url.pathname === "/rest/v1/rpc/desktop_room_command")
-      res.end(JSON.stringify(await rpc(id, body.p_command)));
+      return;
+    }
     // Read-along RPCs dispatch PostgREST's named arguments to the PGlite functions.
-    else if (
+    if (
       /^\/rest\/v1\/rpc\/desktop_tab_share_(publish|head|pull|reconcile)$/.test(
         url.pathname,
       )
@@ -123,6 +119,20 @@ const server = createServer(async (req, res) => {
 });
 await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 const url = `http://127.0.0.1:${server.address().port}`;
+const api = buildServer(
+  {
+    supabaseUrl: url,
+    publishableKey: "sb_publishable_local_test",
+    databaseUrl: "unused",
+  },
+  pool,
+);
+api.log.level = "silent";
+const apiCalls = [];
+api.addHook("onRequest", async (request) => {
+  apiCalls.push(`${request.method} ${request.url}`);
+});
+const apiUrl = await api.listen({ host: "127.0.0.1", port: 0 });
 const apps = [];
 const errors = [];
 const checkpoints = [];
@@ -136,6 +146,7 @@ async function launch(name) {
     MP_E2E: "1",
     MP_TEST_USER_DATA: join(output, name),
     MP_TEST_SUPABASE_URL: url,
+    MP_TEST_API_URL: apiUrl,
     MP_TEST_CODEX_FIXTURE: join(directory, "scripts/codex-fixture.mjs"),
     MP_TEST_HARNESS_MANIFEST: join(output, "manifest.json"),
     MP_FIXTURE_SIGNED_IN: "1",
@@ -345,7 +356,7 @@ try {
     .getByRole("heading", { name: "Shared design", exact: true })
     .waitFor();
   checkpoint("Encrypted session restores shared rooms after desktop restart");
-  await db.query(
+  await pool.query(
     "delete from public.room_member where room_id=$1 and member_id=$2",
     [roomId, bob],
   );
@@ -379,9 +390,35 @@ try {
     "Sign-out clears shared views and switching accounts reveals no prior-account data",
   );
   assert.deepEqual(errors, []);
+  for (const route of [
+    "GET /v1/rooms/snapshot",
+    "POST /v1/rooms",
+    "POST /v1/invites/accept",
+    `POST /v1/rooms/${roomId}/invites`,
+    `POST /v1/rooms/${roomId}/messages`,
+    `POST /v1/rooms/${roomId}/suggestions`,
+  ])
+    assert.ok(apiCalls.includes(route), `Desktop uses ${route}`);
+  assert.ok(
+    apiCalls.some((route) =>
+      route.startsWith(`PATCH /v1/rooms/${roomId}/suggestions/`),
+    ),
+  );
+  assert.equal(
+    calls.some((path) => /desktop_(room_|save_generated)/.test(path)),
+    false,
+    "Room operations use Fastify instead of RPCs",
+  );
+  checkpoint(
+    "All seven Fastify endpoints serve the desktop workflow without room RPC calls",
+  );
   await writeFile(
     join(output, "report.json"),
-    JSON.stringify({ checkpoints, errors, endpoint: url, calls }, null, 2),
+    JSON.stringify(
+      { checkpoints, errors, endpoint: apiUrl, calls, apiCalls },
+      null,
+      2,
+    ),
   );
   console.log("Artifacts: " + output);
 } catch (error) {
@@ -398,6 +435,7 @@ try {
   throw error;
 } finally {
   await Promise.all(apps.map((app) => app.close().catch(() => {})));
+  await api.close();
   server.closeAllConnections();
   await new Promise((resolve) => server.close(resolve));
   await db.close();

@@ -34,6 +34,7 @@
         "zod": "^4.4.3"
     },
     "devDependencies": {
+        "@multiplayer-ai/api": "workspace:*",
         "@multiplayer-ai/domain": "workspace:*",
         "@eslint/js": "^9.39.5",
         "@multiplayer-ai/db": "workspace:*",

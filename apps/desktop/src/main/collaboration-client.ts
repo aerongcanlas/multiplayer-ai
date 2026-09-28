@@ -3,7 +3,7 @@ import {
   type SupabaseClient,
   type Session,
 } from "@supabase/supabase-js";
-import { randomBytes, createHash } from "node:crypto";
+import { z } from "zod";
 import {
   asSharedRoom,
   sharedSnapshotSchema,
@@ -53,11 +53,12 @@ export class CollaborationClient {
   private storageKey = "multiplayer-desktop-auth";
 
   constructor(
-    private config: { url: string; publishableKey: string },
+    private config: { url: string; publishableKey: string; apiUrl?: string },
     private storage: AuthStorage,
     private openBrowser: (url: string) => Promise<void>,
     private changed: () => void,
     testing = false,
+    allowLocalApi = false,
   ) {
     const url = new URL(config.url);
     if (
@@ -70,6 +71,25 @@ export class CollaborationClient {
       throw new Error("Invalid Supabase project URL.");
     if (!config.publishableKey.startsWith("sb_publishable_"))
       throw new Error("Desktop requires a public Supabase publishable key.");
+    if (config.apiUrl) {
+      const api = new URL(config.apiUrl);
+      if (
+        api.username ||
+        api.password ||
+        api.search ||
+        api.hash ||
+        api.pathname !== "/" ||
+        !(
+          api.protocol === "https:" ||
+          ((testing || allowLocalApi) &&
+            api.protocol === "http:" &&
+            api.hostname === "127.0.0.1")
+        )
+      )
+        throw new Error(
+          "Shared-room API requires an HTTPS origin (loopback is allowed in development).",
+        );
+    }
     this.client = createClient(config.url, config.publishableKey, {
       auth: {
         flowType: "pkce",
@@ -278,9 +298,12 @@ export class CollaborationClient {
     this.changed();
   }
   private failure(error: { code?: string; message?: string }) {
-    const missing = ["PGRST202", "42883", "42P01"].includes(error.code ?? "");
+    const missing = ["setup_required", "PGRST202", "42883", "42P01"].includes(
+      error.code ?? "",
+    );
     const message = missing
-      ? "Shared rooms need the desktop database migration. See the setup instructions."
+      ? (error.message ??
+        "Shared rooms need API configuration and current database migrations. See the setup instructions.")
       : error.code && !error.code.startsWith("PGRST")
         ? (error.message ?? "Shared room operation failed.")
         : "Shared rooms could not sync. Check your connection, then refresh before retrying.";
@@ -292,15 +315,71 @@ export class CollaborationClient {
     this.changed();
     return new Error(message);
   }
+  private async api(
+    path: string,
+    epoch: number,
+    method = "GET",
+    body?: unknown,
+  ): Promise<unknown> {
+    if (!this.config.apiUrl)
+      throw Object.assign(
+        new Error(
+          "Configure the shared-room API URL. See the shared rooms setup instructions.",
+        ),
+        { code: "setup_required" },
+      );
+    const { data, error } = await this.client.auth.getSession();
+    if (this.closed || epoch !== this.epoch)
+      throw new Error("The signed-in account changed.");
+    if (
+      error ||
+      !data.session ||
+      data.session.user.id !== this.state.account?.id
+    )
+      throw Object.assign(new Error("Your session expired. Sign in again."), {
+        code: "unauthorized",
+      });
+    const response = await fetch(new URL(path, this.config.apiUrl), {
+      method,
+      headers: {
+        Authorization: `Bearer ${data.session.access_token}`,
+        ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      signal: AbortSignal.timeout(15_000),
+      redirect: "error",
+    });
+    const result: unknown = await response.json();
+    if (!response.ok) {
+      const failure = z
+        .object({ code: z.string(), message: z.string() })
+        .safeParse(result);
+      throw Object.assign(
+        new Error(
+          failure.success
+            ? failure.data.message
+            : "Shared-room request failed.",
+        ),
+        {
+          code: failure.success ? failure.data.code : "unavailable",
+        },
+      );
+    }
+    return result;
+  }
   refresh() {
     if (this.refreshing) return this.refreshing;
     const epoch = this.epoch;
     const work = this.serial(async () => {
       if (this.state.auth !== "signed_in" || epoch !== this.epoch) return;
-      const { data, error } = await this.client.rpc("desktop_room_snapshot");
-      if (epoch !== this.epoch) return;
-      if (error) throw this.failure(error);
-      this.accept(data, epoch);
+      try {
+        const data = await this.api("/v1/rooms/snapshot", epoch);
+        if (epoch !== this.epoch) return;
+        this.accept(data, epoch);
+      } catch (error) {
+        if (epoch !== this.epoch) return;
+        throw this.failure(error instanceof Error ? error : {});
+      }
     });
     this.refreshing = work.finally(() => {
       this.refreshing = undefined;
@@ -315,42 +394,69 @@ export class CollaborationClient {
     return this.serial(async () => {
       if (this.state.auth !== "signed_in" || epoch !== this.epoch)
         throw new Error("Sign in to use shared rooms.");
-      let input: Record<string, unknown> = { ...command };
-      let token: string | undefined;
-      if (command.type === "invite.create") {
-        token = randomBytes(32).toString("base64url");
-        input = {
-          type: command.type,
-          roomId: command.roomId,
-          tokenHash: createHash("sha256").update(token).digest("hex"),
-        };
+      let path: string;
+      let body: unknown;
+      let method = "POST";
+      switch (command.type) {
+        case "room.create":
+          path = "/v1/rooms";
+          body = { name: command.name };
+          break;
+        case "room.join":
+          path = "/v1/invites/accept";
+          body = { token: command.token };
+          break;
+        case "invite.create":
+          path = `/v1/rooms/${command.roomId}/invites`;
+          break;
+        case "message.send":
+          path = `/v1/rooms/${command.roomId}/messages`;
+          body = { text: command.text };
+          break;
+        case "suggestion.create":
+          if (!generatedPrompts?.length)
+            throw new Error(
+              "Generate prompts with the context agent before saving them.",
+            );
+          path = `/v1/rooms/${command.roomId}/suggestions`;
+          body = { messageIds: command.messageIds, prompts: generatedPrompts };
+          break;
+        case "suggestion.edit":
+          path = `/v1/rooms/${command.roomId}/suggestions/${command.suggestionId}`;
+          body = {
+            prompt: command.prompt,
+            expectedRevision: command.expectedRevision,
+          };
+          method = "PATCH";
+          break;
+        default:
+          throw new Error("Unsupported shared-room operation.");
       }
-      if (command.type === "room.join")
-        input = {
-          type: command.type,
-          tokenHash: createHash("sha256").update(command.token).digest("hex"),
-        };
-      if (command.type === "suggestion.create" && !generatedPrompts?.length)
-        throw new Error(
-          "Generate prompts with the context agent before saving them.",
-        );
-      const { data, error } =
-        command.type === "suggestion.create"
-          ? await this.client.rpc("desktop_save_generated_suggestions", {
-              p_room_id: command.roomId,
-              p_message_ids: command.messageIds,
-              p_prompts: generatedPrompts,
-            })
-          : await this.client.rpc("desktop_room_command", { p_command: input });
-      if (epoch !== this.epoch)
-        throw new Error("The signed-in account changed.");
-      if (error) throw this.failure(error);
-      this.accept(data.snapshot, epoch);
-      return token
-        ? { kind: "invite", token }
-        : ["room.create", "room.join"].includes(command.type)
-          ? { kind: "room", roomId: data.roomId }
-          : undefined;
+      try {
+        const result = await this.api(path, epoch, method, body);
+        if (epoch !== this.epoch)
+          throw new Error("The signed-in account changed.");
+        const data = z
+          .object({
+            snapshot: sharedSnapshotSchema,
+            roomId: z.uuid(),
+            token: z
+              .string()
+              .regex(/^[A-Za-z0-9_-]{43}$/)
+              .optional(),
+          })
+          .parse(result);
+        this.accept(data.snapshot, epoch);
+        return data.token
+          ? { kind: "invite", token: data.token }
+          : ["room.create", "room.join"].includes(command.type)
+            ? { kind: "room", roomId: data.roomId }
+            : undefined;
+      } catch (error) {
+        if (epoch !== this.epoch)
+          throw new Error("The signed-in account changed.");
+        throw this.failure(error instanceof Error ? error : {});
+      }
     });
   }
   close() {

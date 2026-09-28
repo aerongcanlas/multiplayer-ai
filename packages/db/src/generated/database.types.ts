@@ -515,6 +515,14 @@ export type Database = {
       };
       desktop_room_command: { Args: { p_command: Json }; Returns: Json };
       desktop_room_snapshot: { Args: never; Returns: Json };
+      desktop_save_generated_suggestions: {
+        Args: {
+          p_message_ids: string[];
+          p_prompts: string[];
+          p_room_id: string;
+        };
+        Returns: Json;
+      };
       desktop_tab_share_head: { Args: { p_tab_id: string }; Returns: Json };
       desktop_tab_share_json: {
         Args: { t: Database["public"]["Tables"]["desktop_tab_share"]["Row"] };
@@ -538,14 +546,6 @@ export type Database = {
       desktop_tab_share_reconcile: {
         Args: { p_device_id: string; p_live_tab_ids: string[] };
         Returns: undefined;
-      };
-      desktop_save_generated_suggestions: {
-        Args: {
-          p_message_ids: string[];
-          p_prompts: string[];
-          p_room_id: string;
-        };
-        Returns: Json;
       };
       finalize_ai_thread_run: {
         Args: {
