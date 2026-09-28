@@ -228,12 +228,38 @@ try {
       "Host can decline a requested command through the real Electron UI",
     );
     await page
+      .getByRole("textbox", { name: "Group chat message", exact: true })
+      .fill("Add dark mode. FIXTURE_SUGGESTION_SLOW");
+    await page
+      .getByRole("button", { name: "Send message", exact: true })
+      .click();
+    await page
+      .getByRole("checkbox", { name: /Select message: Add dark mode/ })
+      .check();
+    await page
       .getByRole("textbox", { name: "Agent direction", exact: true })
       .fill("FIXTURE_CANCEL");
     await page.getByRole("button", { name: "Run agents", exact: true }).click();
+    await page
+      .getByRole("button", { name: "Suggest prompts", exact: true })
+      .click();
+    await page
+      .getByRole("button", { name: "Generating prompts...", exact: true })
+      .waitFor();
     await page.getByRole("button", { name: "Stop", exact: true }).click();
+    await page
+      .getByRole("button", { name: /^lead cancelled /i })
+      .waitFor({ timeout: 2_000 });
     assert.equal((await terminal()).run.status, "cancelled");
-    await checkpoint("Stop cancels an active provider turn");
+    await page
+      .getByText(
+        "Add a dark mode toggle, persist the selected theme, and verify it survives a restart.",
+        { exact: true },
+      )
+      .waitFor();
+    await checkpoint(
+      "Stop stays responsive while the context agent generates a suggestion",
+    );
   }
   assert.deepEqual(await fingerprint(), before);
   await checkpoint(

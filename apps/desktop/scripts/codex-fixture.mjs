@@ -1,6 +1,7 @@
 // Local JSONL protocol fixture. It never makes network requests or executes model commands.
 import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
+import assert from "node:assert/strict";
 const threads = new Map();
 const pending = new Map();
 let signedIn = process.env.MP_FIXTURE_SIGNED_IN === "1";
@@ -104,6 +105,9 @@ createInterface({ input: process.stdin })
       const threadId = randomUUID();
       threads.set(threadId, params);
       result({ thread: { id: threadId } });
+    } else if (method === "thread/unsubscribe") {
+      threads.delete(params.threadId);
+      result({ status: "unsubscribed" });
     } else if (method === "turn/interrupt") {
       finish(params.threadId, params.turnId, "", "interrupted");
       result({});
@@ -118,7 +122,46 @@ createInterface({ input: process.stdin })
         .get(threadId)
         ?.developerInstructions.match(/You are the (\w+)/)?.[1];
       const complete = () => {
-        if (prompt.startsWith("Plan specialist"))
+        if (params.outputSchema?.properties?.suggestedPrompts) {
+          const settings = threads.get(threadId);
+          assert.equal(settings.ephemeral, true);
+          assert.equal(settings.sandbox, "read-only");
+          assert.equal(settings.approvalPolicy, "never");
+          assert.equal(settings.config["features.shell_tool"], false);
+          const source = JSON.parse(prompt);
+          assert.ok(source.messages.length > 0);
+          assert.ok(
+            source.messages.every(
+              (message) => message.id && message.authorName && message.text,
+            ),
+          );
+          if (prompt.includes("FIXTURE_SUGGESTION_FAILURE"))
+            return finish(threadId, turnId, "", "failed");
+          if (prompt.includes("FIXTURE_SUGGESTION_INVALID"))
+            return finish(
+              threadId,
+              turnId,
+              JSON.stringify({ suggestedPrompts: [] }),
+            );
+          return finish(
+            threadId,
+            turnId,
+            JSON.stringify({
+              actionable: true,
+              summary:
+                "The selected feedback requests a bounded UI improvement.",
+              suggestedPrompts: [
+                "Add a dark mode toggle, persist the selected theme, and verify it survives a restart.",
+                ...(prompt.includes("FIXTURE_MULTIPLE_PROMPTS")
+                  ? [
+                      "Verify keyboard navigation and focus visibility for the theme toggle.",
+                    ]
+                  : []),
+              ],
+              unresolved: [],
+            }),
+          );
+        } else if (prompt.startsWith("Plan specialist"))
           finish(
             threadId,
             turnId,
@@ -193,7 +236,11 @@ createInterface({ input: process.stdin })
             reason: "Fixture approval request",
           },
         });
-      } else setTimeout(complete, 200);
+      } else
+        setTimeout(
+          complete,
+          prompt.includes("FIXTURE_SUGGESTION_SLOW") ? 5_000 : 200,
+        );
     } else if (id !== undefined)
       send({
         id,

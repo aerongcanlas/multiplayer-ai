@@ -1,4 +1,10 @@
 import { randomUUID } from "node:crypto";
+import { mkdir } from "node:fs/promises";
+import { join } from "node:path";
+import {
+  ContextSuggestionDraft,
+  CONTEXT_AGENT_INSTRUCTIONS,
+} from "@multiplayer-ai/domain/context-suggestions";
 import { z } from "zod";
 import {
   CodexClient,
@@ -10,6 +16,7 @@ import {
 import { Worktrees, repositoryCommand } from "./worktrees";
 import type {
   ContextSummary,
+  ChatMessage,
   Evidence,
   Execution,
   PrivateWorkspace,
@@ -72,6 +79,68 @@ export class CodexRunner {
     readonly client: CodexClient,
     private worktreeDirectory: string,
   ) {}
+  async suggest(sources: ChatMessage[], context: ContextSummary | undefined) {
+    const prompt = JSON.stringify({
+      messages: sources,
+      context: context ?? null,
+    });
+    if (prompt.length > 64_000)
+      throw new Error("Select fewer messages to generate prompt suggestions.");
+    await this.client.refresh();
+    const provider = this.client.snapshot();
+    if (provider.status !== "connected")
+      throw new Error("Connect ChatGPT to generate prompt suggestions.");
+    const model =
+      provider.models.find((item) => item.isDefault) ?? provider.models[0];
+    if (!model)
+      throw new Error("No Codex model is available for prompt suggestions.");
+    // Context generation needs no repository access or execution/worktree record.
+    const cwd = join(this.worktreeDirectory, "context");
+    await mkdir(cwd, { recursive: true });
+    const response = object(
+      await this.client.request("thread/start", {
+        model: model.id,
+        modelProvider: "openai",
+        cwd,
+        ephemeral: true,
+        sandbox: "read-only",
+        approvalPolicy: "never",
+        config: {
+          "agents.enabled": false,
+          "features.apps": false,
+          "features.shell_tool": false,
+          "features.unified_exec": false,
+          "tools.view_image": false,
+          web_search: "disabled",
+        },
+        developerInstructions: CONTEXT_AGENT_INSTRUCTIONS,
+        serviceName: "multiplayer_ai_desktop",
+      }),
+    );
+    const threadId = string(object(response.thread).id);
+    if (!threadId) throw new Error("Codex did not create a context session.");
+    try {
+      const text = await this.turn({
+        threadId,
+        signal: new AbortController().signal,
+        effort: model.defaultEffort,
+        schema: z.toJSONSchema(ContextSuggestionDraft),
+        prompt,
+        timeoutMs: 60_000,
+      });
+      try {
+        return ContextSuggestionDraft.parse(JSON.parse(text));
+      } catch {
+        throw new Error(
+          "The context agent returned invalid suggestions. Try again.",
+        );
+      }
+    } finally {
+      await this.client
+        .request("thread/unsubscribe", { threadId }, 5_000)
+        .catch(() => {});
+    }
+  }
   approve(executionId: string, id: string, decision: "accept" | "decline") {
     const pending = this.approvals.get(id);
     if (!pending || pending.executionId !== executionId)
@@ -380,16 +449,18 @@ export class CodexRunner {
   }
   private async turn(input: {
     threadId: string;
-    task: Task;
-    cwd: string;
-    execution: Execution;
-    configuration: RunConfiguration;
+    task?: Task;
+    cwd?: string;
+    execution?: Execution;
+    configuration?: RunConfiguration;
+    effort?: string;
+    timeoutMs?: number;
     signal: AbortSignal;
     schema: unknown;
     prompt: string;
-    emit: (event: CodexEvent) => void;
+    emit?: (event: CodexEvent) => void;
   }): Promise<string> {
-    const { threadId, task, execution, signal, emit } = input;
+    const { threadId, task, execution, signal, emit = () => {} } = input;
     if (signal.aborted) throw new Error("Execution cancelled.");
     let turnId = "";
     let finalText = "";
@@ -416,7 +487,7 @@ export class CodexRunner {
       if (buffered) {
         emit({
           type: "activity",
-          taskId: task.id,
+          taskId: task?.id ?? "",
           message: buffered.slice(-8000),
         });
         buffered = "";
@@ -448,7 +519,7 @@ export class CodexRunner {
         if (item.type === "commandExecution")
           emit({
             type: "activity",
-            taskId: task.id,
+            taskId: task?.id ?? "",
             message: `Running: ${string(item.command).slice(0, 2000)}`,
           });
       }
@@ -459,11 +530,11 @@ export class CodexRunner {
           flush();
           emit({
             type: "activity",
-            taskId: task.id,
+            taskId: task?.id ?? "",
             message: finalText.slice(0, 16000),
           });
         }
-        if (item.type === "commandExecution")
+        if (item.type === "commandExecution" && task)
           emit({
             type: "evidence",
             evidence: {
@@ -495,6 +566,15 @@ export class CodexRunner {
     };
     const request = (request: RpcRequest) => {
       if (request.params.threadId !== threadId) return;
+      if (!task || !execution) {
+        this.client.reject(request.id);
+        finish(
+          new Error(
+            "The context agent requested a tool instead of generating prompts.",
+          ),
+        );
+        return;
+      }
       if (
         [
           "item/commandExecution/requestApproval",
@@ -548,16 +628,19 @@ export class CodexRunner {
     this.client.on("request", request);
     this.client.on("disconnected", disconnected);
     signal.addEventListener("abort", abort, { once: true });
-    const timer = setTimeout(() => {
-      abort();
-      finish(new Error("Agent turn exceeded the 10 minute limit."));
-    }, 10 * 60_000);
+    const timer = setTimeout(
+      () => {
+        abort();
+        finish(new Error("Agent generation timed out. Try again."));
+      },
+      input.timeoutMs ?? 10 * 60_000,
+    );
     try {
       const response = object(
         await this.client.request("turn/start", {
           threadId,
           input: [{ type: "text", text: input.prompt }],
-          effort: input.configuration.effort,
+          effort: input.effort ?? input.configuration?.effort,
           outputSchema: input.schema,
         }),
       );
@@ -584,7 +667,7 @@ export class CodexRunner {
       this.client.off("request", request);
       this.client.off("disconnected", disconnected);
       for (const [id, pending] of this.approvals)
-        if (pending.taskId === task.id) {
+        if (pending.taskId === task?.id) {
           this.client.respond(pending.requestId, { decision: "cancel" });
           this.approvals.delete(id);
           emit({ type: "approval.resolved", id });

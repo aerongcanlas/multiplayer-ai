@@ -110,6 +110,61 @@ test("Codex lead schedules specialists, persists real event types, and retains s
   assert.equal(reopened.snapshot().rooms[0].summaries.length, 1);
   reopened.close();
 });
+
+test("context agent persists generated prompts, preserves sources, and rejects failed or invalid output", async () => {
+  const { service, roomId, repo } = await setup();
+  try {
+    await service.dispatch({
+      type: "message.send",
+      roomId,
+      text: "Add a dark mode toggle. FIXTURE_MULTIPLE_PROMPTS",
+    });
+    const message = service.snapshot().rooms[0].messages[0];
+    await service.dispatch({
+      type: "suggestion.create",
+      roomId,
+      messageIds: [message.id],
+    });
+    const room = service.snapshot().rooms[0];
+    assert.deepEqual(
+      room.suggestions.map((item) => item.prompt),
+      [
+        "Add a dark mode toggle, persist the selected theme, and verify it survives a restart.",
+        "Verify keyboard navigation and focus visibility for the theme toggle.",
+      ],
+    );
+    assert.deepEqual(room.suggestions[0].sources, [message]);
+    assert.equal(room.executions.length, 0);
+    assert.equal(await readFile(join(repo, "README.md"), "utf8"), "Original\n");
+    for (const marker of [
+      "FIXTURE_SUGGESTION_FAILURE",
+      "FIXTURE_SUGGESTION_INVALID",
+    ]) {
+      await service.dispatch({ type: "message.send", roomId, text: marker });
+      await assert.rejects(
+        service.dispatch({
+          type: "suggestion.create",
+          roomId,
+          messageIds: [service.snapshot().rooms[0].messages.at(-1)!.id],
+        }),
+        /Fixture provider failure|invalid suggestions/,
+      );
+      assert.equal(service.snapshot().rooms[0].suggestions.length, 2);
+    }
+    await service.dispatch({ type: "provider.disconnect" });
+    await assert.rejects(
+      service.dispatch({
+        type: "suggestion.create",
+        roomId,
+        messageIds: [message.id],
+      }),
+      /Connect ChatGPT/,
+    );
+    assert.equal(service.snapshot().rooms[0].suggestions.length, 2);
+  } finally {
+    service.close();
+  }
+});
 test("approval decisions are execution-scoped and declining retains a failed result", async () => {
   const { service, roomId } = await setup();
   try {
@@ -194,7 +249,18 @@ test("worktrees integrate isolated changes while preserving the original checkou
     const committed = await worktrees.assign("unexpected-commit");
     await writeFile(join(committed, "README.md"), "Agent committed directly\n");
     await repositoryCommand(committed, "add", "README.md");
-    await repositoryCommand(committed, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false", "commit", "-m", "Unexpected history change");
+    await repositoryCommand(
+      committed,
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@example.invalid",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-m",
+      "Unexpected history change",
+    );
     await assert.rejects(worktrees.integrate(committed), /changed Git history/);
     assert.equal((await worktrees.artifact()).revision, artifact.revision);
   } finally {

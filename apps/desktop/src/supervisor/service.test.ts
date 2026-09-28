@@ -2,13 +2,15 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
 import { setTimeout as wait } from "node:timers/promises";
 import { randomUUID } from "node:crypto";
 import { Journal } from "./journal";
 import { MockRunner } from "./runner";
 import { SupervisorService } from "./service";
+import { CodexClient } from "./codex-client";
+import { CodexRunner } from "./codex-runner";
 import { inspectWorkspace } from "./workspace";
 import { currentExecution, type Execution } from "../shared/contracts";
 
@@ -39,6 +41,15 @@ async function setup(interval = 1) {
     journal,
     () => {},
     new MockRunner(interval),
+    new CodexRunner(
+      new CodexClient({
+        executable: process.execPath,
+        args: [resolve("scripts/codex-fixture.mjs")],
+        cwd: dir,
+        env: { ...process.env, MP_FIXTURE_SIGNED_IN: "1" },
+      }),
+      join(dir, "worktrees"),
+    ),
   );
   const roomId = service.snapshot().rooms[0].id;
   await service.dispatch({

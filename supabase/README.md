@@ -9,6 +9,12 @@ RPCs, suggestion index and authenticated-only API permissions. It preserves the
 web thread ownership guards. Existing deployments must reconcile their migration
 history before applying it; never replay the baseline on an existing database.
 
+The updated desktop context agent also requires
+`20260927120000_desktop_generated_suggestions.sql`, applied after the desktop API
+migration. It adds authenticated persistence for generated prompt drafts while
+preserving canonical source attribution. Local-only suggestions use SQLite and
+do not require this migration.
+
 Run `pnpm db:types` to regenerate `packages/db/src/generated/database.types.ts`
 from the canonical migration chain using an in-memory PGlite database and
 Supabase's pinned `@supabase/postgrest-typegen` generator. It needs neither Docker

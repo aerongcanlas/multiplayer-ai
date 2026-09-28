@@ -411,6 +411,14 @@ export type Database = {
       };
       desktop_room_command: { Args: { p_command: Json }; Returns: Json };
       desktop_room_snapshot: { Args: never; Returns: Json };
+      desktop_save_generated_suggestions: {
+        Args: {
+          p_message_ids: string[];
+          p_prompts: string[];
+          p_room_id: string;
+        };
+        Returns: Json;
+      };
       finalize_ai_thread_run: {
         Args: {
           p_actor_id: string;

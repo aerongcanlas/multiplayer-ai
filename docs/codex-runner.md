@@ -4,7 +4,7 @@ The desktop can run a lead and specialist agents through a local Codex App Serve
 
 ## Connect and run
 
-1. Install the native Codex CLI executable, version **0.147.0**. On Windows, the desktop also detects the executable bundled with an installed Codex desktop app. This version is checked before starting App Server; the executable is not bundled into Multiplayer AI.
+1. Install the native Codex CLI executable, version **0.155.1**. On Windows, the desktop also detects the executable bundled with an installed Codex desktop app. This version is checked before starting App Server; the executable is not bundled into Multiplayer AI.
 2. Open Multiplayer AI and choose **Connect ChatGPT**. An existing ChatGPT-authenticated Codex login is reused. Otherwise, finish the official sign-in in your browser. API-key execution is disabled for this adapter.
 3. Select a local Git repository. Open **Run settings** to choose a model, reasoning effort, access mode, and a maximum of one to three concurrent specialists.
 4. Submit a direction. The lead returns bounded assignments, the supervisor creates separate Codex sessions, specialists return results, and an independent validator reviews the combined results. The lead publishes a final summary.

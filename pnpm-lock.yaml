@@ -39,6 +39,9 @@ importers:
       '@multiplayer-ai/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@multiplayer-ai/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
       '@multiplayer-ai/ui':
         specifier: workspace:*
         version: link:../../packages/ui

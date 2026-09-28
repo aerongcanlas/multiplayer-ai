@@ -2,6 +2,60 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { sharedDatabase, alice, bob, eve } from "./shared-fixture.mjs";
 
+test("generated drafts are saved atomically with canonical membership and source attribution", async () => {
+  const { db, rpc } = await sharedDatabase();
+  try {
+    const { roomId } = await rpc(alice, {
+      type: "room.create",
+      name: "Generated drafts",
+    });
+    const sent = await rpc(alice, {
+      type: "message.send",
+      roomId,
+      text: "Support dark mode",
+    });
+    const message = sent.snapshot.rooms[0].messages[0];
+    const command = {
+      type: "suggestion.save-generated",
+      roomId,
+      messageIds: [message.id],
+      prompts: ["Implement a theme toggle.", "Verify theme persistence."],
+    };
+    await assert.rejects(rpc(null, command, "anon"), /permission denied/);
+    await assert.rejects(rpc(null, command), /Sign in/);
+    await assert.rejects(rpc(bob, command), /no longer a member/);
+    await assert.rejects(
+      rpc(alice, { ...command, messageIds: [eve] }),
+      /does not belong/,
+    );
+    await assert.rejects(
+      rpc(alice, { ...command, messageIds: [message.id, message.id] }),
+      /distinct/,
+    );
+    await assert.rejects(rpc(alice, { ...command, prompts: [] }), /1 to 3/);
+    await assert.rejects(
+      rpc(alice, { ...command, prompts: ["Valid", " "] }),
+      /2,000/,
+    );
+    assert.equal((await rpc(alice)).rooms[0].suggestions.length, 0);
+    const result = await rpc(alice, {
+      ...command,
+      userId: bob,
+      sources: [{ text: "forged" }],
+    });
+    assert.deepEqual(
+      result.snapshot.rooms[0].suggestions.map((item) => item.prompt).sort(),
+      command.prompts.sort(),
+    );
+    for (const item of result.snapshot.rooms[0].suggestions) {
+      assert.equal(item.authorId, alice);
+      assert.deepEqual(item.sources, [message]);
+    }
+  } finally {
+    await db.close();
+  }
+});
+
 test("desktop rooms support current web threads while preserving service-only mutations", async () => {
   const { db, rpc } = await sharedDatabase();
   try {

@@ -17,12 +17,18 @@ export async function sharedDatabase() {
       ]);
       await db.exec(`set role ${role === "anon" ? "anon" : "authenticated"}`);
       try {
-        const result = command
-          ? await db.query(
-              "select public.desktop_room_command($1::jsonb) as data",
-              [JSON.stringify(command)],
-            )
-          : await db.query("select public.desktop_room_snapshot() as data");
+        const result =
+          command?.type === "suggestion.save-generated"
+            ? await db.query(
+                "select public.desktop_save_generated_suggestions($1::uuid, $2::uuid[], $3::text[]) as data",
+                [command.roomId, command.messageIds, command.prompts],
+              )
+            : command
+              ? await db.query(
+                  "select public.desktop_room_command($1::jsonb) as data",
+                  [JSON.stringify(command)],
+                )
+              : await db.query("select public.desktop_room_snapshot() as data");
         return result.rows[0].data;
       } finally {
         await db.exec("reset role");

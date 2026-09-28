@@ -252,7 +252,10 @@ export class CollaborationClient {
     });
     return this.refreshing;
   }
-  command(command: Command): Promise<RoomNotice | undefined> {
+  command(
+    command: Command,
+    generatedPrompts?: string[],
+  ): Promise<RoomNotice | undefined> {
     const epoch = this.epoch;
     return this.serial(async () => {
       if (this.state.auth !== "signed_in" || epoch !== this.epoch)
@@ -272,9 +275,18 @@ export class CollaborationClient {
           type: command.type,
           tokenHash: createHash("sha256").update(command.token).digest("hex"),
         };
-      const { data, error } = await this.client.rpc("desktop_room_command", {
-        p_command: input,
-      });
+      if (command.type === "suggestion.create" && !generatedPrompts?.length)
+        throw new Error(
+          "Generate prompts with the context agent before saving them.",
+        );
+      const { data, error } =
+        command.type === "suggestion.create"
+          ? await this.client.rpc("desktop_save_generated_suggestions", {
+              p_room_id: command.roomId,
+              p_message_ids: command.messageIds,
+              p_prompts: generatedPrompts,
+            })
+          : await this.client.rpc("desktop_room_command", { p_command: input });
       if (epoch !== this.epoch)
         throw new Error("The signed-in account changed.");
       if (error) throw this.failure(error);

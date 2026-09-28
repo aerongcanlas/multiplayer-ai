@@ -215,6 +215,7 @@ export class SupervisorService {
     if (command.type === "workspace.select")
       throw new Error("Repository selection requires the desktop file dialog.");
     if (command.type === "execution.start") return this.start(command);
+    if (command.type === "suggestion.create") return this.suggest(command);
     let stoppedId: string | undefined;
     this.transaction((draft, events) => {
       if (command.type === "room.create") {
@@ -241,33 +242,6 @@ export class SupervisorService {
             createdAt: now(),
           });
           break;
-        case "suggestion.create": {
-          // Reload canonical messages; renderer-supplied transcripts and authors are never accepted.
-          const ids = new Set(command.messageIds);
-          const sources = room.messages.filter((message) =>
-            ids.has(message.id),
-          );
-          if (sources.length !== ids.size)
-            throw new Error("A selected message does not belong to this room.");
-          const contextVersion = currentSummary(room)?.version ?? 0;
-          const prompt = `Using context version ${contextVersion}, consider this selected feedback:\n\n${sources.map((source) => `${source.authorName}: ${source.text}`).join("\n\n")}\n\nKeep conflicting advice visible and ask about missing requirements before making changes.`;
-          if (prompt.length > 8_000)
-            throw new Error(
-              "Select fewer messages so the suggestion fits within 8,000 characters.",
-            );
-          room.suggestions.push({
-            id: randomUUID(),
-            prompt,
-            contextVersion,
-            sourceMessageIds: sources.map((source) => source.id),
-            sources: structuredClone(sources),
-            revision: 1,
-            status: "draft",
-            createdAt: now(),
-            updatedAt: now(),
-          });
-          break;
-        }
         case "suggestion.edit": {
           const suggestion = room.suggestions.find(
             (suggestion) => suggestion.id === command.suggestionId,
@@ -313,6 +287,47 @@ export class SupervisorService {
       }
     });
     if (stoppedId) this.controllers.get(stoppedId)?.abort();
+    return this.snapshot();
+  }
+
+  private async suggest(
+    command: Extract<Command, { type: "suggestion.create" }>,
+  ) {
+    const room = findRoom(this.state, command.roomId);
+    const ids = new Set(command.messageIds);
+    const sources = room.messages.filter((message) => ids.has(message.id));
+    if (sources.length !== ids.size)
+      throw new Error("A selected message does not belong to this room.");
+    if (!this.codex)
+      throw new Error("Connect ChatGPT to generate prompt suggestions.");
+    // Shared suggestions only use shared messages, never this host's private lead context.
+    const context = room.shared ? undefined : currentSummary(room);
+    const contextVersion = context?.version ?? 0;
+    const generated = await this.codex.suggest(sources, context);
+    if (this.closed) throw new Error("The supervisor is shutting down.");
+    this.transaction((draft) => {
+      const current = findRoom(draft, room.id);
+      if (
+        current.shared?.userId !== room.shared?.userId ||
+        current.shared?.project !== room.shared?.project ||
+        (!current.shared &&
+          (currentSummary(current)?.version ?? 0) !== contextVersion)
+      )
+        throw new Error("Room context changed. Generate suggestions again.");
+      for (const prompt of generated.suggestedPrompts) {
+        current.suggestions.push({
+          id: randomUUID(),
+          prompt,
+          contextVersion,
+          sourceMessageIds: sources.map((source) => source.id),
+          sources: structuredClone(sources),
+          revision: 1,
+          status: "draft",
+          createdAt: now(),
+          updatedAt: now(),
+        });
+      }
+    });
     return this.snapshot();
   }
 

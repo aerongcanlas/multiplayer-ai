@@ -16,6 +16,7 @@ export class DesktopCoordinator {
   private local?: Snapshot;
   private view?: Snapshot;
   private revision = 0;
+  private suggesting = false;
   constructor(
     private supervisor: Supervisor,
     private shared: Pick<
@@ -86,8 +87,12 @@ export class DesktopCoordinator {
     const result = await this.supervisor.request(command);
     if (!result.ok) throw new Error(result.error);
     this.acceptLocal(result.snapshot);
+    return result.snapshot;
   }
   async dispatch(command: Command): Promise<Result> {
+    if (command.type === "suggestion.create" && this.suggesting)
+      return { ok: false, error: "Prompt generation is already in progress." };
+    if (command.type === "suggestion.create") this.suggesting = true;
     try {
       if (!this.local) await this.localCommand({ type: "snapshot" });
       let notice: Extract<Result, { ok: true }>["notice"];
@@ -116,14 +121,44 @@ export class DesktopCoordinator {
         let room = this.view!.rooms.find((room) => room.id === command.roomId);
         if (!room)
           throw new Error("Room unavailable. Refresh your shared rooms.");
-        if (
+        if (room.shared && command.type === "suggestion.create") {
+          const identity = room.shared;
+          await this.shared.refresh();
+          room = this.shared.rooms.find((item) => item.id === command.roomId);
+          if (
+            !room ||
+            room.shared?.userId !== identity.userId ||
+            room.shared.project !== identity.project ||
+            this.shared.state.status !== "connected"
+          )
+            throw new Error(
+              "Reconnect and confirm room membership before generating suggestions.",
+            );
+          const existing = new Set(room.suggestions.map((item) => item.id));
+          await this.localCommand({ type: "shared.import", room });
+          const generated = await this.localCommand(command);
+          if (
+            this.shared.state.account?.id !== identity.userId ||
+            !this.shared.rooms.some(
+              (item) =>
+                item.id === room!.id &&
+                item.shared?.userId === identity.userId &&
+                item.shared?.project === identity.project,
+            )
+          )
+            throw new Error(
+              "Room membership or account changed. Generate suggestions again.",
+            );
+          const prompts = generated.rooms
+            .find((item) => item.id === room!.id)!
+            .suggestions.filter((item) => !existing.has(item.id))
+            .map((item) => item.prompt);
+          notice = await this.shared.command(command, prompts);
+        } else if (
           room.shared &&
-          [
-            "message.send",
-            "suggestion.create",
-            "suggestion.edit",
-            "invite.create",
-          ].includes(command.type)
+          ["message.send", "suggestion.edit", "invite.create"].includes(
+            command.type,
+          )
         ) {
           notice = await this.shared.command(command);
         } else {
@@ -178,6 +213,8 @@ export class DesktopCoordinator {
         error:
           error instanceof Error ? error.message : "Desktop operation failed.",
       };
+    } finally {
+      if (command.type === "suggestion.create") this.suggesting = false;
     }
   }
 }

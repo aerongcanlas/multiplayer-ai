@@ -150,7 +150,11 @@ export class SupervisorClient {
               "The local operation timed out. Refresh state before retrying a mutation.",
           });
         },
-        command.type.startsWith("provider.") ? 90_000 : 20_000,
+        command.type === "suggestion.create"
+          ? 180_000
+          : command.type.startsWith("provider.")
+            ? 90_000
+            : 20_000,
       );
       this.pending.set(id, { resolve, timer });
       this.child.postMessage({ id, command } satisfies SupervisorRequest);

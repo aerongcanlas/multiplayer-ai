@@ -49,7 +49,7 @@ const heartbeat = setInterval(
 );
 let pending = Promise.resolve();
 parent.on("message", ({ data }) => {
-  pending = pending.then(async () => {
+  const respond = async () => {
     try {
       const snapshot = await service.dispatch(data.command);
       parent.postMessage({
@@ -70,7 +70,14 @@ parent.on("message", ({ data }) => {
         },
       });
     }
-  });
+  };
+  // Model generation can take a minute; execution controls must remain responsive.
+  if (
+    data.command.type === "execution.stop" ||
+    data.command.type === "approval.respond"
+  )
+    void respond();
+  else pending = pending.then(respond);
 });
 process.on("exit", () => {
   clearInterval(heartbeat);

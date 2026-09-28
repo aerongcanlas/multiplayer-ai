@@ -83,6 +83,17 @@ const server = createServer(async (req, res) => {
     }
     if (url.pathname === "/rest/v1/rpc/desktop_room_snapshot")
       res.end(JSON.stringify(await rpc(id)));
+    else if (url.pathname === "/rest/v1/rpc/desktop_save_generated_suggestions")
+      res.end(
+        JSON.stringify(
+          await rpc(id, {
+            type: "suggestion.save-generated",
+            roomId: body.p_room_id,
+            messageIds: body.p_message_ids,
+            prompts: body.p_prompts,
+          }),
+        ),
+      );
     else if (url.pathname === "/rest/v1/rpc/desktop_room_command")
       res.end(JSON.stringify(await rpc(id, body.p_command)));
     else
@@ -112,6 +123,7 @@ async function launch(name) {
     MP_E2E: "1",
     MP_TEST_USER_DATA: join(output, name),
     MP_TEST_SUPABASE_URL: url,
+    MP_TEST_CODEX_FIXTURE: join(directory, "scripts/codex-fixture.mjs"),
   };
   delete env.ELECTRON_RUN_AS_NODE;
   delete env.ELECTRON_RENDERER_URL;
@@ -168,6 +180,13 @@ try {
   assert.deepEqual(calls, [], "Signed-out startup makes no Supabase calls");
   await signIn(first, alice);
   await signIn(second, bob);
+  await first.page
+    .getByRole("button", { name: "Connect ChatGPT", exact: true })
+    .click();
+  await first.page
+    .getByRole("region", { name: "ChatGPT connection" })
+    .getByText("fixture@example.invalid", { exact: true })
+    .waitFor();
   checkpoint(
     "Two desktop profiles sign in through PKCE against local fake auth",
   );
@@ -232,6 +251,12 @@ try {
     })
     .check();
   await first.page.getByRole("button", { name: "Suggest prompts" }).click();
+  await first.page
+    .getByText(
+      "Add a dark mode toggle, persist the selected theme, and verify it survives a restart.",
+      { exact: true },
+    )
+    .waitFor();
   await second.page
     .getByRole("button", { name: "Use prompt", exact: true })
     .waitFor();

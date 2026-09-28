@@ -16,14 +16,20 @@ export function GroupChatPanel({
   disabled: boolean;
 }) {
   const [draft, setDraft] = useState("");
+  const [generating, setGenerating] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const { containerRef: scroll, scrollToBottom } = useChatScroll();
   useEffect(scrollToBottom, [room.messages.length, scrollToBottom]);
   async function suggest() {
-    const result = await perform(() =>
-      window.desktop.createSuggestion(room.id, Array.from(selectedIds)),
-    );
-    if (result) setSelectedIds(new Set());
+    setGenerating(true);
+    try {
+      const result = await perform(() =>
+        window.desktop.createSuggestion(room.id, Array.from(selectedIds)),
+      );
+      if (result) setSelectedIds(new Set());
+    } finally {
+      setGenerating(false);
+    }
   }
   return (
     <section className="panel chat-panel" aria-label="Group Chat">
@@ -86,15 +92,17 @@ export function GroupChatPanel({
           <div>
             <Button
               size="xs"
-              disabled={disabled}
+              disabled={disabled || generating}
               onClick={() => void suggest()}
+              aria-busy={generating}
             >
               <Sparkles size={12} />
-              Suggest prompts
+              {generating ? "Generating prompts..." : "Suggest prompts"}
             </Button>
             <Button
               size="xs"
               variant="ghost"
+              disabled={generating}
               onClick={() => setSelectedIds(new Set())}
             >
               Clear

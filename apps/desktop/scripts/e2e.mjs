@@ -51,6 +51,11 @@ git(
   "Local validation fixture",
 );
 const environment = { ...process.env };
+if (!packaged)
+  environment.MP_TEST_CODEX_FIXTURE = join(
+    appDirectory,
+    "scripts/codex-fixture.mjs",
+  );
 delete environment.ELECTRON_RUN_AS_NODE;
 delete environment.ELECTRON_RENDERER_URL;
 const errors = [];
@@ -205,32 +210,67 @@ try {
   await page
     .getByRole("checkbox", { name: /Select message: Keep the existing/ })
     .click();
-  await page
-    .getByRole("button", { name: "Suggest prompts", exact: true })
-    .click();
-  await page.getByRole("button", { name: "Edit", exact: true }).click();
-  await page
-    .getByRole("textbox", { name: "Edit suggested prompt", exact: true })
-    .fill("Preserve the panel architecture and verify keyboard navigation.");
-  await page.getByRole("button", { name: "Save edit", exact: true }).click();
-  await page.getByRole("button", { name: "Use prompt", exact: true }).click();
-  assert.equal(
+  if (!packaged) {
+    await page
+      .getByRole("button", { name: "Connect ChatGPT", exact: true })
+      .click();
+    await page
+      .getByRole("region", { name: "ChatGPT connection" })
+      .getByText("fixture@example.invalid", { exact: true })
+      .waitFor();
+    await page
+      .getByRole("button", { name: "Suggest prompts", exact: true })
+      .click();
+    await page
+      .getByText(
+        "Add a dark mode toggle, persist the selected theme, and verify it survives a restart.",
+        { exact: true },
+      )
+      .waitFor();
+    assert.equal(
+      await page.getByText(/Using context version 0, consider/).count(),
+      0,
+    );
+    await page.screenshot({ path: join(output, "generated-suggestion.png") });
+    await page.getByRole("button", { name: "Edit", exact: true }).click();
+    await page
+      .getByRole("textbox", { name: "Edit suggested prompt", exact: true })
+      .fill("Preserve the panel architecture and verify keyboard navigation.");
+    await page.getByRole("button", { name: "Save edit", exact: true }).click();
+    await page.getByRole("button", { name: "Use prompt", exact: true }).click();
+    assert.equal(
+      await page
+        .getByRole("textbox", { name: "Agent direction", exact: true })
+        .inputValue(),
+      "Preserve the panel architecture and verify keyboard navigation.",
+    );
+  } else {
+    // Packaged checks never use the operator's real model account. The protocol fixture covers generation above.
     await page
       .getByRole("textbox", { name: "Agent direction", exact: true })
-      .inputValue(),
-    "Preserve the panel architecture and verify keyboard navigation.",
-  );
+      .fill("Preserve the panel architecture and verify keyboard navigation.");
+  }
   let state = await snapshot();
   assert.equal(
     state.rooms[1].executions.length,
     0,
     "Selecting a suggestion must not dispatch work",
   );
-  assert.equal(state.rooms[1].suggestions[0].sources[0].authorName, "You");
-  assert.equal(state.rooms[1].suggestions[0].revision, 2);
+  if (!packaged) {
+    assert.equal(state.rooms[1].suggestions[0].sources[0].authorName, "You");
+    assert.equal(state.rooms[1].suggestions[0].revision, 2);
+  }
   await checkpoint(
-    "Chat selection, persisted suggestion editing, attribution, and draft-only use",
+    packaged
+      ? "Chat selection and manual direction drafting"
+      : "Generated suggestions, persisted editing, attribution, and draft-only use",
   );
+
+  await page.locator("summary").filter({ hasText: "Run settings" }).click();
+  await page
+    .getByRole("combobox", { name: "Agent runner" })
+    .selectOption("mock");
+  await page.locator("summary").filter({ hasText: "Run settings" }).click();
 
   await page
     .getByRole("button", { name: "Run simulation", exact: true })
@@ -241,7 +281,8 @@ try {
   await page.getByRole("button", { name: /^lead completed /i }).waitFor();
   state = await snapshot();
   assert.equal(state.rooms[1].executions[0].tasks.length, 4);
-  assert.equal(state.rooms[1].executions[0].sourceSuggestion.revision, 2);
+  if (!packaged)
+    assert.equal(state.rooms[1].executions[0].sourceSuggestion.revision, 2);
   assert.equal(state.rooms[1].summaries[0].version, 1);
   await page.getByRole("button", { name: /validator completed/i }).click();
   await page.getByText("Showing validator activity", { exact: true }).waitFor();
@@ -323,6 +364,11 @@ try {
     .getByRole("button", { name: "fixture-repo", exact: true })
     .waitFor();
   assert.equal((await snapshot()).rooms[1].messages.length, 1);
+  await page.locator("summary").filter({ hasText: "Run settings" }).click();
+  await page
+    .getByRole("combobox", { name: "Agent runner" })
+    .selectOption("mock");
+  await page.locator("summary").filter({ hasText: "Run settings" }).click();
   await checkpoint(
     "Reload reconciles persisted room, repository, chat, suggestions, and executions",
   );
@@ -342,7 +388,7 @@ try {
   state = await snapshot();
   assert.equal(state.rooms[1].executions.at(-1).status, "blocked");
   assert.equal(state.rooms[1].messages.length, 1);
-  assert.equal(state.rooms[1].suggestions[0].revision, 2);
+  if (!packaged) assert.equal(state.rooms[1].suggestions[0].revision, 2);
   await checkpoint(
     "Restart recovers interrupted work as blocked without replay",
   );
