@@ -5,8 +5,7 @@
     "jsx": "react-jsx",
     "noEmit": true,
     "types": ["node", "vite/client"],
-    "baseUrl": ".",
-    "paths": { "@/*": ["src/renderer/*"] }
+    "paths": { "@/*": ["./src/renderer/*"] }
   },
   "include": ["src", "electron.vite.config.ts"]
 }
