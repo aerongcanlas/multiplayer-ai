@@ -17,8 +17,9 @@ read-along RPCs retain their existing transports; the API snapshot includes shar
    `desktop_prompt_suggestion`, and `desktop_tab_share`, with RLS bypass. Keep these
    credentials on the backend. Use certificate-verified TLS for remote PostgreSQL;
    do not disable certificate verification.
-3. On Windows, run `pnpm dev:shared` from the repository root in Command Prompt
-   (cmd). It starts both the API and desktop and sets `MP_API_URL` to
+3. Run `pnpm dev:shared` from the repository root on Windows, macOS, or Linux.
+   pnpm's configured shell emulator makes the command portable. It starts both
+   the API and desktop and sets `MP_API_URL` to
    `http://127.0.0.1:3001`; keep `PORT=3001` in the API's `.env`. Keep the terminal
    open and press Ctrl+C to stop both. The separate `pnpm dev:api` and
    `pnpm dev:desktop` commands remain available for independent development.

@@ -2,6 +2,7 @@ packages:
   - "apps/*"
   - "packages/*"
 verifyDepsBeforeRun: false
+shellEmulator: true
 allowBuilds:
   electron: true
   # The desktop uses NSIS; the optional Squirrel installer is not built.
