@@ -5,6 +5,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { join, resolve } from "node:path";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { sharedDatabase, alice, bob } from "./shared-fixture.mjs";
 import { startProgramServer } from "./programs-fixture.mjs";
 import { buildServer } from "@multiplayer-ai/api";
@@ -129,8 +130,12 @@ const api = buildServer(
 );
 api.log.level = "silent";
 const apiCalls = [];
+let joinGate;
+let releaseJoin;
 api.addHook("onRequest", async (request) => {
   apiCalls.push(`${request.method} ${request.url}`);
+  if (request.method === "POST" && request.url === "/v1/invites/accept")
+    await joinGate;
 });
 const apiUrl = await api.listen({ host: "127.0.0.1", port: 0 });
 const apps = [];
@@ -198,14 +203,16 @@ async function signIn(client, id) {
   const callback = new URL(new URL(oauth).searchParams.get("redirect_to"));
   callback.searchParams.set("code", id);
   await fetch(callback);
-  await client.page.getByRole("status").filter({ hasText: "Synced" }).waitFor();
+  await client.page.waitForFunction(async () => {
+    const result = await window.desktop.getSnapshot();
+    return result.ok && result.snapshot.collaboration?.status === "connected";
+  });
 }
 try {
   const first = await launch("alice");
   const second = await launch("bob");
   assert.deepEqual(calls, [], "Signed-out startup makes no Supabase calls");
   await signIn(first, alice);
-  await signIn(second, bob);
   await first.page
     .getByRole("button", { name: "Refresh Codex", exact: true })
     .click();
@@ -213,11 +220,9 @@ try {
     .getByRole("region", { name: "Harness settings" })
     .getByText(/fixture@example.invalid/)
     .waitFor();
-  checkpoint(
-    "Two desktop profiles sign in through PKCE against local fake auth",
-  );
+  checkpoint("Room creator signs in through PKCE against local fake auth");
   await first.page
-    .getByRole("button", { name: "New room", exact: true })
+    .getByRole("button", { name: "Add room", exact: true })
     .click();
   await first.page
     .getByRole("textbox", { name: "Room name" })
@@ -239,18 +244,147 @@ try {
     .getByRole("textbox", { name: "Share invitation code" })
     .inputValue();
   assert.match(token, /^[A-Za-z0-9_-]{43}$/);
+  await pool.query(
+    "update public.room_invite set expires_at=now() - interval '1 second' where token_hash=$1",
+    [createHash("sha256").update(token).digest("hex")],
+  );
+  await second.page
+    .getByRole("button", { name: "Add room", exact: true })
+    .click();
+  const joinDialog = second.page.getByRole("dialog", {
+    name: "Add room",
+    exact: true,
+  });
   await second.page
     .getByRole("button", { name: "Join with invite", exact: true })
     .click();
   await second.page
     .getByRole("textbox", { name: "Invitation code" })
     .fill(token);
+  await joinDialog.getByRole("button", { name: "Sign in with GitHub" }).click();
+  await joinDialog.getByRole("button", { name: "Cancel sign-in" }).click();
+  await joinDialog
+    .getByRole("button", { name: "Sign in with GitHub" })
+    .waitFor();
+  assert.equal(
+    await joinDialog
+      .getByRole("textbox", { name: "Invitation code" })
+      .inputValue(),
+    token,
+  );
+  await signIn(second, bob);
+  assert.equal(
+    await joinDialog
+      .getByRole("textbox", { name: "Invitation code" })
+      .inputValue(),
+    token,
+  );
+  assert.equal(
+    apiCalls.filter((route) => route === "POST /v1/invites/accept").length,
+    0,
+    "Sign-in must not automatically join",
+  );
+  await joinDialog
+    .getByRole("textbox", { name: "Invitation code" })
+    .fill("invalid");
+  assert.equal(
+    await joinDialog
+      .getByRole("button", { name: "Join room", exact: true })
+      .isDisabled(),
+    true,
+  );
+  await joinDialog
+    .getByRole("textbox", { name: "Invitation code" })
+    .fill(token);
+  await joinDialog
+    .getByRole("button", { name: "Join room", exact: true })
+    .click();
+  await joinDialog
+    .getByRole("alert")
+    .filter({ hasText: "Invitation is invalid, expired, or revoked." })
+    .waitFor();
+  assert.equal(
+    await joinDialog
+      .getByRole("textbox", { name: "Invitation code" })
+      .inputValue(),
+    token,
+  );
+  await second.page.screenshot({
+    path: join(output, "room-expired-invite.png"),
+    animations: "disabled",
+  });
+  await writeFile(
+    join(output, "room-expired-invite.yml"),
+    await second.page.locator("body").ariaSnapshot(),
+  );
+  checkpoint(
+    "Invite draft survives cancelled and completed sign-in; invalid codes are blocked and expired invites show an inline error",
+  );
+  await first.page.getByRole("button", { name: "Invite", exact: true }).click();
+  await first.page.waitForFunction(
+    (previous) =>
+      document.querySelector('[aria-label="Share invitation code"]')?.value !==
+      previous,
+    token,
+  );
+  const freshToken = await first.page
+    .getByRole("textbox", { name: "Share invitation code" })
+    .inputValue();
+  assert.notEqual(freshToken, token);
+  await joinDialog
+    .getByRole("textbox", { name: "Invitation code" })
+    .fill(` ${freshToken} `);
+  // A rejected invitation marks sync offline; refresh through the dialog before retrying.
+  const refresh = joinDialog.getByRole("button", {
+    name: "Refresh shared rooms",
+  });
+  if (await refresh.isVisible()) await refresh.click();
+  await second.page.waitForFunction(
+    async () =>
+      (await window.desktop.getSnapshot()).snapshot.collaboration.status ===
+      "connected",
+  );
+  await second.page.screenshot({
+    path: join(output, "room-join-ready.png"),
+    animations: "disabled",
+  });
+  joinGate = new Promise((resolve) => {
+    releaseJoin = resolve;
+  });
+  const joinsBefore = apiCalls.filter(
+    (route) => route === "POST /v1/invites/accept",
+  ).length;
   await second.page
     .getByRole("button", { name: "Join room", exact: true })
     .click();
+  await joinDialog
+    .getByRole("button", { name: "Joining...", exact: true })
+    .waitFor();
+  assert.equal(
+    await joinDialog
+      .getByRole("button", { name: "Joining...", exact: true })
+      .isDisabled(),
+    true,
+  );
+  assert.equal(
+    await joinDialog
+      .getByRole("button", { name: "Create", exact: true })
+      .isDisabled(),
+    true,
+  );
+  await second.page.keyboard.press("Enter");
+  await second.page.keyboard.press("Escape");
+  assert.equal(await joinDialog.isVisible(), true);
+  releaseJoin();
+  joinGate = undefined;
   await second.page
     .getByRole("heading", { name: "Shared design", exact: true })
     .waitFor();
+  await joinDialog.waitFor({ state: "hidden" });
+  assert.equal(
+    apiCalls.filter((route) => route === "POST /v1/invites/accept").length,
+    joinsBefore + 1,
+  );
   assert.equal(
     await second.page
       .getByRole("button", { name: "Invite", exact: true })
@@ -434,6 +568,7 @@ try {
   }
   throw error;
 } finally {
+  releaseJoin?.();
   await Promise.all(apps.map((app) => app.close().catch(() => {})));
   await api.close();
   server.closeAllConnections();

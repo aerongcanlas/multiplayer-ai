@@ -161,9 +161,152 @@ await run.execute(
         });
         await checkpoint("Electron renderer sandbox and narrow IPC bridge");
 
-        await page
-            .getByRole("button", { name: "New room", exact: true })
+        const addRoom = page.getByRole("button", {
+            name: "Add room",
+            exact: true,
+        });
+        await addRoom.click();
+        const dialog = page.getByRole("dialog", {
+            name: "Add room",
+            exact: true,
+        });
+        const roomName = dialog.getByRole("textbox", {
+            name: "Room name",
+            exact: true,
+        });
+        await run.until(
+            () =>
+                roomName.evaluate((input) => input === document.activeElement),
+            "room name focus",
+        );
+        assert.equal(
+            await dialog
+                .getByRole("button", { name: "Create room", exact: true })
+                .isDisabled(),
+            true,
+        );
+        assert.equal(
+            await dialog
+                .getByRole("combobox", { name: "Room visibility" })
+                .inputValue(),
+            "local",
+        );
+        await roomName.fill("Draft room");
+        await dialog
+            .getByRole("button", { name: "Join with invite", exact: true })
             .click();
+        await dialog
+            .getByRole("textbox", { name: "Invitation code" })
+            .fill("saved invite draft");
+        assert.equal(
+            await dialog
+                .getByRole("button", { name: "Join room", exact: true })
+                .isDisabled(),
+            true,
+        );
+        await dialog
+            .getByRole("button", { name: "Sign in with GitHub" })
+            .waitFor();
+        await page.screenshot({
+            path: join(output, "room-join-signed-out.png"),
+            animations: "disabled",
+        });
+        await dialog
+            .getByRole("button", { name: "Create", exact: true })
+            .click();
+        assert.equal(await roomName.inputValue(), "Draft room");
+        await dialog
+            .getByRole("combobox", { name: "Room visibility" })
+            .selectOption("shared");
+        await dialog
+            .getByRole("button", { name: "Sign in with GitHub" })
+            .waitFor();
+        assert.equal(
+            await dialog
+                .getByRole("button", { name: "Create room", exact: true })
+                .isDisabled(),
+            true,
+        );
+        await dialog
+            .getByRole("combobox", { name: "Room visibility" })
+            .selectOption("local");
+        await dialog
+            .getByRole("button", { name: "Join with invite", exact: true })
+            .click();
+        assert.equal(
+            await dialog
+                .getByRole("textbox", { name: "Invitation code" })
+                .inputValue(),
+            "saved invite draft",
+        );
+        await dialog
+            .getByRole("button", { name: "Create", exact: true })
+            .click();
+        // Tab wraps inside the dialog; the app's sidebar shortcut must not remove its trigger.
+        await dialog
+            .getByRole("button", { name: "Close", exact: true })
+            .focus();
+        await page.keyboard.press("Tab");
+        assert.equal(
+            await dialog.evaluate((element) =>
+                element.contains(document.activeElement),
+            ),
+            true,
+        );
+        await page.keyboard.press("Control+b");
+        await page.keyboard.press("Escape");
+        await dialog.waitFor({ state: "hidden" });
+        await run.until(
+            () =>
+                addRoom.evaluate((button) => button === document.activeElement),
+            "focus returns to Add room",
+        );
+        await addRoom.click();
+        assert.equal(await roomName.inputValue(), "");
+        await dialog
+            .getByRole("button", { name: "Join with invite", exact: true })
+            .click();
+        assert.equal(
+            await dialog
+                .getByRole("textbox", { name: "Invitation code" })
+                .inputValue(),
+            "",
+        );
+        await dialog
+            .getByRole("button", { name: "Cancel", exact: true })
+            .click();
+        await dialog.waitFor({ state: "hidden" });
+        await addRoom.click();
+        await page
+            .locator('[data-slot="dialog-overlay"]')
+            .click({ position: { x: 5, y: 5 } });
+        await dialog.waitFor({ state: "hidden" });
+        await addRoom.click();
+        await application.evaluate(({ BrowserWindow }) =>
+            BrowserWindow.getAllWindows()[0].setSize(1024, 720),
+        );
+        await page.screenshot({
+            path: join(output, "room-create-minimum-window.png"),
+            animations: "disabled",
+        });
+        const dialogBox = await dialog.boundingBox();
+        const viewport = await page.evaluate(() => ({
+            width: innerWidth,
+            height: innerHeight,
+        }));
+        assert.ok(
+            dialogBox.width >= 400 && dialogBox.x >= 0 && dialogBox.y >= 0,
+        );
+        assert.ok(
+            dialogBox.x + dialogBox.width <= viewport.width &&
+                dialogBox.y + dialogBox.height <= viewport.height,
+        );
+        await application.evaluate(({ BrowserWindow }) =>
+            BrowserWindow.getAllWindows()[0].setSize(1440, 960),
+        );
+        await checkpoint(
+            "Room modal preserves mode drafts, resets on dismissal, traps and restores focus, and fits the minimum window",
+        );
         await page
             .getByRole("textbox", { name: "Room name", exact: true })
             .fill("Desktop validation");
@@ -173,6 +316,7 @@ await run.execute(
         await page
             .getByRole("heading", { name: "Desktop validation", exact: true })
             .waitFor();
+        await dialog.waitFor({ state: "hidden" });
         await selectRepository(fixture);
         await checkpoint("Create room and select a real local Git repository");
 

@@ -1,21 +1,15 @@
-import { useState } from "react";
 import { UserRound, LogOut, RefreshCw, Users } from "lucide-react";
 import type { CollaborationState } from "../../shared/collaboration";
 import { perform } from "../lib/desktop-store";
 import { Button } from "./ui/Button";
-import { Input } from "./ui/Input";
 
 export function SharedConnection({
   connection,
   disabled,
-  onRoom,
 }: {
   connection?: CollaborationState;
   disabled: boolean;
-  onRoom: (id: string) => void;
 }) {
-  const [joining, setJoining] = useState(false);
-  const [token, setToken] = useState("");
   const signedIn = connection?.auth === "signed_in";
   return (
     <section className="shared-connection" aria-label="Shared room account">
@@ -57,48 +51,6 @@ export function SharedConnection({
               <RefreshCw size={12} />
             </Button>
           </div>
-          <Button
-            size="xs"
-            variant="outline"
-            disabled={disabled}
-            onClick={() => setJoining(!joining)}
-          >
-            Join with invite
-          </Button>
-          {joining && (
-            <form
-              className="join-room"
-              onSubmit={(event) => {
-                event.preventDefault();
-                void perform(
-                  () => window.desktop.joinRoom(token.trim()),
-                  (notice) => {
-                    if (notice.kind === "room") {
-                      onRoom(notice.roomId);
-                      setJoining(false);
-                      setToken("");
-                    }
-                  },
-                );
-              }}
-            >
-              <Input
-                autoFocus
-                aria-label="Invitation code"
-                placeholder="Paste invitation code"
-                value={token}
-                onChange={(event) => setToken(event.target.value)}
-                maxLength={43}
-              />
-              <Button
-                size="xs"
-                type="submit"
-                disabled={disabled || !/^[A-Za-z0-9_-]{43}$/.test(token.trim())}
-              >
-                Join room
-              </Button>
-            </form>
-          )}
         </>
       ) : connection?.auth === "signing_in" ? (
         <Button
@@ -110,7 +62,7 @@ export function SharedConnection({
         </Button>
       ) : (
         <>
-          <p>Sign in to create rooms and chat with your team.</p>
+          <p>Sign in to use shared rooms and chat with your team.</p>
           <Button
             size="xs"
             variant="outline"

@@ -310,14 +310,6 @@ summary:focus-visible {
   margin-top: 17px;
   color: #b3b3bb;
 }
-.create-room {
-  padding: 2px 12px 12px;
-}
-.create-room > div {
-  display: flex;
-  gap: 3px;
-  padding-top: 7px;
-}
 .room-view {
   display: flex;
   flex-direction: column;
@@ -785,19 +777,68 @@ summary:focus-visible {
 .shared-message {
   overflow-wrap: anywhere;
 }
-.join-room {
+.room-entry-dialog {
+  width: 420px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  background: #202022;
+  color: #dedee2;
+}
+.room-entry-modes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 9px;
+  background: #171719;
+}
+.room-entry-modes button[aria-pressed="true"] {
+  background: #35353b;
+  color: #f0f0f4;
+}
+.room-entry-form {
   display: grid;
   gap: 8px;
-  width: 100%;
 }
-.create-room select {
+.room-entry-form label {
+  font-weight: 500;
+}
+.room-entry-form label:not(:first-child) {
+  margin-top: 8px;
+}
+.room-entry-form select {
   width: 100%;
-  padding: 6px;
+  height: 36px;
+  padding: 0 10px;
   color: #ddd;
   background: #252525;
   border: 1px solid #444;
-  border-radius: 5px;
-  font-size: 11px;
+  border-radius: 8px;
+}
+.room-entry-hint {
+  color: #a3a3ad;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.room-entry-account {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  margin-top: 8px;
+  border: 1px solid #3c3c42;
+  border-radius: 8px;
+}
+.room-entry-error {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #482d31;
+  color: #edd3d5;
+  overflow-wrap: anywhere;
+}
+.room-entry-form [data-slot="dialog-footer"] {
+  margin-top: 12px;
 }
 .room-header-actions {
   display: flex;

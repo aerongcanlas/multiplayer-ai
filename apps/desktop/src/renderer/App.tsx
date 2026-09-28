@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertCircle,
   ChevronRight,
@@ -21,6 +21,7 @@ import { RoomWorkspace } from "@multiplayer-ai/ui/layouts/room-workspace";
 import { GroupChatPanel } from "./components/GroupChatPanel";
 import { MissionControlPanel } from "./components/MissionControlPanel";
 import { SharedConnection } from "./components/SharedConnection";
+import { RoomEntryDialog } from "./components/RoomEntryDialog";
 import { SidebarSection } from "./components/SidebarSection";
 import { HarnessSettings } from "./components/HarnessSettings";
 import { TabsPanel } from "./components/tabs/TabsPanel";
@@ -137,7 +138,7 @@ function RoomView({
             <strong>Single-use invitation · expires in 24 hours</strong>
             <p>
               Share this code with your teammate. They can sign in and choose
-              Join with invite.
+              Add room, then Join with invite.
             </p>
           </div>
           <Input
@@ -239,9 +240,8 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(
     () => getStored("multiplayer:sidebar") !== "closed",
   );
-  const [creating, setCreating] = useState(false);
-  const [roomName, setRoomName] = useState("");
-  const [roomScope, setRoomScope] = useState<"local" | "shared">("local");
+  const [roomDialog, setRoomDialog] = useState<"create" | "join" | null>(null);
+  const addRoomRef = useRef<HTMLButtonElement>(null);
   // Each room's active tab, remembered across launches.
   const [selectedTabs, setSelectedTabs] = useState<Record<string, string>>({});
   // Another host's read-along tab open in a room's main area.
@@ -261,6 +261,7 @@ export default function App() {
   }
   useEffect(() => {
     const listener = (event: KeyboardEvent) => {
+      if (roomDialog) return;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "b") {
         event.preventDefault();
         toggleSidebar();
@@ -268,7 +269,7 @@ export default function App() {
     };
     window.addEventListener("keydown", listener);
     return () => window.removeEventListener("keydown", listener);
-  }, []);
+  }, [roomDialog]);
   function selectRoom(id: string) {
     setSelectedRoomId(id);
     setStored("multiplayer:room", id);
@@ -294,18 +295,6 @@ export default function App() {
       if (!result) return;
     }
     selectTab(roomId, tab.id);
-  }
-  async function createRoom() {
-    const result = await perform(
-      () => window.desktop.createRoom(roomName, roomScope),
-      (notice) => {
-        if (notice.kind === "room") selectRoom(notice.roomId);
-      },
-    );
-    if (result) {
-      setRoomName("");
-      setCreating(false);
-    }
   }
   return (
     <div className="desktop-shell">
@@ -340,7 +329,7 @@ export default function App() {
           </span>
         </div>
       </header>
-      {error && (
+      {error && !roomDialog && (
         <div className="error-banner" role="alert">
           <AlertCircle size={16} />
           <p>{error}</p>
@@ -376,74 +365,21 @@ export default function App() {
                     <Button
                       size="icon-xs"
                       variant="ghost"
-                      aria-label="New room"
-                      title="New room"
-                      aria-expanded={creating}
+                      ref={addRoomRef}
+                      aria-label="Add room"
+                      title="Add room"
+                      aria-haspopup="dialog"
+                      aria-expanded={roomDialog !== null}
                       disabled={disabled}
                       onClick={() => {
-                        setCreating(!creating);
-                        setRoomScope(
-                          snapshot?.collaboration?.auth === "signed_in"
-                            ? "shared"
-                            : "local",
-                        );
+                        dismissError();
+                        setRoomDialog("create");
                       }}
                     >
                       <Plus size={16} />
                     </Button>
                   }
                 >
-                  {creating && (
-                    <form
-                      className="create-room"
-                      onSubmit={(event) => {
-                        event.preventDefault();
-                        void createRoom();
-                      }}
-                    >
-                      <Input
-                        autoFocus
-                        aria-label="Room name"
-                        maxLength={80}
-                        placeholder="Room name"
-                        value={roomName}
-                        onChange={(event) => setRoomName(event.target.value)}
-                      />
-                      <select
-                        aria-label="Room visibility"
-                        value={roomScope}
-                        onChange={(event) =>
-                          setRoomScope(event.target.value as "local" | "shared")
-                        }
-                      >
-                        <option value="local">Local to this desktop</option>
-                        <option
-                          value="shared"
-                          disabled={
-                            snapshot?.collaboration?.auth !== "signed_in"
-                          }
-                        >
-                          Shared with members
-                        </option>
-                      </select>
-                      <div>
-                        <Button
-                          size="xs"
-                          type="submit"
-                          disabled={disabled || !roomName.trim()}
-                        >
-                          Create room
-                        </Button>
-                        <Button
-                          size="xs"
-                          variant="ghost"
-                          onClick={() => setCreating(false)}
-                        >
-                          Cancel
-                        </Button>
-                      </div>
-                    </form>
-                  )}
                   <nav className="room-list" aria-label="Rooms">
                     {snapshot?.rooms.map((item) => (
                       <Fragment key={item.id}>
@@ -493,7 +429,6 @@ export default function App() {
                   <SharedConnection
                     connection={snapshot?.collaboration}
                     disabled={disabled}
-                    onRoom={selectRoom}
                   />
                 </SidebarSection>
                 <SidebarSection
@@ -575,6 +510,18 @@ export default function App() {
             : "Saved on this desktop · Private local room"}
         </span>
       </footer>
+      {roomDialog && (
+        <RoomEntryDialog
+          mode={roomDialog}
+          onModeChange={setRoomDialog}
+          onRoom={selectRoom}
+          triggerRef={addRoomRef}
+          onClose={() => {
+            setRoomDialog(null);
+            dismissError();
+          }}
+        />
+      )}
     </div>
   );
 }
