@@ -3,6 +3,7 @@ import {
   PROTOCOL_VERSION,
   commandSchema,
   isHarnessCommand,
+  type Command,
   type Snapshot,
   type PrivateWorkspace,
   type SupervisorRequest,
@@ -202,8 +203,9 @@ export class SupervisorService {
       );
     if (command.type === "workspace.select")
       throw new Error("Repository selection requires the desktop file dialog.");
+    if (command.type === "suggestion.create")
+      return { snapshot: await this.suggest(command) };
     if (isTabCommand(command))
-    if (command.type === "suggestion.create") return this.suggest(command);
       throw new Error("Chat tabs are unavailable in this build.");
     this.transaction((draft) => {
       if (command.type === "room.create") {
@@ -229,32 +231,6 @@ export class SupervisorService {
             createdAt: now(),
           });
           break;
-        case "suggestion.create": {
-          // Reload canonical messages; renderer-supplied transcripts and authors are never accepted.
-          const ids = new Set(command.messageIds);
-          const sources = room.messages.filter((message) =>
-            ids.has(message.id),
-          );
-          if (sources.length !== ids.size)
-            throw new Error("A selected message does not belong to this room.");
-          const prompt = `Consider this selected feedback from the room:\n\n${sources.map((source) => `${source.authorName}: ${source.text}`).join("\n\n")}\n\nKeep conflicting advice visible and ask about missing requirements before making changes.`;
-          if (prompt.length > 8_000)
-            throw new Error(
-              "Select fewer messages so the suggestion fits within 8,000 characters.",
-            );
-          room.suggestions.push({
-            id: randomUUID(),
-            prompt,
-            contextVersion: 0,
-            sourceMessageIds: sources.map((source) => source.id),
-            sources: structuredClone(sources),
-            revision: 1,
-            status: "draft",
-            createdAt: now(),
-            updatedAt: now(),
-          });
-          break;
-        }
         case "suggestion.edit": {
           const suggestion = room.suggestions.find(
             (suggestion) => suggestion.id === command.suggestionId,
@@ -279,6 +255,58 @@ export class SupervisorService {
     return { snapshot: this.snapshot() };
   }
 
+  private async suggest(
+    command: Extract<Command, { type: "suggestion.create" }>,
+  ) {
+    const room = findRoom(this.state, command.roomId);
+    const ids = new Set(command.messageIds);
+    const sources = room.messages.filter((message) => ids.has(message.id));
+    if (sources.length !== ids.size)
+      throw new Error("A selected message does not belong to this room.");
+    const registry = this.registry;
+    if (!registry) throw new Error("Codex is unavailable in this build.");
+    await registry.refresh("codex");
+    if (!registry.ready("codex"))
+      throw new Error(
+        "Sign in with ChatGPT in Harness settings to generate prompts.",
+      );
+    const adapter = registry.adapter("codex");
+    const models = registry.state("codex").models;
+    const model = models.find((item) => item.isDefault) ?? models[0];
+    if (!adapter.suggest || !model)
+      throw new Error("Codex prompt generation is unavailable.");
+    // Selected room messages are the only input; local tab transcripts remain private.
+    const generated = await adapter.suggest({
+      ...(await registry.context("codex")),
+      messages: sources,
+      model,
+    });
+    if (this.closed) throw new Error("The supervisor is shutting down.");
+    this.transaction((draft) => {
+      const current = findRoom(draft, room.id);
+      if (
+        current.shared?.userId !== room.shared?.userId ||
+        current.shared?.project !== room.shared?.project
+      )
+        throw new Error(
+          "Room membership or account changed. Generate suggestions again.",
+        );
+      for (const prompt of generated.suggestedPrompts)
+        current.suggestions.push({
+          id: randomUUID(),
+          prompt,
+          contextVersion: 0,
+          sourceMessageIds: sources.map((source) => source.id),
+          sources: structuredClone(sources),
+          revision: 1,
+          status: "draft",
+          createdAt: now(),
+          updatedAt: now(),
+        });
+    });
+    return this.snapshot();
+  }
+
   // Shared rooms keep this host's private repository selection and tabs for the same account.
   private async importShared(room: Snapshot["rooms"][number]) {
     if (!room.shared) throw new Error("Shared room identity is required.");
@@ -293,276 +321,6 @@ export class SupervisorService {
       // Remove the previous account's tabs fully, closed ones included: sessions, live state,
       // and transcripts.
       this.host?.purge(room.id);
-        case "execution.stop": {
-          const execution = findExecution(room, command.executionId);
-          if (execution.status !== "running")
-            throw new Error("This execution has already stopped.");
-          execution.status = "cancelled";
-          execution.endedAt = now();
-          for (const task of execution.tasks.filter((task) =>
-            ["queued", "running", "waiting_for_input"].includes(task.status),
-          )) {
-            task.status = "cancelled";
-            task.activity = "Stopped by the host.";
-            task.updatedAt = now();
-          }
-          this.record(
-            execution,
-            execution.tasks[0],
-            "status",
-            "Host stopped the execution. Completed work and evidence were retained.",
-            events,
-          );
-          stoppedId = execution.id;
-          break;
-        }
-      }
-    });
-    if (stoppedId) this.controllers.get(stoppedId)?.abort();
-    return this.snapshot();
-  }
-
-  private async suggest(
-    command: Extract<Command, { type: "suggestion.create" }>,
-  ) {
-    const room = findRoom(this.state, command.roomId);
-    const ids = new Set(command.messageIds);
-    const sources = room.messages.filter((message) => ids.has(message.id));
-    if (sources.length !== ids.size)
-      throw new Error("A selected message does not belong to this room.");
-    if (!this.codex)
-      throw new Error("Connect ChatGPT to generate prompt suggestions.");
-    // Shared suggestions only use shared messages, never this host's private lead context.
-    const context = room.shared ? undefined : currentSummary(room);
-    const contextVersion = context?.version ?? 0;
-    const generated = await this.codex.suggest(sources, context);
-    if (this.closed) throw new Error("The supervisor is shutting down.");
-    this.transaction((draft) => {
-      const current = findRoom(draft, room.id);
-      if (
-        current.shared?.userId !== room.shared?.userId ||
-        current.shared?.project !== room.shared?.project ||
-        (!current.shared &&
-          (currentSummary(current)?.version ?? 0) !== contextVersion)
-      )
-        throw new Error("Room context changed. Generate suggestions again.");
-      for (const prompt of generated.suggestedPrompts) {
-        current.suggestions.push({
-          id: randomUUID(),
-          prompt,
-          contextVersion,
-          sourceMessageIds: sources.map((source) => source.id),
-          sources: structuredClone(sources),
-          revision: 1,
-          status: "draft",
-          createdAt: now(),
-          updatedAt: now(),
-        });
-      }
-    });
-    return this.snapshot();
-  }
-
-  private async start(
-    command: Extract<Command, { type: "execution.start" }>,
-  ): Promise<Snapshot> {
-    if (this.controllers.size)
-      throw new Error(
-        "An active execution is still running or stopping. Wait before starting another run.",
-      );
-    if (command.runner === "codex" && (!this.codex || !command.configuration))
-      throw new Error("Connect Codex and choose a model before running.");
-    const initialRoom = findRoom(this.state, command.roomId);
-    if (!initialRoom.workspace)
-      throw new Error(
-        "Select a local Git repository before starting an execution.",
-      );
-    const stored = this.journal.getWorkspace(initialRoom.workspace.id);
-    if (!stored)
-      throw new Error("Select the repository again to restore access.");
-    const workspace = await inspectWorkspace(stored.path, stored.id);
-    if (this.closed) throw new Error("The supervisor is shutting down.");
-    const executionId = randomUUID();
-    this.transaction((draft, events) => {
-      const room = findRoom(draft, command.roomId);
-      if (
-        draft.rooms.some((room) =>
-          room.executions.some((run) => run.status === "running"),
-        )
-      ) {
-        throw new Error(
-          "This desktop already has an active execution. Stop it or wait for completion.",
-        );
-      }
-      const suggestion = command.suggestionId
-        ? room.suggestions.find((item) => item.id === command.suggestionId)
-        : null;
-      if (command.suggestionId && !suggestion)
-        throw new Error("Suggestion not found in this room.");
-      const contextVersion = room.shared
-        ? 0
-        : (currentSummary(room)?.version ?? 0);
-      if (
-        suggestion &&
-        (suggestion.contextVersion !== contextVersion ||
-          suggestion.revision !== command.suggestionRevision)
-      ) {
-        throw new Error(
-          "The suggestion refers to older context or an older edit. Generate a new suggestion from the current context.",
-        );
-      }
-      if (suggestion?.status === "submitted")
-        throw new Error("This suggestion was already submitted.");
-      room.workspace = publicWorkspace(workspace);
-      const taskIds = Array.from({ length: 4 }, () => randomUUID());
-      const mockAssignments = [
-        [
-          "lead",
-          "Coordinate the simulation",
-          "All mock tasks complete and mock validation passes.",
-        ],
-        [
-          "planner",
-          "Plan a bounded task",
-          "Record a simulated plan and acceptance criteria.",
-        ],
-        [
-          "implementer",
-          "Simulate implementation",
-          "Emit a mock result without modifying files.",
-        ],
-        [
-          "validator",
-          "Simulate independent validation",
-          "Record the selected mock validation outcome.",
-        ],
-      ] as const;
-      const assignments =
-        command.runner === "codex"
-          ? ([
-              [
-                "lead",
-                command.prompt,
-                "Delegate bounded work, review specialist evidence, and report the outcome.",
-              ],
-            ] as const)
-          : mockAssignments;
-      const execution: Execution = {
-        id: executionId,
-        roomId: room.id,
-        hostId: draft.hostId,
-        generation: 1,
-        planVersion: 1,
-        runner: command.runner ?? "mock",
-        ...(command.configuration
-          ? { configuration: command.configuration, approvals: [] }
-          : {}),
-        scenario: command.scenario,
-        workspace: publicWorkspace(workspace),
-        prompt: command.prompt,
-        contextVersion,
-        sourceSuggestion: suggestion ? structuredClone(suggestion) : null,
-        status: "running",
-        startedAt: now(),
-        endedAt: null,
-        events: [],
-        evidence: [],
-        tasks: assignments.map(([role, objective, criteria], index) => ({
-          id: taskIds[index],
-          agentId: randomUUID(),
-          parentId: index === 0 ? null : taskIds[0],
-          role,
-          objective,
-          criteria,
-          dependencies: index > 1 ? [taskIds[index - 1]] : [],
-          status: "queued",
-          contextVersion,
-          inputRevision: workspace.revision,
-          workspaceId: workspace.id,
-          activity:
-            command.runner === "codex"
-              ? "Queued for Codex."
-              : "Queued for the local mock runner.",
-          updatedAt: now(),
-          startedAt: null,
-          completedAt: null,
-        })),
-      };
-      if (suggestion && !room.shared) {
-        suggestion.status = "submitted";
-        suggestion.updatedAt = now();
-      }
-      room.executions.push(execution);
-      this.record(
-        execution,
-        execution.tasks[0],
-        "status",
-        command.runner === "codex"
-          ? `Host submitted a direction to Codex in ${command.configuration!.mode} mode.`
-          : "Host submitted a direction to the mock runner. Simulation only; no repository changes.",
-        events,
-      );
-    }, workspace);
-    const controller = new AbortController();
-    this.controllers.set(executionId, controller);
-    if (command.runner === "codex")
-      void this.runCodex(command.roomId, executionId, workspace, controller);
-    else void this.run(command.roomId, executionId, command, controller);
-    return this.snapshot();
-  }
-
-  private async runCodex(
-    roomId: string,
-    executionId: string,
-    workspace: PrivateWorkspace,
-    controller: AbortController,
-  ) {
-    try {
-      const execution = structuredClone(
-        findExecution(findRoom(this.state, roomId), executionId),
-      );
-      await this.codex!.run(
-        {
-          execution,
-          workspace,
-          configuration: execution.configuration!,
-          signal: controller.signal,
-        },
-        (event) => this.applyCodexEvent(roomId, executionId, event),
-      );
-    } catch (error) {
-      if (!this.closed && !controller.signal.aborted)
-        this.transaction((draft, events) => {
-          const execution = findExecution(findRoom(draft, roomId), executionId);
-          execution.status = "failed";
-          execution.endedAt = now();
-          execution.approvals = [];
-          const message =
-            error instanceof Error ? error.message : "Codex execution failed.";
-          for (const task of execution.tasks.filter((item) =>
-            ["running", "queued", "waiting_for_input"].includes(item.status),
-          )) {
-            task.status = "failed";
-            task.activity = message;
-            task.completedAt = now();
-            task.updatedAt = now();
-          }
-          this.record(execution, execution.tasks[0], "status", message, events);
-        });
-    } finally {
-      this.controllers.delete(executionId);
-    }
-  }
-
-  private applyCodexEvent(
-    roomId: string,
-    executionId: string,
-    event: CodexEvent,
-  ) {
-    if (this.closed) return;
-    if (event.type === "session") {
-      this.journal.saveSession(executionId, event.taskId, event.threadId);
-      return;
     }
     this.transaction((draft) => {
       const index = draft.rooms.findIndex((item) => item.id === room.id);

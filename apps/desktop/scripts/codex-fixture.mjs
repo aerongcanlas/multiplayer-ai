@@ -233,6 +233,47 @@ function followUp(lead, leadTurn) {
 
 async function turn(threadId, turnId, prompt, params) {
     const thread = threads.get(threadId) ?? { turns: 0 };
+    if (params.outputSchema?.properties?.suggestedPrompts) {
+        // Windows retains a directory handle for a process's working directory.
+        if (
+            process.platform === "win32" &&
+            prompt.includes("FIXTURE_SUGGESTION_LOCK")
+        )
+            process.chdir(thread.cwd);
+        if (prompt.includes("FIXTURE_SUGGESTION_FAILURE"))
+            return complete(threadId, turnId, "failed", {
+                message: "Fixture suggestion failure.",
+            });
+        await new Promise((resolve) =>
+            setTimeout(
+                resolve,
+                prompt.includes("FIXTURE_SUGGESTION_SLOW") ? 5_000 : 100,
+            ),
+        );
+        if (!running.has(threadId)) return;
+        message(
+            threadId,
+            turnId,
+            JSON.stringify(
+                prompt.includes("FIXTURE_SUGGESTION_INVALID")
+                    ? { suggestedPrompts: [] }
+                    : {
+                          actionable: true,
+                          summary: "Add a persistent theme preference.",
+                          suggestedPrompts: [
+                              "Add a dark mode toggle, persist the selected theme, and verify it survives a restart.",
+                              ...(prompt.includes("FIXTURE_MULTIPLE_PROMPTS")
+                                  ? [
+                                        "Verify keyboard navigation and focus visibility for the theme toggle.",
+                                    ]
+                                  : []),
+                          ],
+                          unresolved: [],
+                      },
+            ),
+        );
+        return complete(threadId, turnId);
+    }
     const planMode = params.collaborationMode?.mode === "plan";
     if (prompt.includes("FIXTURE_CRASH")) process.exit(1);
     if (prompt.includes("FIXTURE_AGENTS")) await spawnAgents(threadId, turnId);
@@ -465,6 +506,10 @@ createInterface({ input: process.stdin })
                 thread: { id: threadId },
                 model: params.model ?? "fixture-codex",
             });
+        } else if (method === "thread/unsubscribe") {
+            threads.delete(params.threadId);
+            saveThreads();
+            result({});
         } else if (method === "thread/resume") {
             if (!threads.has(params.threadId))
                 return error(

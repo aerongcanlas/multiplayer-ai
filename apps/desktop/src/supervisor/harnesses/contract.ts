@@ -1,3 +1,5 @@
+import type { ContextSuggestionDraft } from "@multiplayer-ai/domain/context-suggestions";
+import type { ChatMessage } from "../../shared/contracts";
 import type {
   AgentStatus,
   HarnessId,
@@ -12,6 +14,11 @@ import type {
 export interface LaunchContext {
   executable: string;
   env: Record<string, string>;
+}
+
+export interface SuggestionRequest extends LaunchContext {
+  messages: ChatMessage[];
+  model: HarnessModel;
 }
 
 export interface Inspection {
@@ -153,6 +160,8 @@ export interface HarnessAdapter {
   /** Starts an in-app sign-in and returns the URL to open, or null when already signed in. */
   startSignIn?(context: LaunchContext): Promise<string | null>;
   open(request: OpenRequest): Promise<HarnessSession>;
+  /** Generates drafts without opening a user-visible chat or running repository tools. */
+  suggest?(request: SuggestionRequest): Promise<ContextSuggestionDraft>;
   /** Harness-level changes such as a completed sign-in. */
   onChange?(listener: () => void): void;
   close(): void;

@@ -115,6 +115,19 @@ export const stubOpenDialog = (application, path) =>
     });
   }, path);
 
+/** Simulate a crash without leaving Windows child processes holding the test's pipes open. */
+export async function crashApplication(application) {
+  const child = application.process();
+  const closed = new Promise((resolve) => child.once("close", resolve));
+  if (process.platform === "win32")
+    execFileSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], {
+      windowsHide: true,
+      stdio: "pipe",
+    });
+  else child.kill("SIGKILL");
+  await closed;
+}
+
 /**
  * One scripted run of the app. `launch` may be called again after a close or a kill; `execute`
  * runs the scenario, writes the report, and closes the app.
@@ -225,6 +238,14 @@ export function createRun({
       .getByRole("textbox", { name: "Message", exact: true })
       .fill(text);
     await panel.getByRole("button", { name: "Send", exact: true }).click();
+    // The composer clears after IPC acknowledges the new turn; an old idle snapshot is insufficient.
+    await until(
+      async () =>
+        (await panel
+          .getByRole("textbox", { name: "Message", exact: true })
+          .inputValue()) === "",
+      "the submitted message to be accepted",
+    );
   };
 
   const report = ({ passed, ...fields }) =>

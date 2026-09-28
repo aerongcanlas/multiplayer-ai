@@ -105,12 +105,8 @@ parent.on("message", ({ data }) => {
       });
     }
   };
-  // Model generation can take a minute; execution controls must remain responsive.
-  if (
-    data.command.type === "execution.stop" ||
-    data.command.type === "approval.respond"
-  )
-    void respond();
+  // Generation waits on the model; other commands, including Stop, keep flowing.
+  if (data.command.type === "suggestion.create") void pending.then(respond);
   else pending = pending.then(respond);
 });
 process.on("exit", () => {

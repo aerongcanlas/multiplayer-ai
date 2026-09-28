@@ -13,7 +13,7 @@ Verify the migration and OAuth redirect configuration for the project you intend
 
 ## Ownership and synchronization
 
-**Suggest prompts** uses the operator's local Codex/ChatGPT connection to run the context agent. The agent receives canonical selected messages and returns up to three generated drafts. It does not start a repository execution. Connect ChatGPT first; generation failures preserve the message selection for retry. Local room suggestions can also use the current lead summary; shared suggestions never include private local execution context.
+**Suggest prompts** uses the operator's local Codex/ChatGPT connection to run the context agent. The agent receives canonical selected messages and returns up to three generated drafts. It does not start a repository execution. Sign in with ChatGPT under Harness settings first; generation failures preserve the message selection for retry. Suggestions use only selected room messages; private tab transcripts are never included.
 
 For shared rooms, apply `supabase/migrations/20260927120000_desktop_generated_suggestions.sql` after the existing desktop API migration. The new `desktop_save_generated_suggestions` RPC saves all generated drafts atomically, rechecks membership, and reloads source attribution. The older command RPC remains for compatibility; updated clients use the new save RPC instead of storing its context template. Apply this migration before distributing the updated desktop. Local generation needs no Supabase migration.
 

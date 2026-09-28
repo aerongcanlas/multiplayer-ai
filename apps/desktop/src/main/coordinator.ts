@@ -37,6 +37,7 @@ export class DesktopCoordinator {
     private local?: Snapshot;
     private view?: Snapshot;
     private revision = 0;
+    private suggesting = false;
     // The read-along publisher's per-tab status, shown by the host's switch.
     readAlongStatus?: () => NonNullable<Snapshot["readAlong"]>;
     // Main's viewer for other hosts' read-along tabs.
@@ -226,7 +227,13 @@ export class DesktopCoordinator {
                     const existing = new Set(
                         room.suggestions.map((item) => item.id),
                     );
-                    await this.localCommand({ type: "shared.import", room });
+                    await this.localCommand({
+                        type: "shared.import",
+                        room: {
+                            ...room,
+                            shared: { ...room.shared!, sharedTabs: undefined },
+                        },
+                    });
                     const generated = await this.localCommand(command);
                     if (
                         this.shared.state.account?.id !== identity.userId ||
@@ -240,7 +247,7 @@ export class DesktopCoordinator {
                         throw new Error(
                             "Room membership or account changed. Generate suggestions again.",
                         );
-                    const prompts = generated.rooms
+                    const prompts = generated.snapshot.rooms
                         .find((item) => item.id === room!.id)!
                         .suggestions.filter((item) => !existing.has(item.id))
                         .map((item) => item.prompt);

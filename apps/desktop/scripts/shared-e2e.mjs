@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { join, resolve } from "node:path";
 import assert from "node:assert/strict";
 import { sharedDatabase, alice, bob } from "./shared-fixture.mjs";
+import { startProgramServer } from "./programs-fixture.mjs";
 
 const require = createRequire(import.meta.url);
 const directory = resolve(fileURLToPath(new URL("..", import.meta.url)));
@@ -15,6 +16,7 @@ const output = resolve(
     new Date().toISOString().replaceAll(":", "-"),
 );
 await mkdir(output, { recursive: true });
+const programs = await startProgramServer(join(output, "manifest.json"));
 const { db, rpc, call } = await sharedDatabase();
 const sessions = new Map();
 let offline = false;
@@ -135,6 +137,8 @@ async function launch(name) {
     MP_TEST_USER_DATA: join(output, name),
     MP_TEST_SUPABASE_URL: url,
     MP_TEST_CODEX_FIXTURE: join(directory, "scripts/codex-fixture.mjs"),
+    MP_TEST_HARNESS_MANIFEST: join(output, "manifest.json"),
+    MP_FIXTURE_SIGNED_IN: "1",
   };
   delete env.ELECTRON_RUN_AS_NODE;
   delete env.ELECTRON_RENDERER_URL;
@@ -192,11 +196,11 @@ try {
   await signIn(first, alice);
   await signIn(second, bob);
   await first.page
-    .getByRole("button", { name: "Connect ChatGPT", exact: true })
+    .getByRole("button", { name: "Refresh Codex", exact: true })
     .click();
   await first.page
-    .getByRole("region", { name: "ChatGPT connection" })
-    .getByText("fixture@example.invalid", { exact: true })
+    .getByRole("region", { name: "Harness settings" })
+    .getByText(/fixture@example.invalid/)
     .waitFor();
   checkpoint(
     "Two desktop profiles sign in through PKCE against local fake auth",
@@ -397,4 +401,5 @@ try {
   server.closeAllConnections();
   await new Promise((resolve) => server.close(resolve));
   await db.close();
+  await programs.close();
 }

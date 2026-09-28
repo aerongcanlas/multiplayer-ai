@@ -105,6 +105,7 @@ test("transcript messages of unknown shape are dropped and sign-in URLs are allo
   assert.equal(loginAllowed("cursor", "https://auth.openai.com/x"), false);
   assert.equal(requestTimeout("harness.refresh"), 90_000);
   assert.equal(requestTimeout("tab.send"), 20_000);
+  assert.equal(requestTimeout("suggestion.create"), 180_000);
 });
 
 test("the renderer cannot set an executable path", () => {

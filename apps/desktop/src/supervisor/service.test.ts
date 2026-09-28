@@ -95,6 +95,11 @@ test("messages and editable attributed suggestions persist; generating a suggest
             messageIds: [message.id],
         });
         const suggestion = service.snapshot().rooms[0].suggestions[0];
+        assert.equal(
+            suggestion.prompt,
+            "Review the selected feedback and propose the next concrete change.",
+        );
+        assert.ok(fake.calls.includes("suggest"));
         assert.deepEqual(service.snapshot().rooms[0].tabs, []);
         assert.equal(
             fake.calls.some((call) => call.startsWith("send:")),
@@ -158,6 +163,31 @@ test("cross-room and unknown messages are rejected without mutating state", () =
             /does not belong/,
         );
         assert.equal(service.snapshot().revision, revision);
+    }));
+
+test("signed-out or failed generation preserves messages without saving a fallback", () =>
+    withHost(async ({ service, roomId }, fake) => {
+        await service.dispatch({
+            type: "message.send",
+            roomId,
+            text: "Selected feedback",
+        });
+        const command = {
+            type: "suggestion.create" as const,
+            roomId,
+            messageIds: [service.snapshot().rooms[0].messages[0].id],
+        };
+        fake.signedIn = false;
+        await assert.rejects(service.dispatch(command), /Sign in with ChatGPT/);
+        fake.signedIn = true;
+        fake.suggest = async () => {
+            throw new Error("Generation failed");
+        };
+        await assert.rejects(service.dispatch(command), /Generation failed/);
+        const room = service.snapshot().rooms[0];
+        assert.equal(room.messages.length, 1);
+        assert.deepEqual(room.suggestions, []);
+        assert.deepEqual(room.tabs, []);
     }));
 
 test("the repository cannot change under a running tab", () =>

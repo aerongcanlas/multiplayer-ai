@@ -143,6 +143,92 @@ function sharedSetup(
     return { coordinator, requests, shared };
 }
 
+test("shared suggestions persist generated text and reject duplicate or switched-account requests", async () => {
+    const userId = randomUUID();
+    const room = tabRoom(userId);
+    const local: Snapshot = {
+        protocolVersion: 2,
+        sync: "local-only",
+        revision: 1,
+        hostId: randomUUID(),
+        rooms: [room],
+    };
+    const saved: string[][] = [];
+    let finish!: () => void;
+    let generationStarted!: () => void;
+    let started = new Promise<void>((resolve) => {
+        generationStarted = resolve;
+    });
+    const shared = {
+        rooms: [structuredClone(room)],
+        state: {
+            ...signedOutState(),
+            status: "connected" as const,
+            account: { id: userId, name: "Alice" },
+        },
+        command: async (_command: unknown, prompts?: string[]) => {
+            saved.push(prompts!);
+            return undefined;
+        },
+        refresh: async () => {},
+        signIn: async () => {},
+        signOut: async () => {},
+        cancelSignIn: async () => {},
+    };
+    const coordinator = new DesktopCoordinator(
+        {
+            request: async (command) => {
+                if (command.type === "suggestion.create") {
+                    generationStarted();
+                    await new Promise<void>((resolve) => {
+                        finish = resolve;
+                    });
+                    room.suggestions.push({
+                        id: randomUUID(),
+                        prompt: "Generated direction",
+                        contextVersion: 0,
+                        sourceMessageIds: [],
+                        sources: [],
+                        revision: 1,
+                        status: "draft",
+                        createdAt: new Date().toISOString(),
+                        updatedAt: new Date().toISOString(),
+                    });
+                    local.revision++;
+                }
+                return { ok: true, snapshot: structuredClone(local) };
+            },
+        },
+        shared,
+        () => {},
+        async () => null,
+    );
+    coordinator.acceptLocal(local);
+    const command = {
+        type: "suggestion.create" as const,
+        roomId: room.id,
+        messageIds: [randomUUID()],
+    };
+    const first = coordinator.dispatch(command);
+    await started;
+    assert.deepEqual(await coordinator.dispatch(command), {
+        ok: false,
+        error: "Prompt generation is already in progress.",
+    });
+    finish();
+    assert.equal((await first).ok, true);
+    assert.deepEqual(saved, [["Generated direction"]]);
+    started = new Promise<void>((resolve) => {
+        generationStarted = resolve;
+    });
+    const switched = coordinator.dispatch(command);
+    await started;
+    shared.state.account.id = randomUUID();
+    finish();
+    assert.equal((await switched).ok, false);
+    assert.equal(saved.length, 1);
+});
+
 test("tab.send in a shared room refreshes, imports, and checks membership first", async () => {
     const userId = randomUUID();
     const room = tabRoom(userId);

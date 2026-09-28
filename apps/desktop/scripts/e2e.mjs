@@ -176,41 +176,6 @@ await run.execute(
         await selectRepository(fixture);
         await checkpoint("Create room and select a real local Git repository");
 
-        await page
-            .getByRole("textbox", { name: "Group chat message", exact: true })
-            .fill(
-                "Keep the existing UI components and verify keyboard navigation.",
-            );
-        await page
-            .getByRole("button", { name: "Send message", exact: true })
-            .click();
-        await page
-            .getByRole("checkbox", {
-                name: /Select message: Keep the existing/,
-            })
-            .click();
-        await page
-            .getByRole("button", { name: "Suggest prompts", exact: true })
-            .click();
-        await page.getByRole("button", { name: "Edit", exact: true }).click();
-        await page
-            .getByRole("textbox", {
-                name: "Edit suggested prompt",
-                exact: true,
-            })
-            .fill(
-                "Preserve the panel architecture and verify keyboard navigation.",
-            );
-        await page
-            .getByRole("button", { name: "Save edit", exact: true })
-            .click();
-        let state = await snapshot();
-        assert.equal(
-            state.rooms[1].suggestions[0].sources[0].authorName,
-            "You",
-        );
-        assert.equal(state.rooms[1].suggestions[0].revision, 2);
-
         if (packaged) {
             // The Claude Code harness state exists only once the supervisor has loaded the Claude Agent
             // SDK, so reaching it proves the SDK loads from the packaged build.
@@ -221,7 +186,7 @@ await run.execute(
                 .getByRole("menuitem", { name: "Claude Code", exact: true })
                 .click();
             await page.getByRole("tab", { name: /Claude Code 1/ }).waitFor();
-            state = await snapshot();
+            const state = await snapshot();
             assert.equal(state.rooms[1].tabs[0].status, "unavailable");
             assert.ok(
                 ["missing", "downloading"].includes(
@@ -234,6 +199,60 @@ await run.execute(
             );
             return;
         }
+
+        await page
+            .getByRole("textbox", { name: "Group chat message", exact: true })
+            .fill(
+                "Keep the existing UI components and verify keyboard navigation. FIXTURE_SUGGESTION_LOCK",
+            );
+        await page
+            .getByRole("button", { name: "Send message", exact: true })
+            .click();
+        await page
+            .getByRole("checkbox", {
+                name: /Select message: Keep the existing/,
+            })
+            .click();
+        await page
+            .getByRole("button", { name: "Suggest prompts", exact: true })
+            .click();
+        await page
+            .getByText(
+                "Add a dark mode toggle, persist the selected theme, and verify it survives a restart.",
+                { exact: true },
+            )
+            .waitFor();
+        await page.screenshot({
+            path: join(output, "generated-suggestion.png"),
+        });
+        await page.getByRole("button", { name: "Edit", exact: true }).click();
+        await page
+            .getByRole("textbox", {
+                name: "Edit suggested prompt",
+                exact: true,
+            })
+            .fill(
+                "Preserve the panel architecture and verify keyboard navigation.",
+            );
+        await page
+            .getByRole("button", { name: "Save edit", exact: true })
+            .click();
+        // Wait for the save acknowledgement; the editor already contains the new text.
+        await page
+            .getByRole("button", { name: "Save edit", exact: true })
+            .waitFor({ state: "hidden" });
+        await page
+            .getByText(
+                "Preserve the panel architecture and verify keyboard navigation.",
+                { exact: true },
+            )
+            .waitFor();
+        let state = await snapshot();
+        assert.equal(
+            state.rooms[1].suggestions[0].sources[0].authorName,
+            "You",
+        );
+        assert.equal(state.rooms[1].suggestions[0].revision, 2);
 
         await page
             .getByRole("button", { name: "New tab", exact: true })

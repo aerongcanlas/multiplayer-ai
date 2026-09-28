@@ -27,6 +27,53 @@ const loadout: Loadout = {
   access: "ask",
 };
 
+test("context generation preserves drafts and errors even when its temporary directory stays locked", () =>
+  withAdapter(async (adapter, fixture) => {
+    const inspection = await adapter.inspect(fixture.context);
+    const model = inspection.models[0];
+    const messages = [
+      {
+        id: randomUUID(),
+        authorId: randomUUID(),
+        authorName: "Alice",
+        text: "Add a theme toggle. FIXTURE_MULTIPLE_PROMPTS FIXTURE_SUGGESTION_LOCK",
+        createdAt: new Date().toISOString(),
+      },
+    ];
+    const request = { ...fixture.context, model, messages };
+    const generated = await adapter.suggest(request);
+    assert.deepEqual(generated.suggestedPrompts, [
+      "Add a dark mode toggle, persist the selected theme, and verify it survives a restart.",
+      "Verify keyboard navigation and focus visibility for the theme toggle.",
+    ]);
+    const start = (await fixture.requests("thread/start"))[0].params!;
+    assert.equal(start.ephemeral, true);
+    assert.equal(start.sandbox, "read-only");
+    assert.equal(start.approvalPolicy, "never");
+    assert.equal(
+      (start.config as Record<string, unknown>)["features.shell_tool"],
+      false,
+    );
+    const turn = (await fixture.requests("turn/start"))[0].params!;
+    assert.deepEqual(JSON.parse((turn.input as { text: string }[])[0].text), {
+      messages,
+      context: null,
+    });
+    assert.equal((await fixture.requests("thread/unsubscribe")).length, 1);
+    for (const [text, error] of [
+      ["FIXTURE_SUGGESTION_FAILURE", /Fixture suggestion failure/],
+      ["FIXTURE_SUGGESTION_INVALID", /invalid suggestions/],
+    ] as const)
+      await assert.rejects(
+        adapter.suggest({
+          ...request,
+          messages: [{ ...messages[0], text: `${text} FIXTURE_SUGGESTION_LOCK` }],
+        }),
+        error,
+      );
+    assert.equal((await fixture.requests("thread/unsubscribe")).length, 3);
+  }));
+
 async function setup(
   options: { signedIn?: boolean; loginUrl?: string; idleMs?: number } = {},
 ) {

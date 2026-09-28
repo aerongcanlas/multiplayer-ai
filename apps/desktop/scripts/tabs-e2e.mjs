@@ -4,12 +4,12 @@
 // the machine.
 import { join } from "node:path";
 import { readFile, writeFile } from "node:fs/promises";
-import { setTimeout as wait } from "node:timers/promises";
 import assert from "node:assert/strict";
 import { startProgramServer } from "./programs-fixture.mjs";
 import {
   appDirectory,
   createRun,
+  crashApplication,
   fixtureRepository,
   outputDirectory,
   stubOpenDialog,
@@ -123,7 +123,10 @@ await run.execute(
       name: "Agent approval",
     });
     await approval.getByText("Run command: git status --short").waitFor();
-    assert.equal((await tabNamed("Codex 1")).status, "awaiting_host");
+    await until(
+      async () => (await tabNamed("Codex 1")).status === "awaiting_host",
+      "the approval to pause the turn",
+    );
     await run.page.screenshot({ path: join(output, "01-approval.png") });
     await approval
       .getByRole("button", { name: "Approve once", exact: true })
@@ -160,7 +163,7 @@ await run.execute(
     await checkpoint("Stop while an approval is pending ends the turn stopped");
 
     // Plan mode uses Codex's native plan mode, then continues into execution.
-    await tabsPanel().getByRole("checkbox", { name: "Plan mode" }).check();
+    await tabsPanel().getByRole("checkbox", { name: "Plan mode" }).click();
     await until(
       async () => (await tabNamed("Codex 1")).loadout.planMode,
       "plan mode",
@@ -169,6 +172,10 @@ await run.execute(
     await settled("Codex 1");
     const plan = tabsPanel().getByRole("region", { name: "Plan" }).last();
     await plan.getByRole("button", { name: "Continue into execution" }).click();
+    await until(
+      async () => !(await tabNamed("Codex 1")).loadout.planMode,
+      "the continuation to leave plan mode",
+    );
     await settled("Codex 1");
     assert.equal((await tabNamed("Codex 1")).loadout.planMode, false);
     const turns = await codexRequests("turn/start");
@@ -180,9 +187,8 @@ await run.execute(
       "Codex plan mode yields a plan that continues into execution",
     );
 
-    // A custom path to a bad file shows guidance and never downloads.
-    const bad = join(output, "not-a-program.txt");
-    await writeFile(bad, "not a program");
+    // Use a missing path: on Windows, the fixture replaces the executable handshake.
+    const bad = join(output, "missing-program.exe");
     await stubOpenDialog(run.application, bad);
     await harnessRow("Codex")
       .locator("summary", { hasText: "Program" })
@@ -301,7 +307,7 @@ await run.execute(
     await checkpoint("A Claude Code skill question card sends its answer back");
 
     // Claude Code's native plan mode asks before leaving plan mode.
-    await tabsPanel().getByRole("checkbox", { name: "Plan mode" }).check();
+    await tabsPanel().getByRole("checkbox", { name: "Plan mode" }).click();
     await until(
       async () => (await tabNamed("Claude Code 1")).loadout.planMode,
       "plan mode",
@@ -523,7 +529,10 @@ await run.execute(
       name: "Message",
       exact: true,
     });
-    assert.match(await composer.inputValue(), /Keep the README short/);
+    assert.equal(
+      await composer.inputValue(),
+      "Add a dark mode toggle, persist the selected theme, and verify it survives a restart.",
+    );
     assert.equal((await room()).suggestions[0].status, "draft");
     await tabsPanel()
       .getByRole("button", { name: "Send", exact: true })
@@ -583,8 +592,7 @@ await run.execute(
     await tabsPanel()
       .getByRole("button", { name: "Approve once", exact: true })
       .waitFor();
-    run.application.process().kill("SIGKILL");
-    await wait(500);
+    await crashApplication(run.application);
     await launch();
     await selectTab("Codex 1");
     await until(

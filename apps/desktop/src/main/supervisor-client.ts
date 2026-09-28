@@ -8,7 +8,7 @@ import type {
     SupervisorRequest,
 } from "../shared/contracts";
 import type { HarnessId, TranscriptBatch } from "../shared/tabs";
-import { parseTranscript } from "./supervisor-messages";
+import { parseTranscript, requestTimeout } from "./supervisor-messages";
 
 export class SupervisorClient {
     private child: UtilityProcess;
@@ -171,20 +171,13 @@ export class SupervisorClient {
             return { ok: false, error: this.health.message };
         const id = randomUUID();
         return new Promise((resolve) => {
-            const timer = setTimeout(
-                () => {
-                    this.pending.delete(id);
-                    resolve({
-                        ok: false,
-                        error: "The local operation timed out. Refresh state before retrying a mutation.",
-                    });
-                },
-                command.type === "suggestion.create"
-                    ? 180_000
-                    : command.type.startsWith("provider.")
-                      ? 90_000
-                      : 20_000,
-            );
+            const timer = setTimeout(() => {
+                this.pending.delete(id);
+                resolve({
+                    ok: false,
+                    error: "The local operation timed out. Refresh state before retrying a mutation.",
+                });
+            }, requestTimeout(command.type));
             this.pending.set(id, { resolve, timer });
             this.child.postMessage({ id, command } satisfies SupervisorRequest);
         });

@@ -306,6 +306,17 @@ class FakeSession implements HarnessSession {
 }
 
 export class FakeHarness implements HarnessAdapter {
+  async suggest() {
+    this.calls.push("suggest");
+    return {
+      actionable: true,
+      summary: "Review the selected feedback.",
+      suggestedPrompts: [
+        "Review the selected feedback and propose the next concrete change.",
+      ],
+      unresolved: [],
+    };
+  }
   readonly signIn: "in_app" | "guidance";
   readonly reportsAgents = true;
   calls: string[] = [];

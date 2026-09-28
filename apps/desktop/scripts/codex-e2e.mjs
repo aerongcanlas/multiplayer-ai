@@ -123,7 +123,7 @@ await run.execute(
         );
 
         // A read-only plan-mode turn: the access mode keeps Codex in its read-only sandbox.
-        await run.page.getByRole("checkbox", { name: "Plan mode" }).check();
+        await run.page.getByRole("checkbox", { name: "Plan mode" }).click();
         await until(async () => (await tab()).loadout.planMode, "plan mode");
         await send(
             live
@@ -136,6 +136,51 @@ await run.execute(
             live ? 10 * 60_000 : 30_000,
         );
         assert.equal((await tab()).status, "idle");
+        if (!live) {
+            await run.page
+                .getByRole("textbox", {
+                    name: "Group chat message",
+                    exact: true,
+                })
+                .fill("Add dark mode. FIXTURE_SUGGESTION_SLOW");
+            await run.page
+                .getByRole("button", { name: "Send message", exact: true })
+                .click();
+            await run.page
+                .getByRole("checkbox", {
+                    name: /Select message: Add dark mode/,
+                })
+                .check();
+            await send("FIXTURE_SLOW");
+            await until(
+                async () => (await tab()).status === "running",
+                "a running tab",
+            );
+            await run.page
+                .getByRole("button", { name: "Suggest prompts", exact: true })
+                .click();
+            await run.page
+                .getByRole("button", { name: "Generating prompts..." })
+                .waitFor();
+            await run.page
+                .getByRole("button", { name: "Stop", exact: true })
+                .click();
+            await until(
+                async () => (await tab()).status === "idle",
+                "Stop during context generation",
+                2_000,
+            );
+            await run.page
+                .getByText(
+                    "Add a dark mode toggle, persist the selected theme, and verify it survives a restart.",
+                    { exact: true },
+                )
+                .waitFor();
+            await checkpoint(
+                "Stop responds while the context agent generates a prompt",
+            );
+        }
+
         if (live) {
             // A real model may answer a simple question without a plan item.
             await run.page
@@ -159,7 +204,7 @@ await run.execute(
                 .locator(".agent-card");
             await run.page
                 .getByRole("checkbox", { name: "Plan mode" })
-                .uncheck();
+                .click();
             await until(
                 async () => !(await tab()).loadout.planMode,
                 "plan mode off",
@@ -194,7 +239,7 @@ await run.execute(
             // Ask mode routes a write to the tab; declining keeps the repository unchanged.
             await run.page
                 .getByRole("checkbox", { name: "Plan mode" })
-                .uncheck();
+                .click();
             await until(
                 async () => !(await tab()).loadout.planMode,
                 "plan mode off",

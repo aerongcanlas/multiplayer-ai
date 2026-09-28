@@ -49,5 +49,9 @@ export function loginAllowed(harness: unknown, value: string): boolean {
 
 /** Harness commands may wait on a program download; tab commands return when work starts. */
 export function requestTimeout(type: SupervisorRequest["command"]["type"]) {
-  return type.startsWith("harness.") ? 90_000 : 20_000;
+  return type === "suggestion.create"
+    ? 180_000
+    : type.startsWith("harness.")
+      ? 90_000
+      : 20_000;
 }

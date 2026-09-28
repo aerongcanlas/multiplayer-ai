@@ -1,4 +1,11 @@
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
+import { mkdtemp, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { z } from "zod";
+import {
+  ContextSuggestionDraft,
+  CONTEXT_AGENT_INSTRUCTIONS,
+} from "@multiplayer-ai/domain/context-suggestions";
 import {
   HarnessError,
   type HarnessAdapter,
@@ -6,9 +13,12 @@ import {
   type Inspection,
   type LaunchContext,
   type OpenRequest,
+  type SuggestionRequest,
 } from "../contract";
 import { clip, object, string } from "../json";
 import { accessSettings } from "./access";
+import { EventQueue } from "../queue";
+import type { TurnStartParams } from "./generated/v2/TurnStartParams";
 import type { ThreadResumeParams } from "./generated/v2/ThreadResumeParams";
 import type { ThreadStartParams } from "./generated/v2/ThreadStartParams";
 import { ARGS, CodexProcess, versionOf, type Launcher } from "./process";
@@ -372,6 +382,117 @@ export class CodexAdapter implements HarnessAdapter {
 
   onChange(listener: () => void) {
     this.listeners.push(listener);
+  }
+
+  async suggest(request: SuggestionRequest): Promise<ContextSuggestionDraft> {
+    const prompt = JSON.stringify({
+      messages: request.messages,
+      context: null,
+    });
+    if (prompt.length > 64_000)
+      throw new Error("Select fewer messages to generate prompt suggestions.");
+    const process = await this.process(request);
+    let cwd: string | undefined;
+    let threadId = "";
+    let turnId = "";
+    let completed = false;
+    const queue = new EventQueue<string>();
+    const notification = ({ method, params }: RpcNotification) => {
+      if (!threadId || params.threadId !== threadId) return;
+      if (method === "turn/started") turnId = string(object(params.turn).id);
+      if (method === "item/completed") {
+        const item = object(params.item);
+        if (item.type === "agentMessage") queue.push(string(item.text));
+      }
+      if (method === "error" && params.willRetry !== true)
+        queue.fail(this.error(object(params.error)));
+      if (method === "turn/completed") {
+        completed = true;
+        const turn = object(params.turn);
+        if (turn.status === "completed") queue.end();
+        else queue.fail(this.error(object(turn.error)));
+      }
+    };
+    const disconnected = (message: string) =>
+      queue.fail(new HarnessError("crashed", message));
+    process.transport.on("notification", notification);
+    process.transport.on("exit", disconnected);
+    const timer = setTimeout(
+      () => queue.fail(new Error("Prompt generation timed out. Try again.")),
+      60_000,
+    );
+    try {
+      // A fresh empty directory keeps repository instructions out of this context-only turn.
+      cwd = await mkdtemp(join(tmpdir(), "multiplayer-context-"));
+      const response = object(
+        await process.transport.request("thread/start", {
+          cwd,
+          model: request.model.id,
+          ephemeral: true,
+          sandbox: "read-only",
+          approvalPolicy: "never",
+          config: {
+            "agents.enabled": false,
+            "features.apps": false,
+            "features.shell_tool": false,
+            "features.unified_exec": false,
+            "tools.view_image": false,
+            web_search: "disabled",
+            mcp_servers: {},
+          },
+          dynamicTools: [],
+          selectedCapabilityRoots: [],
+          environments: [],
+          developerInstructions: CONTEXT_AGENT_INSTRUCTIONS,
+          serviceName: "multiplayer_ai_desktop",
+        } satisfies ThreadStartParams),
+      );
+      threadId = string(object(response.thread).id);
+      if (!threadId) throw new Error("Codex did not create a context session.");
+      const turn = object(
+        await process.transport.request("turn/start", {
+          threadId,
+          input: [{ type: "text", text: prompt, text_elements: [] }],
+          effort: request.model.defaultEffort as TurnStartParams["effort"],
+          outputSchema: z.toJSONSchema(
+            ContextSuggestionDraft,
+          ) as TurnStartParams["outputSchema"],
+        } satisfies TurnStartParams),
+      );
+      turnId ||= string(object(turn.turn).id);
+      let final = "";
+      for await (const text of queue) final = text;
+      try {
+        return ContextSuggestionDraft.parse(JSON.parse(final));
+      } catch {
+        throw new Error(
+          "The context agent returned invalid suggestions. Try again.",
+        );
+      }
+    } finally {
+      clearTimeout(timer);
+      process.transport.off("notification", notification);
+      process.transport.off("exit", disconnected);
+      if (threadId) {
+        if (!completed && turnId)
+          await process.transport
+            .request("turn/interrupt", { threadId, turnId }, 5_000)
+            .catch(() => {});
+        await process.transport
+          .request("thread/unsubscribe", { threadId }, 5_000)
+          .catch(() => {});
+      }
+      process.release();
+      // Codex can retain a Windows directory handle after unsubscribe. Cleanup must
+      // not replace a generated result or the original generation error.
+      if (cwd)
+        await rm(cwd, {
+          recursive: true,
+          force: true,
+          maxRetries: 3,
+          retryDelay: 100,
+        }).catch(() => {});
+    }
   }
 
   close() {
