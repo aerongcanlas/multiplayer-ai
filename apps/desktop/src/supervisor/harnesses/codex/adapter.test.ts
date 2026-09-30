@@ -614,6 +614,42 @@ test("sub-agent threads register under their parent, and their approvals outlive
     assert.equal(agentEvents(heard, scout).at(-1)?.summary, "Checked again.");
   }));
 
+test("native spawn activities register children before routing their approvals and transcripts", () =>
+  withAdapter(async (adapter, setup_) => {
+    const heard: SessionEvent[] = [];
+    const session = await setup_.open(adapter, {}, undefined, (event) =>
+      heard.push(event),
+    );
+    await run(session, "FIXTURE_NATIVE_AGENTS");
+    const keys = [...new Set(agentEvents(heard).map((event) => event.key))];
+    assert.equal(keys.length, 2);
+    const [scout, reader] = keys;
+    assert.ok(
+      agentEvents(heard, scout).some((event) => event.name === "/root/scout"),
+    );
+    assert.equal(agentEvents(heard, reader)[0].parentKey, scout);
+    assert.equal(agentEvents(heard, reader).at(-1)?.status, "completed");
+    assert.ok(!keys.includes(session.sessionId!));
+    const approval = heard.find((event) => event.type === "approval");
+    assert.equal(approval?.type === "approval" && approval.agent, scout);
+    session.respond(
+      approval?.type === "approval" ? approval.request : "",
+      "accept",
+    );
+    await until(
+      () => agentEvents(heard, scout).at(-1)?.status === "completed",
+      "native scout completion",
+    );
+    assert.equal(agentEvents(heard, scout).at(-1)?.summary, "Found README.md.");
+    assert.deepEqual((await setup_.answers("sub-agent approval"))[0].result, {
+      decision: "accept",
+    });
+    assert.ok(
+      "error" in
+        ((await setup_.answers("stray approval"))[0].result as object),
+    );
+  }));
+
 test("the lead's plan updates become steps, and a sub-agent's never do", () =>
   withAdapter(async (adapter, setup_) => {
     const heard: SessionEvent[] = [];

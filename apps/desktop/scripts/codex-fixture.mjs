@@ -2,7 +2,8 @@
 // or runs model commands. Prompt markers select behavior: FIXTURE_APPROVAL, FIXTURE_QUESTION,
 // FIXTURE_PERMISSIONS, FIXTURE_ELICIT, FIXTURE_USAGE, FIXTURE_CRASH, FIXTURE_SLOW,
 // FIXTURE_UNKNOWN_REQUEST, FIXTURE_AGENTS (a sub-agent with a nested one whose command approval
-// outlives the lead's turn; once it finishes Codex wakes the lead on its own), FIXTURE_FOLLOWUP (more
+// outlives the lead's turn; once it finishes Codex wakes the lead on its own), FIXTURE_NATIVE_AGENTS
+// (the same flow using subAgentActivity spawn events), FIXTURE_FOLLOWUP (more
 // work for that sub-agent), and FIXTURE_EXIT_LATER (the process exits after the turn).
 // MP_FIXTURE_STATE persists threads so a restarted fixture can resume them; MP_FIXTURE_LOG records
 // every request, the launch arguments, and the environment for tests to inspect.
@@ -122,21 +123,35 @@ const collab = (tool, sender, receivers, prompt, extra = {}) => ({
     ...extra,
 });
 
-async function spawnAgents(lead, leadTurn) {
+async function spawnAgents(lead, leadTurn, native = false) {
     const sub = randomUUID();
     subAgents.set(lead, sub);
     const spawn = collab("spawnAgent", lead, [], "Inspect the checkout", {
         model: "fixture-codex-mini",
     });
-    notify("item/started", { threadId: lead, turnId: leadTurn, item: spawn });
-    notify("thread/started", {
-        thread: {
-            id: sub,
-            parentThreadId: lead,
-            agentNickname: "Scout",
-            agentRole: "explorer",
-        },
-    });
+    if (native)
+        notify("item/completed", {
+            threadId: lead,
+            turnId: leadTurn,
+            item: {
+                type: "subAgentActivity",
+                id: spawn.id,
+                kind: "started",
+                agentThreadId: sub,
+                agentPath: "/root/scout",
+            },
+        });
+    else {
+        notify("item/started", { threadId: lead, turnId: leadTurn, item: spawn });
+        notify("thread/started", {
+            thread: {
+                id: sub,
+                parentThreadId: lead,
+                agentNickname: "Scout",
+                agentRole: "explorer",
+            },
+        });
+    }
     // A thread spawned elsewhere never reaches this tab.
     notify("thread/started", {
         thread: {
@@ -146,25 +161,51 @@ async function spawnAgents(lead, leadTurn) {
             agentRole: null,
         },
     });
-    notify("item/completed", {
-        threadId: lead,
-        turnId: leadTurn,
-        item: { ...spawn, status: "completed", receiverThreadIds: [sub] },
-    });
+    if (!native)
+        notify("item/completed", {
+            threadId: lead,
+            turnId: leadTurn,
+            item: { ...spawn, status: "completed", receiverThreadIds: [sub] },
+        });
     const subTurn = randomUUID();
     running.set(sub, subTurn);
     started(sub, subTurn);
     const nested = randomUUID();
-    notify("thread/started", {
-        thread: {
-            id: nested,
-            parentThreadId: sub,
-            agentNickname: "Reader",
-            agentRole: null,
-        },
-    });
+    if (native)
+        notify("item/completed", {
+            threadId: sub,
+            turnId: subTurn,
+            item: {
+                type: "subAgentActivity",
+                id: randomUUID(),
+                kind: "started",
+                agentThreadId: nested,
+                agentPath: "/root/scout/reader",
+            },
+        });
+    else
+        notify("thread/started", {
+            thread: {
+                id: nested,
+                parentThreadId: sub,
+                agentNickname: "Reader",
+                agentRole: null,
+            },
+        });
     const nestedTurn = randomUUID();
     started(nested, nestedTurn);
+    if (native)
+        notify("item/completed", {
+            threadId: nested,
+            turnId: nestedTurn,
+            item: {
+                type: "subAgentActivity",
+                id: randomUUID(),
+                kind: "interacted",
+                agentThreadId: lead,
+                agentPath: "/root",
+            },
+        });
     message(nested, nestedTurn, "A short README.");
     complete(nested, nestedTurn);
     const stray = await ask("item/commandExecution/requestApproval", {
@@ -277,6 +318,8 @@ async function turn(threadId, turnId, prompt, params) {
     const planMode = params.collaborationMode?.mode === "plan";
     if (prompt.includes("FIXTURE_CRASH")) process.exit(1);
     if (prompt.includes("FIXTURE_AGENTS")) await spawnAgents(threadId, turnId);
+    if (prompt.includes("FIXTURE_NATIVE_AGENTS"))
+        await spawnAgents(threadId, turnId, true);
     if (prompt.includes("FIXTURE_FOLLOWUP")) followUp(threadId, turnId);
     if (prompt.includes("FIXTURE_SLOW")) return;
     if (prompt.includes("FIXTURE_USAGE")) {

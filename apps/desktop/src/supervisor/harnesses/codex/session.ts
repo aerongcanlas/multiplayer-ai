@@ -410,6 +410,9 @@ export class CodexSession implements HarnessSession {
     }
     if (item.type === "subAgentActivity") {
       const key = string(item.agentThreadId);
+      // Native collaboration can announce a child here without thread/started.
+      if (item.kind === "started")
+        this.register(key, threadId, { name: string(item.agentPath) });
       const last = this.agents.get(key)?.last;
       if (item.kind === "started" || item.kind === "interacted")
         this.agentStatus(key, "running");
