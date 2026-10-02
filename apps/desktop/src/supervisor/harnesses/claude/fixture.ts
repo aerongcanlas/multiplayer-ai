@@ -95,7 +95,7 @@ export function claudeFixture(
     ...(load().signedIn
       ? { email: "fixture@example.invalid", subscription: "max" }
       : {}),
-    version: "2.1.280",
+    version: "2.1.286",
   });
 
   const startQuery = (params: {
