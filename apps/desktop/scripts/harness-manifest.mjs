@@ -12,8 +12,8 @@ import { fileURLToPath } from "node:url";
 import { gunzipSync, zstdDecompressSync } from "node:zlib";
 
 const CODEX_VERSION = "0.160.0";
-const SDK_VERSION = "0.3.280";
-const CLAUDE_VERSION = "2.1.280";
+const SDK_VERSION = "0.3.286";
+const CLAUDE_VERSION = "2.1.286";
 const print = process.argv.includes("--print");
 
 if (process.argv.includes("--check")) {

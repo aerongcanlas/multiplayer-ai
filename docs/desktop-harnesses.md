@@ -9,7 +9,7 @@ The app downloads a pinned build of each harness the first time a tab needs it a
 | Harness     | Pinned version | Source                                                                 | Verified against                                                  |
 | ----------- | -------------- | ---------------------------------------------------------------------- | ----------------------------------------------------------------- |
 | Codex       | 0.160.0        | `openai/codex` GitHub release, per-platform `codex-package-*.tar.zst`  | the release's sha256 digest, then the unpacked `bin/codex` digest |
-| Claude Code | 2.1.280        | `downloads.claude.ai/claude-code-releases/<version>/<platform>/claude` | the sha256 in the paired Claude Agent SDK 0.3.280 `manifest.json` |
+| Claude Code | 2.1.286        | `downloads.claude.ai/claude-code-releases/<version>/<platform>/claude` | the sha256 in the paired Claude Agent SDK 0.3.286 `manifest.json` |
 
 Codex ships as a package rather than a lone binary because `codex` needs its companions (`codex-code-mode-host`, `rg`) beside it; without them its command tool fails closed. A download is written to a `.partial` file, hashed while it streams, unpacked if needed (packages into a staging folder that refuses absolute paths, `..`, and links), checked again, and moved into place with a `.meta` record. A file without a matching `.meta` record is re-verified before use, and a mismatch is downloaded again. A checksum failure deletes the download and shows the failure with **Retry download**. The Codex digest is taken from the GitHub release when the pin is set, so it protects against tampering in transit, not a bad upstream release.
 

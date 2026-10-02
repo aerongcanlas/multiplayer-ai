@@ -88,7 +88,7 @@ export async function startProgramServer(manifestPath) {
         },
       },
       claude: {
-        version: "2.1.280",
+        version: "2.1.286",
         platforms: {
           [platform]: {
             url: `${url}/claude`,
