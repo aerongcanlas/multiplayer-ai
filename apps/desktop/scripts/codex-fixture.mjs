@@ -1,4 +1,4 @@
-// Local Codex app-server fixture speaking the 0.155.1 method names. It never makes network requests
+// Local Codex app-server fixture speaking the 0.160.0 method names. It never makes network requests
 // or runs model commands. Prompt markers select behavior: FIXTURE_APPROVAL, FIXTURE_QUESTION,
 // FIXTURE_PERMISSIONS, FIXTURE_ELICIT, FIXTURE_USAGE, FIXTURE_CRASH, FIXTURE_SLOW,
 // FIXTURE_UNKNOWN_REQUEST, FIXTURE_AGENTS (a sub-agent with a nested one whose command approval
@@ -490,7 +490,7 @@ createInterface({ input: process.stdin })
             send({ id, error: { code: -32600, message: text } });
         if (method === "initialize")
             result({
-                userAgent: "multiplayer_ai_desktop/0.155.1 (fixture)",
+                userAgent: "multiplayer_ai_desktop/0.160.0 (fixture)",
                 codexHome: "/tmp/fixture",
                 platformFamily: "unix",
                 platformOs: "macos",
