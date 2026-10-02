@@ -15,6 +15,8 @@ import {
 import type { Room, Snapshot, Suggestion } from "../shared/contracts";
 import { tabBusy, type HarnessState, type Tab } from "../shared/tabs";
 import { dismissError, perform, useDesktop } from "./lib/desktop-store";
+import { missionSource } from "./lib/mission";
+import { useAgents, useSharedAgents } from "./lib/transcript-store";
 import { getStored, setStored } from "./lib/storage";
 import { Button } from "./components/ui/Button";
 import { Input } from "./components/ui/Input";
@@ -87,6 +89,23 @@ function RoomView({
   const tab = room.tabs.find((item) => item.id === selectedTab) ?? room.tabs[0];
   const harness = harnesses.find((item) => item.id === tab?.loadout.harness);
   const agentKey = viewing && viewing.tabId === tab?.id ? viewing.key : null;
+  // Mission Control follows the tab in the main area: a host's shared tab while one is open
+  // there, and otherwise the member's own tab.
+  const sharedAgents = useSharedAgents(sharedTabId);
+  const ownAgents = useAgents(room.id, sharedTabId ? null : (tab?.id ?? null));
+  const mission = missionSource({
+    tab,
+    harness,
+    own: ownAgents,
+    watched: sharedTabId
+      ? {
+          record:
+            sharedAgents.record ??
+            room.shared?.sharedTabs?.find((item) => item.tabId === sharedTabId),
+          agents: sharedAgents,
+        }
+      : null,
+  });
   // Mission Control and the main area both follow the active tab.
   function selectTab(id: string) {
     setViewing(null);
@@ -247,8 +266,7 @@ function RoomView({
           promptPanel={
             <MissionControlPanel
               room={room}
-              tab={tab}
-              harness={harness}
+              source={mission}
               agentKey={agentKey}
               collapsed={missionCollapsed}
               onToggle={() =>
@@ -260,11 +278,6 @@ function RoomView({
                 key && tab ? setViewing({ tabId: tab.id, key }) : leaveAgent()
               }
               disabled={disabled}
-              watching={
-                room.shared?.sharedTabs?.find(
-                  (item) => item.tabId === sharedTabId,
-                )?.title
-              }
               onUseSuggestion={(suggestion) => {
                 setDraft(suggestion.prompt);
                 setSource(suggestion);

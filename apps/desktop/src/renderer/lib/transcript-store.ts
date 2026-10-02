@@ -284,6 +284,8 @@ export type SharedAgentsAvailability =
   // The host's harness does not report sub-agents.
   | "no_reporting";
 export interface SharedAgents {
+  // The newest record pulled for the tab.
+  record: SharedTab | null;
   // Cards in the host's own shape, oldest first.
   cards: SharedAgentEntry[];
   plan: SharedPlan | null;
@@ -293,6 +295,7 @@ export interface SharedAgents {
   capped: boolean;
 }
 const emptySharedAgents: SharedAgents = {
+  record: null,
   cards: [],
   plan: null,
   runningAgents: 0,
@@ -310,6 +313,7 @@ export function sharedAgents(tabId: string | null): SharedAgents {
   if (known) return known;
   const { record, cardsState } = held;
   const value: SharedAgents = {
+    record,
     cards: held.cards.flatMap((entry) => asAgentEntry(tabId, entry) ?? []),
     plan: record?.plan ?? null,
     runningAgents: record?.runningAgents ?? 0,

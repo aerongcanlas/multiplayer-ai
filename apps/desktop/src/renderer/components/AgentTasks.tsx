@@ -1,177 +1,150 @@
 import { GitBranch } from "lucide-react";
+import type { SharedAgentEntry } from "../lib/read-along";
 import {
-  HARNESS_LABELS,
-  type AgentEntry,
-  type HarnessState,
-  type Tab,
-} from "../../shared/tabs";
-import { durationLabel, timeLabel, useNow } from "../lib/time";
-import { useAgents } from "../lib/transcript-store";
+  agentCount,
+  agentsNotes,
+  agentsNotice,
+  cardView,
+  groupByTurn,
+  type MissionSource,
+} from "../lib/mission";
+import { timeLabel, useNow } from "../lib/time";
 import { plural } from "../lib/utils";
-import { AGENT_STATUS_LABELS } from "./tabs/labels";
-
-/** A turn's cards, newest turn first, each card followed by the sub-agents it spawned. */
-function groupByTurn(cards: AgentEntry[]) {
-  const turns = new Map<string, AgentEntry[]>();
-  for (const card of cards)
-    turns.set(card.turnId ?? "", [
-      ...(turns.get(card.turnId ?? "") ?? []),
-      card,
-    ]);
-  return [...turns.entries()]
-    .map(([turnId, items]) => {
-      const keys = new Set(items.map((card) => card.agent.key));
-      const ordered: { card: AgentEntry; depth: number }[] = [];
-      const walk = (card: AgentEntry, depth: number) => {
-        ordered.push({ card, depth });
-        for (const child of items.filter(
-          (item) => item.agent.parentKey === card.agent.key,
-        ))
-          walk(child, depth + 1);
-      };
-      for (const root of items.filter(
-        (card) => !card.agent.parentKey || !keys.has(card.agent.parentKey),
-      ))
-        walk(root, 0);
-      return { turnId, first: items[0], ordered };
-    })
-    .sort((a, b) => b.first.seq - a.first.seq);
-}
 
 function AgentCard({
   card,
   depth,
   selected,
   now,
+  source,
   onSelect,
 }: {
-  card: AgentEntry;
+  card: SharedAgentEntry;
   depth: number;
   selected: boolean;
   now: number;
+  source: MissionSource;
   onSelect: () => void;
 }) {
-  const { agent } = card;
-  const running = agent.status === "running";
-  const elapsed = durationLabel(
-    (agent.endedAt ? Date.parse(agent.endedAt) : now) -
-      Date.parse(agent.startedAt),
+  const view = cardView(card, source, now);
+  const style = {
+    marginLeft: depth * 14,
+    width: `calc(100% - ${depth * 14}px)`,
+  };
+  const body = (
+    <>
+      <span className="agent-heading">
+        <strong>{card.summary}</strong>
+        <span className={`agent-status status-${view.status}`}>
+          {view.statusLabel}
+        </span>
+      </span>
+      {view.kind && <span className="agent-meta">{view.kind}</span>}
+      <span className="agent-meta">
+        {view.meta}
+        {view.joinedMidRun && (
+          <span className="agent-joined"> · Joined mid-run</span>
+        )}
+      </span>
+      {view.summary && <span className="agent-summary">{view.summary}</span>}
+    </>
   );
-  const kind = [agent.name, agent.type].filter(Boolean).join(" · ");
+  // A spectator's card is plain content: nothing to select and no transcript to open.
+  if (!view.interactive)
+    return (
+      <div
+        className={`agent-card agent-static agent-${view.status}`}
+        style={style}
+        data-agent-card={card.agent.key}
+      >
+        {body}
+      </div>
+    );
   return (
     <button
       type="button"
-      className={`agent-card agent-${agent.status} ${selected ? "agent-selected" : ""}`}
-      style={{
-        marginLeft: depth * 14,
-        width: `calc(100% - ${depth * 14}px)`,
-      }}
-      data-agent-card={agent.key}
+      className={`agent-card agent-${view.status} ${selected ? "agent-selected" : ""}`}
+      style={style}
+      data-agent-card={card.agent.key}
       aria-pressed={selected}
       onClick={onSelect}
     >
-      <span className="agent-heading">
-        <strong>{card.summary}</strong>
-        <span className={`agent-status status-${agent.status}`}>
-          {AGENT_STATUS_LABELS[agent.status]}
-        </span>
-      </span>
-      {kind && <span className="agent-meta">{kind}</span>}
-      <span className="agent-meta">
-        {elapsed} · {plural(agent.toolUses, "tool")}
-        {running && agent.latestTool ? ` · ${agent.latestTool}` : ""}
-      </span>
-      {!running && card.detail && (
-        <span className="agent-summary">{card.detail}</span>
-      )}
+      {body}
     </button>
   );
 }
 
 export function AgentTasks({
-  roomId,
-  tab,
-  harness,
+  source,
   agentKey,
   onSelectAgent,
 }: {
-  roomId: string;
-  tab: Tab | undefined;
-  harness: HarnessState | undefined;
+  source: MissionSource | null;
   agentKey: string | null;
   onSelectAgent: (key: string | null) => void;
 }) {
-  const agents = useAgents(roomId, tab?.id ?? null);
-  const running = agents.cards.filter(
-    (card) => card.agent.status === "running",
-  ).length;
-  const now = useNow(running > 0);
-  const label = tab ? HARNESS_LABELS[tab.loadout.harness] : "";
-  const groups = groupByTurn(agents.cards);
+  const cards = source?.cards ?? [];
+  const live =
+    !source?.spectator?.ended &&
+    cards.some((card) => card.agent.status === "running");
+  const now = useNow(live);
+  const count = agentCount(source);
+  const notice = agentsNotice(source);
   return (
     <section className="mission-column" aria-label="Agent tasks">
       <h3>
         <GitBranch size={14} />
         Agent tasks
-        {agents.cards.length > 0 && (
-          <span>
-            {running ? `${running} running · ` : ""}
-            {agents.cards.length}
+        {source?.spectator?.needsHost && (
+          <span className="agent-status shared-status-awaiting_host">
+            Needs the host
           </span>
         )}
+        {count && <span>{count}</span>}
       </h3>
       <div className="mission-scroll">
-        {!tab ? (
-          <div className="column-empty">
-            <p>Open a chat tab to track the sub-agents it spawns.</p>
-          </div>
-        ) : harness && !harness.reportsAgents ? (
-          <div className="column-empty">
-            <p>
-              {label} doesn&apos;t report sub-agents, so this tab has none to
-              track.
-            </p>
-          </div>
-        ) : !agents.loaded ? (
-          <div className="column-empty" role="status">
-            <p>{agents.error ?? "Loading sub-agents…"}</p>
-          </div>
-        ) : groups.length === 0 ? (
-          <div className="column-empty">
-            <p>No sub-agents in this tab yet.</p>
-            <p>
-              When {label} spawns sub-agents, they appear here grouped by turn.
-              Select one to read its transcript.
-            </p>
+        {notice ? (
+          <div className="column-empty" role={notice.status && "status"}>
+            {notice.lines.map((line) => (
+              <p key={line}>{line}</p>
+            ))}
           </div>
         ) : (
-          groups.map((group, index) => (
-            <details
-              key={group.turnId}
-              className="agent-turn"
-              open={index === 0}
-            >
-              <summary>
-                {index === 0 ? "Latest turn" : "Earlier turn"} ·{" "}
-                {timeLabel(group.first.createdAt)}
-                <span>{plural(group.ordered.length, "agent")}</span>
-              </summary>
-              {group.ordered.map(({ card, depth }) => (
-                <AgentCard
-                  key={card.id}
-                  card={card}
-                  depth={depth}
-                  now={now}
-                  selected={card.agent.key === agentKey}
-                  onSelect={() =>
-                    onSelectAgent(
-                      card.agent.key === agentKey ? null : card.agent.key,
-                    )
-                  }
-                />
-              ))}
-            </details>
-          ))
+          <>
+            {agentsNotes(source).map((note) => (
+              <p key={note} className="subtle agent-note" role="status">
+                {note}
+              </p>
+            ))}
+            {groupByTurn(cards).map((group, index) => (
+              <details
+                key={group.turnId}
+                className="agent-turn"
+                open={index === 0}
+              >
+                <summary>
+                  {index === 0 ? "Latest turn" : "Earlier turn"} ·{" "}
+                  {timeLabel(group.first.createdAt)}
+                  <span>{plural(group.ordered.length, "agent")}</span>
+                </summary>
+                {group.ordered.map(({ card, depth }) => (
+                  <AgentCard
+                    key={card.id}
+                    card={card}
+                    depth={depth}
+                    now={now}
+                    source={source!}
+                    selected={card.agent.key === agentKey}
+                    onSelect={() =>
+                      onSelectAgent(
+                        card.agent.key === agentKey ? null : card.agent.key,
+                      )
+                    }
+                  />
+                ))}
+              </details>
+            ))}
+          </>
         )}
       </div>
     </section>

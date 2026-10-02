@@ -246,6 +246,7 @@ test("shared cards merge by version apart from the transcript and map to the hos
   // An account change clears cards and plan.
   acceptShared({ type: "clear" });
   assert.deepEqual(sharedAgents(tab.tabId), {
+    record: null,
     cards: [],
     plan: null,
     runningAgents: 0,

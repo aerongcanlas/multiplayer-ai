@@ -7,17 +7,15 @@ import {
   Radio,
 } from "lucide-react";
 import type { Room, Suggestion } from "../../shared/contracts";
+import type { PlanStep } from "../../shared/tabs";
 import {
-  HARNESS_LABELS,
-  type HarnessState,
-  type PlanStep,
-  type Tab,
-} from "../../shared/tabs";
-import { plural } from "../lib/utils";
+  missionSubtitle,
+  planNotice,
+  type MissionSource,
+} from "../lib/mission";
 import { AgentTasks } from "./AgentTasks";
 import { SuggestionColumn } from "./SuggestionColumn";
 import { Button } from "./ui/Button";
-import { STATUS_LABELS } from "./tabs/labels";
 
 const STEP_ICONS: Record<PlanStep["status"], typeof Circle> = {
   pending: Circle,
@@ -30,54 +28,34 @@ const STEP_LABELS: Record<PlanStep["status"], string> = {
   done: "Done",
 };
 
-function LeadContext({
-  tab,
-  harness,
-}: {
-  tab: Tab | undefined;
-  harness: HarnessState | undefined;
-}) {
-  const model =
-    harness?.models.find((item) => item.id === tab?.loadout.model)?.name ??
-    tab?.loadout.model;
-  const steps = tab?.plan?.steps ?? [];
+function LeadContext({ source }: { source: MissionSource | null }) {
   return (
     <section className="mission-column" aria-label="Lead context">
       <h3>
         <ClipboardList size={14} />
-        Lead context{tab && <span>{STATUS_LABELS[tab.status]}</span>}
+        Lead context{source && <span>{source.status}</span>}
       </h3>
       <div className="mission-scroll">
-        {!tab ? (
+        {!source ? (
           <div className="column-empty">
             <p>Open a chat tab to follow its lead here.</p>
           </div>
         ) : (
           <div className="summary-content">
             <dl className="lead-facts">
-              <div>
-                <dt>Harness</dt>
-                <dd>{HARNESS_LABELS[tab.loadout.harness]}</dd>
-              </div>
-              <div>
-                <dt>Model</dt>
-                <dd>{model || "Not chosen"}</dd>
-              </div>
-              <div>
-                <dt>Mode</dt>
-                <dd>{tab.loadout.planMode ? "Plan" : "Act"}</dd>
-              </div>
-              <div>
-                <dt>Status</dt>
-                <dd>{STATUS_LABELS[tab.status]}</dd>
-              </div>
+              {source.facts.map((fact) => (
+                <div key={fact.label}>
+                  <dt>{fact.label}</dt>
+                  <dd>{fact.value}</dd>
+                </div>
+              ))}
             </dl>
             <span className="eyebrow">Plan</span>
-            {steps.length ? (
+            {source.plan.steps.length ? (
               <>
-                {tab.plan?.explanation && <p>{tab.plan.explanation}</p>}
+                {source.plan.explanation && <p>{source.plan.explanation}</p>}
                 <ol className="lead-steps" aria-label="Lead plan">
-                  {steps.map((step, index) => {
+                  {source.plan.steps.map((step, index) => {
                     const Icon = STEP_ICONS[step.status];
                     return (
                       <li key={index} className={`step-${step.status}`}>
@@ -89,10 +67,7 @@ function LeadContext({
                 </ol>
               </>
             ) : (
-              <p className="subtle">
-                No plan in this tab. {HARNESS_LABELS[tab.loadout.harness]} shows
-                its plan here when it keeps one.
-              </p>
+              <p className="subtle">{planNotice(source)}</p>
             )}
           </div>
         )}
@@ -103,29 +78,24 @@ function LeadContext({
 
 export function MissionControlPanel({
   room,
-  tab,
-  harness,
+  source,
   agentKey,
   onSelectAgent,
   onUseSuggestion,
   disabled,
-  watching,
   collapsed,
   onToggle,
 }: {
   room: Room;
-  tab: Tab | undefined;
-  harness: HarnessState | undefined;
+  // The tab in the main area: the member's own, or a host's shared tab, view-only.
+  source: MissionSource | null;
   agentKey: string | null;
   onSelectAgent: (key: string | null) => void;
   onUseSuggestion: (suggestion: Suggestion) => void;
   disabled: boolean;
-  // The shared tab filling the main area; Mission Control keeps following your own tab.
-  watching?: string;
   collapsed: boolean;
   onToggle: () => void;
 }) {
-  const running = tab?.runningAgents ?? 0;
   return (
     <section className="mission-panel" aria-label="Mission Control">
       <header className="panel-header">
@@ -133,12 +103,7 @@ export function MissionControlPanel({
           <Radio size={16} />
           Mission Control
         </h2>
-        <span className="subtle">
-          {tab
-            ? `${tab.title}${running ? ` · ${plural(running, "sub-agent")} running` : ""}`
-            : "Follows the active chat tab"}
-          {watching && ` · you are watching ${watching}`}
-        </span>
+        <span className="subtle">{missionSubtitle(source)}</span>
         <Button
           size="icon-xs"
           variant="ghost"
@@ -153,11 +118,9 @@ export function MissionControlPanel({
         </Button>
       </header>
       <div className="mission-grid" hidden={collapsed}>
-        <LeadContext tab={tab} harness={harness} />
+        <LeadContext source={source} />
         <AgentTasks
-          roomId={room.id}
-          tab={tab}
-          harness={harness}
+          source={source}
           agentKey={agentKey}
           onSelectAgent={onSelectAgent}
         />
