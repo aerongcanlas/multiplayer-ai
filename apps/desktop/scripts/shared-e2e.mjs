@@ -664,8 +664,18 @@ try {
     "Shared sub-agent cards complete live with masked summaries, grouped by turn",
   );
 
+  // A suggestion used while the shared tab is open lands in the viewer's own composer.
+  await missionOf(second.page)
+    .getByRole("button", { name: "Use prompt", exact: true })
+    .click();
   // Covers AE1: back on the viewer's own tab, Mission Control is the viewer's own again.
   await ownChip.click();
+  assert.equal(
+    await tabsOf(second.page)
+      .getByRole("textbox", { name: "Message", exact: true })
+      .inputValue(),
+    "Review selected feedback before implementation.",
+  );
   await tasksOf(second.page)
     .getByText(/No sub-agents in this tab yet/)
     .waitFor();
