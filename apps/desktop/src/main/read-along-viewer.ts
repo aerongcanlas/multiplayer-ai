@@ -1,5 +1,6 @@
 import {
   sharedPullSchema,
+  type SharedEntry,
   type SharedTab,
   type SharedTranscriptMessage,
 } from "../shared/collaboration";
@@ -10,6 +11,19 @@ const PAGE = 200;
 const BYTE_BUDGET = 1_048_576;
 // The initial page's cursor: every entry at or below the record's rev has been read.
 const MAX_SEQ = 2_147_483_647;
+// Transcript pages ask for these kinds once a tab has cards, so cards never fill a page.
+const LEAD_KINDS = [
+  "user",
+  "assistant",
+  "plan",
+  "tool",
+  "approval",
+  "notice",
+  "error",
+  "turn",
+];
+// The cards load stops after this many pages and says it shows the latest cards.
+const CARD_PAGES = 5;
 
 type Collaboration = Pick<
   CollaborationClient,
@@ -21,6 +35,13 @@ interface Watch {
   epoch: number;
   cursor?: { rev: number; seq: number };
   record?: SharedTab;
+  // Set once the one-time cards load has answered. `unavailable` means the database predates
+  // the kinds filter, so no pull sends it.
+  cards?: "ready" | "capped" | "unavailable";
+  // The record rev the cards load read at; the tail starts no later than it.
+  cardsRev?: number;
+  // The newest version delivered per card, so a re-read never re-delivers a stale one.
+  cardVersions: Map<number, number>;
   inflight: boolean;
   timer?: ReturnType<typeof setTimeout>;
 }
@@ -59,6 +80,7 @@ export class ReadAlongViewer {
       roomId,
       tabId,
       epoch: this.collaboration.currentEpoch,
+      cardVersions: new Map(),
       inflight: false,
     };
     this.watching = watch;
@@ -80,6 +102,7 @@ export class ReadAlongViewer {
       p_after_rev: null,
       p_after_seq: null,
       p_before_seq: beforeSeq,
+      ...this.leadKinds(watch),
     });
     if (page === "stale") return;
     if (!page.ok) throw new Error("Could not load earlier shared entries.");
@@ -88,7 +111,7 @@ export class ReadAlongViewer {
       roomId,
       tabId,
       record: page.data.record,
-      entries: page.data.entries,
+      entries: this.split(watch, page.data.entries),
       earlierSeq: page.data.next?.seq ?? null,
       now: page.data.now,
     });
@@ -133,9 +156,70 @@ export class ReadAlongViewer {
     if (watch && this.visible()) void this.pull(watch);
   }
 
+  // A tab with no cards keeps the pull it always sent.
+  private leadKinds(watch: Watch): { p_kinds?: string[] } {
+    return watch.cards !== "unavailable" && watch.cardVersions.size
+      ? { p_kinds: LEAD_KINDS }
+      : {};
+  }
+
+  // Sends the cards among pulled entries on their own and returns the lead's entries.
+  private split(
+    watch: Watch,
+    entries: SharedEntry[],
+    state?: "ready" | "capped" | "unavailable",
+  ) {
+    const cards = entries.filter((entry) => {
+      if (entry.kind !== "agent") return false;
+      if ((watch.cardVersions.get(entry.seq) ?? 0) >= entry.version)
+        return false;
+      watch.cardVersions.set(entry.seq, entry.version);
+      return true;
+    });
+    if (cards.length || state)
+      this.send({
+        type: "cards",
+        roomId: watch.roomId,
+        tabId: watch.tabId,
+        cards,
+        ...(state ? { state } : {}),
+      });
+    return entries.filter((entry) => entry.kind !== "agent");
+  }
+
+  // Loads every card of the tab once, newest first, apart from the lead transcript. A database
+  // without the kinds filter rejects the call as not found: cards are then unavailable.
+  private async loadCards(watch: Watch): Promise<void> {
+    const cards: SharedEntry[] = [];
+    let before: number | null = null;
+    let more = false;
+    for (let pages = 0; pages < CARD_PAGES; pages++) {
+      const page = await this.request(watch, {
+        p_after_rev: null,
+        p_after_seq: null,
+        p_before_seq: before,
+        p_kinds: ["agent"],
+      });
+      if (page === "stale") return;
+      if (!page.ok) {
+        if (page.reason !== "migration_missing") return;
+        watch.cards = "unavailable";
+        this.split(watch, [], "unavailable");
+        return;
+      }
+      watch.cardsRev ??= page.data.record.rev;
+      cards.push(...page.data.entries);
+      more = Boolean(page.data.next);
+      if (!page.data.next) break;
+      before = page.data.next.seq;
+    }
+    watch.cards = more ? "capped" : "ready";
+    this.split(watch, cards, watch.cards);
+  }
+
   private async request(
     watch: Watch,
-    cursor: Record<string, number | null>,
+    cursor: Record<string, number | string[] | null | undefined>,
   ): Promise<
     | "stale"
     | { ok: true; data: ReturnType<typeof sharedPullSchema.parse> }
@@ -171,11 +255,14 @@ export class ReadAlongViewer {
     watch.timer = undefined;
     watch.inflight = true;
     const initial = !watch.cursor;
+    // Cards load before the first transcript page, and again on a later pull if that failed.
+    if (!watch.cards) await this.loadCards(watch);
+    if (this.watching !== watch) return;
     const page = await this.request(
       watch,
       watch.cursor
         ? { p_after_rev: watch.cursor.rev, p_after_seq: watch.cursor.seq }
-        : { p_after_rev: null, p_after_seq: null },
+        : { p_after_rev: null, p_after_seq: null, ...this.leadKinds(watch) },
     );
     watch.inflight = false;
     if (page === "stale") return;
@@ -201,7 +288,12 @@ export class ReadAlongViewer {
     }
     const { record, entries, next, now } = page.data;
     watch.record = record;
-    if (initial) watch.cursor = { rev: record.rev, seq: MAX_SEQ };
+    // The cards were read first, so the tail starts at their rev and misses no card update.
+    if (initial)
+      watch.cursor = {
+        rev: Math.min(record.rev, watch.cardsRev ?? record.rev),
+        seq: MAX_SEQ,
+      };
     else if (next) watch.cursor = next;
     else if (entries.length)
       watch.cursor = { rev: entries.at(-1)!.rev, seq: entries.at(-1)!.seq };
@@ -210,7 +302,7 @@ export class ReadAlongViewer {
       roomId,
       tabId,
       record,
-      entries,
+      entries: this.split(watch, entries),
       ...(initial ? { earlierSeq: next?.seq ?? null } : {}),
       now,
     });

@@ -4,7 +4,11 @@ import type {
   SharedTab,
   SharedTabStatus,
 } from "../../shared/collaboration";
-import type { TranscriptEntry } from "../../shared/tabs";
+import type {
+  AgentEntry,
+  HarnessState,
+  TranscriptEntry,
+} from "../../shared/tabs";
 import { durationLabel } from "./time";
 
 export const SHARED_STATUS_LABELS: Record<SharedTabStatus, string> = {
@@ -28,6 +32,15 @@ export function ageLabel(
   if (!Number.isFinite(updated)) return "";
   return `Updated ${durationLabel(now + clockOffsetMs - updated)} ago`;
 }
+
+/** A shared tab's model by name. The host shares its id; this desktop's own harness names it. */
+export const sharedModelName = (
+  record: Pick<SharedTab, "harness" | "model">,
+  harnesses: HarnessState[],
+) =>
+  harnesses
+    .find((item) => item.id === record.harness)
+    ?.models.find((item) => item.id === record.model)?.name ?? record.model;
 
 export interface SharedGroup {
   key: string;
@@ -68,6 +81,32 @@ export const asTranscriptEntry = (
   createdAt: entry.updatedAt,
   updatedAt: entry.updatedAt,
 });
+
+// A host's card in this desktop's card shape, plus whether it joined mid-run.
+export type SharedAgentEntry = AgentEntry & { joinedMidRun?: boolean };
+
+/** A shared card as the host's own card entry: the text is its final summary. */
+export function asAgentEntry(
+  tabId: string,
+  entry: SharedEntry,
+): SharedAgentEntry | null {
+  if (!entry.agent) return null;
+  const { joinedMidRun, turnId, ...agent } = entry.agent;
+  return {
+    id: `shared:${tabId}:${entry.seq}`,
+    tabId,
+    seq: entry.seq,
+    turnId: turnId ?? null,
+    kind: "agent",
+    share: "full",
+    summary: entry.summary,
+    ...(entry.text ? { detail: entry.text } : {}),
+    agent,
+    ...(joinedMidRun ? { joinedMidRun } : {}),
+    createdAt: entry.agent.startedAt,
+    updatedAt: entry.updatedAt,
+  };
+}
 
 /** The host's switch caption. */
 export function switchCaption(

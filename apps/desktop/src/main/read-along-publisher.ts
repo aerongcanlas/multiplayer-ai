@@ -1,9 +1,15 @@
-import type { ReadAlongStatus, SharedTabStatus } from "../shared/collaboration";
+import type {
+  ReadAlongStatus,
+  SharedAgent,
+  SharedPlan,
+  SharedTabStatus,
+} from "../shared/collaboration";
 import type { Result, Snapshot, SupervisorRequest } from "../shared/contracts";
 import { maskCredentials, publishablePrefix } from "../shared/masking";
 import {
   inReadAlongWindow,
   type Tab,
+  type TabPlan,
   type TranscriptBatch,
   type TranscriptEntry,
   type TranscriptPage,
@@ -30,6 +36,8 @@ export interface PublishedEntry {
   state?: TranscriptEntry["state"];
   outcome?: TranscriptEntry["outcome"];
   notice?: TranscriptEntry["notice"];
+  // Sub-agent cards only: summary is the task and text the final summary.
+  agent?: SharedAgent;
   version: number;
 }
 type Body = Omit<PublishedEntry, "version">;
@@ -42,17 +50,30 @@ export interface PublishedRecord {
   model: string;
   status: SharedTabStatus;
   switchOn: boolean;
+  // Sent only while read-along is on, so an ended record keeps what it last shared.
+  plan?: SharedPlan | null;
+  runningAgents?: number;
+  // Null when the snapshot does not say whether the harness reports sub-agents.
+  reportsAgents?: boolean | null;
+}
+// What a card showed when it joined mid-run; work from before the switch stays unpublished.
+interface MidRun {
+  latestTool?: string;
 }
 interface Head {
   maxSeq: number | null;
   version: number | null;
   rev: number;
+  // Approvals stored as pending and sub-agent cards stored as running.
   pending?: { seq: number; version: number }[];
 }
 
 const FULL_KINDS = new Set(["user", "assistant", "plan"]);
 const SUMMARY_KINDS = new Set(["tool", "approval", "error", "turn", "notice"]);
 const STREAMING_KINDS = new Set(["assistant", "plan"]);
+const MAX_PLAN_STEPS = 50;
+const MAX_STEP = 300;
+const MAX_EXPLANATION = 1_000;
 
 const clampBytes = (text: string, limit: number) => {
   const bytes = Buffer.from(text);
@@ -61,16 +82,76 @@ const clampBytes = (text: string, limit: number) => {
     : bytes.subarray(0, limit).toString().replace(/�+$/, "");
 };
 
+// Masked first, then cut, so a credential straddling the cut never leaks a prefix.
+const maskedLine = (text: string, limit = 400) =>
+  oneLine(maskCredentials(text), limit);
+
+// A sub-agent card: its task, masked card fields, and its final summary once it has one.
+function projectCard(entry: TranscriptEntry, midRun?: MidRun): Body | null {
+  const card = entry.agent;
+  if (!card) return null;
+  const running = card.status === "running";
+  // A summary still being written publishes only its safe prefix.
+  const text = (
+    running
+      ? publishablePrefix(entry.detail ?? "")
+      : maskCredentials(entry.detail ?? "")
+  ).slice(0, MAX_TEXT);
+  const latestTool =
+    card.latestTool !== undefined && card.latestTool !== midRun?.latestTool
+      ? maskedLine(card.latestTool)
+      : "";
+  return {
+    seq: entry.seq,
+    kind: "agent",
+    share: "full",
+    summary: maskedLine(entry.summary),
+    ...(text.trim() ? { text } : {}),
+    agent: {
+      key: card.key.slice(0, 200),
+      ...(card.parentKey ? { parentKey: card.parentKey.slice(0, 200) } : {}),
+      ...(card.name ? { name: maskedLine(card.name, 200) } : {}),
+      ...(card.type ? { type: maskedLine(card.type, 200) } : {}),
+      status: card.status,
+      background: card.background,
+      startedAt: card.startedAt.slice(0, 64),
+      ...(card.endedAt ? { endedAt: card.endedAt.slice(0, 64) } : {}),
+      toolUses: card.toolUses,
+      ...(latestTool ? { latestTool } : {}),
+      ...(midRun ? { joinedMidRun: true } : {}),
+      ...(entry.turnId ? { turnId: entry.turnId } : {}),
+    },
+  };
+}
+
+/** The tab's plan as viewers see it: masked, at most 50 steps of 300 characters. */
+export function projectPlan(plan: TabPlan | undefined): SharedPlan | null {
+  if (!plan?.steps.length) return null;
+  const explanation = maskCredentials(plan.explanation ?? "")
+    .slice(0, MAX_EXPLANATION)
+    .trim();
+  return {
+    ...(explanation ? { explanation } : {}),
+    steps: plan.steps.slice(0, MAX_PLAN_STEPS).map((step) => ({
+      text: maskedLine(step.text, MAX_STEP),
+      status: step.status,
+    })),
+  };
+}
+
 /**
- * Projects a transcript entry to what viewers may see: user and agent text in full, everything
- * else as one masked line, and nothing from reasoning, questions, sub-agents, or local detail
- * except a plan's body. A streaming entry publishes only its safe prefix until complete.
+ * Projects a transcript entry to what viewers may see: user and agent text in full, a sub-agent
+ * as its card, everything else as one masked line, and nothing from reasoning, questions, a
+ * sub-agent's own entries, or local detail except a plan's body. A streaming entry publishes
+ * only its safe prefix until complete. `midRun` marks a card that joined mid-run.
  */
 export function projectEntry(
   entry: TranscriptEntry,
   complete: boolean,
+  midRun?: MidRun,
 ): Body | null {
   if (entry.share === "none") return null;
+  if (entry.kind === "agent") return projectCard(entry, midRun);
   if (entry.agentKey && entry.kind !== "approval") return null;
   if (!FULL_KINDS.has(entry.kind) && !SUMMARY_KINDS.has(entry.kind))
     return null;
@@ -131,6 +212,10 @@ interface Shared {
   // Turns with a later entry or their turn marker, which complete earlier streaming entries.
   turnLast: Map<string, number>;
   ended: Set<string>;
+  // Cards that joined mid-run, by key. Their entries sit before the window and still publish.
+  midRun: Map<string, MidRun>;
+  // The database predates sub-agent cards and refused one: cards stop publishing.
+  noCards?: boolean;
   lastRecord?: string;
   seeded: boolean;
   inflight: boolean;
@@ -218,6 +303,7 @@ export class ReadAlongPublisher {
     for (const room of snapshot.rooms)
       for (const tab of room.tabs) {
         live.add(tab.id);
+        let joined = false;
         let shared = this.tabs.get(tab.id);
         if (!shared) {
           if (!tab.readAlongWindows.length) continue;
@@ -230,12 +316,14 @@ export class ReadAlongPublisher {
             dirty: new Set(),
             turnLast: new Map(),
             ended: new Set(),
+            midRun: new Map(),
             seeded: false,
             inflight: false,
           };
           this.tabs.set(tab.id, shared);
           // A tab first switched on while ready has nothing on the server to backfill.
           shared.seeded = this.ready && !this.backfilling;
+          joined = shared.seeded;
         }
         const reopened =
           tab.readAlongWindows.length > shared.tab.readAlongWindows.length;
@@ -246,7 +334,7 @@ export class ReadAlongPublisher {
           shared.stopped = undefined;
           shared.seeded = false;
           void this.backfillTab(tab.id);
-        }
+        } else if (joined || reopened) void this.join(shared);
         this.restage(shared);
       }
     for (const [tabId, shared] of this.tabs)
@@ -279,6 +367,8 @@ export class ReadAlongPublisher {
         shared.dirty.clear();
         shared.versions.clear();
         shared.raw.clear();
+        shared.midRun.clear();
+        shared.noCards = undefined;
         shared.lastRecord = undefined;
         shared.seeded = false;
       }
@@ -313,7 +403,16 @@ export class ReadAlongPublisher {
   }
 
   private ingest(shared: Shared, entry: TranscriptEntry) {
-    if (!inReadAlongWindow(shared.tab.readAlongWindows, entry.seq)) return;
+    if (entry.kind === "agent") {
+      // Cards update in place long after they were filed, so they follow the switch itself.
+      if (!shared.tab.readAlong || shared.noCards || !entry.agent) return;
+      if (
+        !inReadAlongWindow(shared.tab.readAlongWindows, entry.seq) &&
+        !shared.midRun.has(entry.agent.key)
+      )
+        return;
+    } else if (!inReadAlongWindow(shared.tab.readAlongWindows, entry.seq))
+      return;
     const held = shared.raw.get(entry.seq);
     if (held && held.updatedAt > entry.updatedAt) return;
     if (entry.turnId && !entry.agentKey) {
@@ -348,7 +447,19 @@ export class ReadAlongPublisher {
     );
   }
 
+  // An entry that will not change again, so only its version needs keeping.
+  private settled(shared: Shared, entry: TranscriptEntry) {
+    return (
+      entry.state !== "pending" &&
+      entry.agent?.status !== "running" &&
+      this.complete(shared, entry)
+    );
+  }
+
   private record(shared: Shared, tab = shared.tab): PublishedRecord {
+    const harness = this.local!.harnesses?.find(
+      (item) => item.id === tab.loadout.harness,
+    );
     return {
       tabId: tab.id,
       roomId: shared.roomId,
@@ -358,6 +469,13 @@ export class ReadAlongPublisher {
       model: tab.loadout.model.slice(0, 120),
       status: recordStatus(tab),
       switchOn: tab.readAlong,
+      ...(tab.readAlong
+        ? {
+            plan: projectPlan(tab.plan),
+            runningAgents: tab.runningAgents ?? 0,
+            reportsAgents: harness?.reportsAgents ?? null,
+          }
+        : {}),
     };
   }
 
@@ -387,7 +505,11 @@ export class ReadAlongPublisher {
         known
       )
         continue;
-      const body = projectEntry(entry, this.complete(shared, entry));
+      const body = projectEntry(
+        entry,
+        this.complete(shared, entry),
+        entry.agent && shared.midRun.get(entry.agent.key),
+      );
       if (!body) continue;
       const json = JSON.stringify(body);
       if (known?.body === json) continue;
@@ -461,16 +583,22 @@ export class ReadAlongPublisher {
           shared.staged.delete(entry.seq);
         // Settled entries no longer change; keep only their version.
         const raw = shared.raw.get(entry.seq);
-        if (
-          raw &&
-          raw.state !== "pending" &&
-          this.complete(shared, raw) &&
-          !shared.staged.has(entry.seq)
-        ) {
+        if (raw && this.settled(shared, raw) && !shared.staged.has(entry.seq)) {
           shared.raw.delete(entry.seq);
           shared.versions.set(entry.seq, { version: entry.version });
         }
       }
+    } else if (
+      outcome.reason === "invalid" &&
+      entries.some((entry) => entry.kind === "agent")
+    ) {
+      // A database without the sub-agent migration refuses cards; the transcript goes on.
+      shared.noCards = true;
+      for (const [seq, entry] of shared.staged)
+        if (entry.kind === "agent") {
+          shared.staged.delete(seq);
+          shared.raw.delete(seq);
+        }
     } else if (outcome.reason === "not_member")
       await this.notMember(tabId, shared);
     else if (outcome.reason === "migration_missing") {
@@ -563,6 +691,68 @@ export class ReadAlongPublisher {
     return result.ok ? (result.transcript as TranscriptPage) : undefined;
   }
 
+  private async cards(shared: Shared) {
+    const result = await this.supervisor.request({
+      type: "tab.agents",
+      roomId: shared.roomId,
+      tabId: shared.tab.id,
+    });
+    const page = result.ok
+      ? (result.transcript as TranscriptPage | undefined)
+      : undefined;
+    return page?.entries ?? [];
+  }
+
+  // Takes in the tab's cards: those running outside every window join mid-run, and cards the
+  // publisher holds, the server stores as running, or the server has not seen are refreshed.
+  private adopt(
+    shared: Shared,
+    cards: TranscriptEntry[],
+    stored: Set<number>,
+    afterSeq: number,
+  ) {
+    if (!shared.tab.readAlong) return;
+    for (const entry of cards) {
+      const card = entry.agent;
+      if (!card) continue;
+      const inWindow = inReadAlongWindow(
+        shared.tab.readAlongWindows,
+        entry.seq,
+      );
+      if (
+        !inWindow &&
+        !shared.midRun.has(card.key) &&
+        (card.status === "running" || stored.has(entry.seq))
+      )
+        shared.midRun.set(card.key, { latestTool: card.latestTool });
+      if (
+        !shared.midRun.has(card.key) &&
+        !(inWindow && (entry.seq > afterSeq || stored.has(entry.seq))) &&
+        !shared.raw.has(entry.seq)
+      )
+        continue;
+      const held = shared.raw.get(entry.seq);
+      if (held && held.updatedAt > entry.updatedAt) continue;
+      shared.raw.delete(entry.seq);
+      this.ingest(shared, entry);
+    }
+  }
+
+  // A window opened on a live tab: sub-agents already running join mid-run, once per window.
+  private async join(shared: Shared) {
+    const windows = shared.tab.readAlongWindows.length;
+    const cards = await this.cards(shared);
+    if (
+      this.closed ||
+      this.tabs.get(shared.tab.id) !== shared ||
+      shared.stopped ||
+      shared.tab.readAlongWindows.length !== windows
+    )
+      return;
+    this.adopt(shared, cards, new Set(), Infinity);
+    this.restage(shared);
+  }
+
   private async backfillTab(tabId: string) {
     const shared = this.tabs.get(tabId);
     if (!shared || shared.stopped || !this.accountRoom(shared.roomId)) return;
@@ -604,6 +794,9 @@ export class ReadAlongPublisher {
       if (page.nextSeq === null) break;
       after = page.nextSeq;
     }
+    // Transcript pages leave cards out. Cards the server stores as running are re-read too, so
+    // one that settled while the host was away republishes settled.
+    const cards = await this.cards(shared);
     if (epoch !== this.epoch || this.tabs.get(tabId) !== shared) return;
     for (const entry of entries) {
       // Journal entries replace held ones at equal time, so seeded entries restage.
@@ -612,6 +805,12 @@ export class ReadAlongPublisher {
       shared.raw.delete(entry.seq);
       this.ingest(shared, entry);
     }
+    this.adopt(
+      shared,
+      cards,
+      new Set(seeds.map((seed) => seed.seq)),
+      head.data?.maxSeq ?? 0,
+    );
     shared.seeded = true;
     shared.lastRecord = undefined;
     for (const seq of shared.raw.keys()) shared.dirty.add(seq);

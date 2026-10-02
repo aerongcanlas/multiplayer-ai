@@ -1678,6 +1678,17 @@ summary:focus-visible {
 .agent-card:hover {
   border-color: #4a4a53;
 }
+/* A spectator's card: content, not a control. */
+.agent-card.agent-static:hover {
+  border-color: #35353b;
+}
+.agent-joined {
+  color: #b9d0f3;
+}
+.agent-note {
+  margin: 0 0 6px;
+  font-size: 11px;
+}
 .agent-card.agent-selected {
   border-color: #7fa6e0;
   background: #262a33;

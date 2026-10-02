@@ -16,7 +16,10 @@ import type { Command, Room } from "../shared/contracts";
 // How a read-along call ended. Read-along never reports through the room-wide status.
 export type ReadAlongOutcome<T> =
   | { ok: true; data: T }
-  | { ok: false; reason: "not_member" | "migration_missing" | "retry" };
+  | {
+      ok: false;
+      reason: "not_member" | "migration_missing" | "invalid" | "retry";
+    };
 export type ReadAlongRpc =
   | "desktop_tab_share_publish"
   | "desktop_tab_share_head"
@@ -26,8 +29,10 @@ export type ReadAlongRpc =
 /** Maps a read-along RPC error without touching collaboration state. */
 export function readAlongFailure(error: {
   code?: string;
-}): "not_member" | "migration_missing" | "retry" {
+}): "not_member" | "migration_missing" | "invalid" | "retry" {
   if (error.code === "42501") return "not_member";
+  // The server refused the arguments; sending them again cannot succeed.
+  if (error.code === "22023") return "invalid";
   if (["PGRST202", "42883", "42P01"].includes(error.code ?? ""))
     return "migration_missing";
   return "retry";

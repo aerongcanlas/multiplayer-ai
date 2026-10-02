@@ -66,7 +66,20 @@ Adapters report sub-agent events on a session listener, separate from the owner'
 
 A turn can end while sub-agents keep running: the tab goes idle and its header shows the running count. Stop on that tab stops them, and their cards read stopped. A card still running when the app quits reads interrupted after restart. Closing a tab with running sub-agents asks first, and a session reset or harness change waits until they settle. Harnesses that do not report sub-agents show that in Agent tasks rather than cards built from tool calls.
 
-Cards and sub-agent entries are transcript entries. For read-along, cards share in full and sub-agent entries share at their own kind's level (messages in full, tool calls as one-line summaries, reasoning never), masked like the lead's entries. Read-along must publish `agent` entries and entries with an agent key.
+Cards and sub-agent entries are transcript entries.
+
+### Watching a host's shared tab
+
+While read-along is on for a tab, room members who open it see that tab in Mission Control instead of their own: **Lead context** shows the host, harness, model, status, and plan, and **Agent tasks** shows the host's sub-agent cards grouped by turn, updating on the same cadence as the shared transcript. Returning to one of your own tabs switches Mission Control back. Prompt suggestions always stay your own.
+
+What is shared, masked for credentials before it leaves the host's desktop:
+
+- **Cards:** the task, sub-agent name and type, status, elapsed time, tool count, the latest tool as one line, and the final summary.
+- **Plan state:** up to 50 plan steps of 300 characters, the running sub-agent count, and whether the harness reports sub-agents.
+
+A sub-agent's own messages, tool calls, and reasoning are not shared, so a spectator's card is not selectable and opens no transcript. Spectators control nothing: a tab waiting on an approval reads **Needs the host**.
+
+Sharing follows the switch. A sub-agent already running when read-along goes on appears from then, labeled **Joined mid-run**, without the tool it last used before the switch. When read-along goes off, cards stop updating and stay as ended history; a card still running then reads **Was running**. A host on an older app, or a shared database without the sub-agent migration (`20261002120000_desktop_tab_read_along_agents.sql`), shows "This host's app doesn't share sub-agents yet" instead of cards, and the shared transcript keeps working.
 
 ## Release checks
 

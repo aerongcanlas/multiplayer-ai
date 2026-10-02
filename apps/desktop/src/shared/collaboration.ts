@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { Room } from "./contracts";
-import { harnessIdSchema } from "./tabs";
+import { AGENT_STATUSES, PLAN_STEP_STATUSES, harnessIdSchema } from "./tabs";
 
 export interface SharedAccount {
   id: string;
@@ -27,6 +27,19 @@ export const SHARED_TAB_STATUSES = [
 ] as const;
 export type SharedTabStatus = (typeof SHARED_TAB_STATUSES)[number];
 export const deviceIdSchema = z.string().regex(/^[A-Za-z0-9_-]{8,64}$/);
+// The host tab's plan as published: masked and clamped to 50 steps of 300 characters.
+export const sharedPlanSchema = z.object({
+  explanation: z.string().max(1_000).optional(),
+  steps: z
+    .array(
+      z.object({
+        text: z.string().max(300),
+        status: z.enum(PLAN_STEP_STATUSES),
+      }),
+    )
+    .max(50),
+});
+export type SharedPlan = z.infer<typeof sharedPlanSchema>;
 // Another member's (or this account's other desktop's) read-along tab record.
 export const sharedTabSchema = z.object({
   tabId: z.uuid(),
@@ -46,11 +59,37 @@ export const sharedTabSchema = z.object({
   switchOn: z.boolean(),
   rev: z.number().int().nonnegative(),
   updatedAt: z.string(),
+  // Added by the sub-agent sharing migration. All three are null or absent when the host's app
+  // or the database predates it.
+  plan: sharedPlanSchema.nullable().optional(),
+  runningAgents: z.number().int().nonnegative().nullable().optional(),
+  // Whether the host's harness reports sub-agents.
+  reportsAgents: z.boolean().nullable().optional(),
 });
 export type SharedTab = z.infer<typeof sharedTabSchema> & {
   // Set by the coordinator for this account's tabs on another desktop.
   sameUser?: boolean;
 };
+
+// A host's sub-agent card as published, with the turn that spawned it.
+export const sharedAgentSchema = z
+  .object({
+    key: z.string().min(1).max(200),
+    parentKey: z.string().min(1).max(200).optional(),
+    name: z.string().max(200).optional(),
+    type: z.string().max(200).optional(),
+    status: z.enum(AGENT_STATUSES),
+    background: z.boolean(),
+    startedAt: z.string().max(64),
+    endedAt: z.string().max(64).optional(),
+    toolUses: z.number().int().nonnegative(),
+    latestTool: z.string().max(400).optional(),
+    // The sub-agent was already running when read-along went on.
+    joinedMidRun: z.boolean().optional(),
+    turnId: z.uuid().optional(),
+  })
+  .strict();
+export type SharedAgent = z.infer<typeof sharedAgentSchema>;
 
 // One published entry as a viewer receives it; main parses every pulled row with this schema.
 export const sharedEntrySchema = z
@@ -65,6 +104,7 @@ export const sharedEntrySchema = z
       "notice",
       "error",
       "turn",
+      "agent",
     ]),
     share: z.enum(["full", "summary"]),
     summary: z.string().max(400),
@@ -80,11 +120,14 @@ export const sharedEntrySchema = z
       .string()
       .regex(/^[a-z_]{1,40}$/)
       .optional(),
+    // Present on, and only on, sub-agent cards: summary is the task, text the final summary.
+    agent: sharedAgentSchema.optional(),
     version: z.number().int().positive(),
     rev: z.number().int().positive(),
     updatedAt: z.string().max(64),
   })
-  .strict();
+  .strict()
+  .refine((entry) => (entry.kind === "agent") === Boolean(entry.agent));
 export type SharedEntry = z.infer<typeof sharedEntrySchema>;
 // The envelope ignores fields a newer server adds; rows stay strict.
 export const sharedPullSchema = z.object({
@@ -117,6 +160,16 @@ export type SharedTranscriptMessage =
       roomId: string;
       tabId: string;
       state: "loading" | "failed" | "reconnecting" | "live" | "unshared";
+    }
+  // Sub-agent cards of the watched tab, apart from its transcript entries. `state` is set once
+  // by the first load: every card, only the latest ones, or none because the database predates
+  // sub-agent sharing.
+  | {
+      type: "cards";
+      roomId: string;
+      tabId: string;
+      cards: SharedEntry[];
+      state?: "ready" | "capped" | "unavailable";
     }
   // The account changed or signed out: drop every shared transcript.
   | { type: "clear" };

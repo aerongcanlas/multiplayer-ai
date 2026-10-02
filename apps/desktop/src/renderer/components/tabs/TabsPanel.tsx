@@ -400,6 +400,7 @@ export function TabsPanel({
           roomId={room.id}
           tabId={sharedTabId}
           listed={sharedTabs.find((item) => item.tabId === sharedTabId)}
+          harnesses={harnesses}
           connected={connected}
           clockOffsetMs={clockOffsetMs}
           onLeave={onLeaveShared}

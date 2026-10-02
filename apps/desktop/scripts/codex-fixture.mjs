@@ -3,7 +3,8 @@
 // FIXTURE_PERMISSIONS, FIXTURE_ELICIT, FIXTURE_USAGE, FIXTURE_CRASH, FIXTURE_SLOW,
 // FIXTURE_UNKNOWN_REQUEST, FIXTURE_AGENTS (a sub-agent with a nested one whose command approval
 // outlives the lead's turn; once it finishes Codex wakes the lead on its own), FIXTURE_NATIVE_AGENTS
-// (the same flow using subAgentActivity spawn events), FIXTURE_FOLLOWUP (more
+// (the same flow using subAgentActivity spawn events), FIXTURE_AGENT_SECRET (that sub-agent's
+// final message carries a credential-shaped string), FIXTURE_FOLLOWUP (more
 // work for that sub-agent), and FIXTURE_EXIT_LATER (the process exits after the turn).
 // MP_FIXTURE_STATE persists threads so a restarted fixture can resume them; MP_FIXTURE_LOG records
 // every request, the launch arguments, and the environment for tests to inspect.
@@ -123,7 +124,7 @@ const collab = (tool, sender, receivers, prompt, extra = {}) => ({
     ...extra,
 });
 
-async function spawnAgents(lead, leadTurn, native = false) {
+async function spawnAgents(lead, leadTurn, native = false, secret = false) {
     const sub = randomUUID();
     subAgents.set(lead, sub);
     const spawn = collab("spawnAgent", lead, [], "Inspect the checkout", {
@@ -227,7 +228,13 @@ async function spawnAgents(lead, leadTurn, native = false) {
         log({ type: "answer", method: "sub-agent approval", result });
         if (result?.decision === "cancel") return;
         command(sub, subTurn, "ls");
-        message(sub, subTurn, "Found README.md.");
+        message(
+            sub,
+            subTurn,
+            secret
+                ? "Found README.md. OPENAI_API_KEY=q8Zr2mVx4TnL7pWc"
+                : "Found README.md.",
+        );
         complete(sub, subTurn);
         notify("item/completed", {
             threadId: lead,
@@ -317,7 +324,13 @@ async function turn(threadId, turnId, prompt, params) {
     }
     const planMode = params.collaborationMode?.mode === "plan";
     if (prompt.includes("FIXTURE_CRASH")) process.exit(1);
-    if (prompt.includes("FIXTURE_AGENTS")) await spawnAgents(threadId, turnId);
+    if (prompt.includes("FIXTURE_AGENTS"))
+        await spawnAgents(
+            threadId,
+            turnId,
+            false,
+            prompt.includes("FIXTURE_AGENT_SECRET"),
+        );
     if (prompt.includes("FIXTURE_NATIVE_AGENTS"))
         await spawnAgents(threadId, turnId, true);
     if (prompt.includes("FIXTURE_FOLLOWUP")) followUp(threadId, turnId);

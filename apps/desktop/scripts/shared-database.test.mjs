@@ -503,3 +503,253 @@ test("read-along RPCs keep shared tabs host-only, member-readable, and ordered",
     await db.close();
   }
 });
+
+test("read-along RPCs store sub-agent cards and the plan record, and pull them by kind", async () => {
+  const { db, rpc, call } = await sharedDatabase();
+  try {
+    const { roomId } = await rpc(alice, {
+      type: "room.create",
+      name: "Spectators",
+    });
+    const invite = "d".repeat(64);
+    await rpc(alice, { type: "invite.create", roomId, tokenHash: invite });
+    await rpc(bob, { type: "room.join", tokenHash: invite });
+    const tabId = "77777777-7777-4777-8777-777777777777";
+    const turnId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const record = (patch = {}) => ({
+      tabId,
+      roomId,
+      deviceId: "alice-desktop-1",
+      title: "Fix the build",
+      harness: "claude",
+      model: "opus",
+      status: "running",
+      switchOn: true,
+      ...patch,
+    });
+    const agent = (patch = {}) => ({
+      key: "agent-1",
+      parentKey: "agent-0",
+      name: "explorer",
+      type: "Explore",
+      status: "running",
+      background: false,
+      startedAt: "2026-10-02T00:00:00.000Z",
+      toolUses: 2,
+      latestTool: "Read src/index.ts",
+      turnId,
+      ...patch,
+    });
+    const card = (seq, patch = {}, entry = {}) => ({
+      seq,
+      kind: "agent",
+      share: "full",
+      summary: "Map the codebase",
+      version: 1,
+      agent: agent(patch),
+      ...entry,
+    });
+    const line = (seq) => ({
+      seq,
+      kind: "assistant",
+      share: "full",
+      summary: `Line ${seq}`,
+      text: `Line ${seq}`,
+      version: 1,
+    });
+    const publish = (userId, tab, entries = []) =>
+      call(userId, "desktop_tab_share_publish", {
+        p_tab: tab,
+        p_entries: entries,
+      });
+    const pull = (userId, args = {}) =>
+      call(userId, "desktop_tab_share_pull", {
+        p_tab_id: tabId,
+        p_after_rev: 0,
+        p_after_seq: 0,
+        p_before_seq: null,
+        p_limit: 200,
+        p_byte_budget: 1048576,
+        ...args,
+      });
+    const head = () =>
+      call(alice, "desktop_tab_share_head", { p_tab_id: tabId });
+
+    // Happy path, turn: a full card round-trips with its agent object and turn.
+    await publish(alice, record(), [line(1), card(2)]);
+    const stored = (await pull(bob)).entries.find((row) => row.seq === 2);
+    assert.equal(stored.kind, "agent");
+    assert.deepEqual(stored.agent, agent());
+    assert.equal(stored.agent.turnId, turnId);
+
+    // Record: fields never published stay null; published ones return in the pull's record.
+    const bare = (await pull(bob)).record;
+    assert.deepEqual(
+      [bare.plan, bare.runningAgents, bare.reportsAgents],
+      [null, null, null],
+    );
+    const plan = {
+      explanation: "Two steps",
+      steps: [
+        { text: "Read the code", status: "done" },
+        { text: "Fix it", status: "active" },
+      ],
+    };
+    await publish(
+      alice,
+      record({ plan, runningAgents: 1, reportsAgents: true }),
+    );
+    const full = (await pull(bob)).record;
+    assert.deepEqual(full.plan, plan);
+    assert.equal(full.runningAgents, 1);
+    assert.equal(full.reportsAgents, true);
+    // The room snapshot's list keeps its shape.
+    assert.equal("plan" in (await rpc(bob)).rooms[0].sharedTabs[0], false);
+    // An ended record omits the fields and keeps what it last shared; a null clears one.
+    await publish(alice, record({ status: "ended", switchOn: false }));
+    assert.deepEqual((await pull(bob)).record.plan, plan);
+    await publish(alice, record({ plan: null, reportsAgents: false }));
+    const cleared = (await pull(bob)).record;
+    assert.deepEqual(
+      [cleared.plan, cleared.runningAgents, cleared.reportsAgents],
+      [null, 1, false],
+    );
+
+    // Plan size and record field types.
+    for (const bad of [
+      { plan: { steps: Array(51).fill({ text: "s", status: "done" }) } },
+      { plan: { steps: [{ text: "x".repeat(301), status: "done" }] } },
+      { plan: { steps: [{ text: "s", status: "blocked" }] } },
+      { plan: { steps: [{ text: "s", status: "done", extra: 1 }] } },
+      { plan: { steps: [], explanation: "e".repeat(1001) } },
+      { plan: { steps: [], turnId } },
+      { plan: [] },
+      { runningAgents: -1 },
+      { runningAgents: 1.5 },
+      { reportsAgents: "yes" },
+    ])
+      await assert.rejects(
+        publish(alice, record(bad)),
+        /record is invalid/,
+        JSON.stringify(bad).slice(0, 80),
+      );
+
+    // Edge: a running mid-run card without endedAt; versions stay monotonic.
+    await publish(alice, record(), [
+      card(3, { key: "agent-2", joinedMidRun: true, parentKey: undefined }),
+    ]);
+    await publish(alice, record(), [
+      card(
+        3,
+        {
+          key: "agent-2",
+          joinedMidRun: true,
+          status: "completed",
+          endedAt: "2026-10-02T00:01:00.000Z",
+        },
+        { version: 3, text: "Found it" },
+      ),
+    ]);
+    await publish(alice, record(), [
+      card(3, { key: "agent-2", status: "failed" }, { version: 2 }),
+    ]);
+    const settled = (await pull(bob)).entries.find((row) => row.seq === 3);
+    assert.equal(settled.agent.status, "completed");
+    assert.equal(settled.agent.joinedMidRun, true);
+    assert.equal(settled.text, "Found it");
+    assert.equal(settled.version, 3);
+
+    // Head: running cards are seeds beside pending approvals; settled cards are not.
+    await publish(alice, record(), [
+      {
+        seq: 4,
+        kind: "approval",
+        share: "summary",
+        summary: "Run tests",
+        state: "pending",
+        version: 1,
+      },
+    ]);
+    assert.deepEqual((await head()).pending, [
+      { seq: 2, version: 1 },
+      { seq: 4, version: 1 },
+    ]);
+
+    // Errors: malformed cards, and a card on another kind or a card entry without one.
+    for (const bad of [
+      card(5, { status: "paused" }),
+      card(5, { latestTool: "t".repeat(401) }),
+      card(5, { model: "leak" }),
+      card(5, { turnId: "not-a-turn" }),
+      card(5, { key: "" }),
+      card(5, { toolUses: -1 }),
+      card(5, { background: "no" }),
+      card(5, { joinedMidRun: "yes" }),
+      card(5, {}, { summary: "s".repeat(401) }),
+      card(5, {}, { agent: "card" }),
+      card(5, {}, { agent: undefined }),
+      { ...line(5), agent: agent() },
+    ])
+      await assert.rejects(
+        publish(alice, record(), [bad]),
+        /entry is invalid/,
+        JSON.stringify(bad).slice(0, 120),
+      );
+
+    // Integration: no kinds argument returns every kind; a filter keeps only its kinds.
+    const kindsOf = async (args) =>
+      (await pull(bob, args)).entries.map((row) => row.kind);
+    assert.deepEqual(await kindsOf({}), [
+      "assistant",
+      "agent",
+      "agent",
+      "approval",
+    ]);
+    assert.deepEqual(await kindsOf({ p_kinds: ["agent"] }), ["agent", "agent"]);
+    assert.deepEqual(await kindsOf({ p_kinds: ["assistant", "approval"] }), [
+      "assistant",
+      "approval",
+    ]);
+    assert.deepEqual(
+      await kindsOf({ p_kinds: ["agent"], p_after_rev: null, p_limit: 1 }),
+      ["agent"],
+    );
+    await assert.rejects(
+      pull(bob, { p_kinds: Array(21).fill("agent") }),
+      /Too many/,
+    );
+
+    // Compatibility: one pull function, and the shipped six-argument call still resolves to it.
+    const overloads = await db.query(
+      "select count(*)::int as count from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'desktop_tab_share_pull'",
+    );
+    assert.equal(overloads.rows[0].count, 1);
+    await db.query("select set_config('request.jwt.claim.sub', $1, false)", [
+      bob,
+    ]);
+    await db.exec("set role authenticated");
+    const positional = await db.query(
+      "select public.desktop_tab_share_pull($1::uuid, 0::bigint, 0, null, 200, 1048576) as data",
+      [tabId],
+    );
+    await db.exec("reset role");
+    assert.equal(positional.rows[0].data.entries.length, 4);
+
+    // Host-only writes: another account or device publishing cards is still refused.
+    await assert.rejects(
+      publish(bob, record({ deviceId: "bob-desktop-1" }), [card(6)]),
+      /Only the host device/,
+    );
+    await assert.rejects(
+      publish(alice, record({ deviceId: "alice-desktop-2" }), [card(6)]),
+      /Only the host device/,
+    );
+    await assert.rejects(
+      publish(eve, record({ deviceId: "eve-desktop-1" }), [card(6)]),
+      /no longer a member/,
+    );
+    assert.equal((await pull(bob)).entries.length, 4);
+  } finally {
+    await db.close();
+  }
+});

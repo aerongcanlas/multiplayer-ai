@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { sharedDatabase, alice, bob } from "./shared-fixture.mjs";
 import { startProgramServer } from "./programs-fixture.mjs";
+import { fixtureRepository, stubOpenDialog } from "./e2e-support.mjs";
 import { buildServer } from "@multiplayer-ai/api";
 
 const require = createRequire(import.meta.url);
@@ -643,6 +644,257 @@ try {
   checkpoint(
     "Tokens remain outside renderer snapshots and are encrypted on disk",
   );
+
+  // Spectator Mission Control: the host's plan state and sub-agent cards follow the shared tab
+  // in a member's main area, view-only.
+  const SECRET = "q8Zr2mVx4TnL7pWc";
+  const tabsOf = (page) => page.getByRole("region", { name: "AI tabs" });
+  const missionOf = (page) =>
+    page.getByRole("region", { name: "Mission Control" });
+  const tasksOf = (page) =>
+    missionOf(page).getByRole("region", { name: "Agent tasks" });
+  const leadOf = (page) =>
+    missionOf(page).getByRole("region", { name: "Lead context" });
+  const cardOf = (page, task) =>
+    tasksOf(page).locator(".agent-card").filter({ hasText: task });
+  const hostTab = async () =>
+    (
+      await first.page.evaluate(() => window.desktop.getSnapshot())
+    ).snapshot.rooms
+      .find((room) => room.id === roomId)
+      .tabs.find((tab) => tab.title === "Codex 1");
+  const until = async (check, label) => {
+    const end = Date.now() + 20_000;
+    while (Date.now() < end) {
+      if (await check()) return;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    throw new Error(`Timed out waiting for ${label}.`);
+  };
+  // An idle shared tab is pulled on room refreshes, so the viewer refreshes until it shows.
+  const seen = (locator) =>
+    until(async () => {
+      if (await locator.first().isVisible()) return true;
+      await second.page
+        .getByRole("button", { name: "Refresh shared rooms" })
+        .click();
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      return locator.first().isVisible();
+    }, "the viewer to show " + locator);
+  const hostSend = async (text) => {
+    await tabsOf(first.page)
+      .getByRole("textbox", { name: "Message", exact: true })
+      .fill(text);
+    await tabsOf(first.page)
+      .getByRole("button", { name: "Send", exact: true })
+      .click();
+  };
+  const hostApproval = () =>
+    tabsOf(first.page).getByRole("region", {
+      name: "Approval for sub-agent Inspect the checkout",
+    });
+  const readAlongSwitch = () =>
+    tabsOf(first.page).getByRole("switch", { name: /Read-along/ });
+
+  const repository = join(output, "repository");
+  await fixtureRepository(repository, { readme: "Shared fixture\n" });
+  await stubOpenDialog(first.app, repository);
+  await first.page
+    .getByRole("button", { name: "Select repository", exact: true })
+    .click();
+  await tabsOf(first.page)
+    .getByRole("button", { name: "New tab", exact: true })
+    .click();
+  await first.page
+    .getByRole("menuitem", { name: "Codex", exact: true })
+    .click();
+  await until(async () => (await hostTab())?.status === "idle", "the host tab");
+  // The sub-agent starts, and waits on the host, before anything is shared.
+  await hostSend("FIXTURE_AGENTS FIXTURE_AGENT_SECRET");
+  await hostApproval().waitFor();
+  await until(
+    async () => (await hostTab()).status === "idle",
+    "the host's first turn to end",
+  );
+  await cardOf(first.page, "Inspect the checkout")
+    .getByText("Running")
+    .waitFor();
+  await readAlongSwitch().check();
+  await until(async () => (await hostTab()).readAlong, "read-along to turn on");
+
+  // The viewer's own Mission Control, before any shared tab is open.
+  await tabsOf(second.page)
+    .getByRole("button", { name: "New tab", exact: true })
+    .click();
+  await second.page
+    .getByRole("menuitem", { name: "Codex", exact: true })
+    .click();
+  const ownChip = tabsOf(second.page).locator(
+    ".tab-chip:not(.tab-shared) [role=tab]",
+  );
+  await ownChip.waitFor();
+  await tasksOf(second.page)
+    .getByText(/No sub-agents in this tab yet/)
+    .waitFor();
+  const sharedChip = tabsOf(second.page)
+    .getByRole("group", { name: "Shared by Alice" })
+    .getByRole("tab", { name: /Codex 1/ });
+  await seen(sharedChip);
+  await sharedChip.click();
+  // Covers AE1, AE5, AE7: the host's data, a mid-run card, and a host that is needed.
+  await missionOf(second.page)
+    .getByText(/Alice · Codex 1/)
+    .waitFor();
+  const joined = cardOf(second.page, "Inspect the checkout");
+  await seen(joined);
+  await joined.getByText("Running", { exact: true }).waitFor();
+  await joined.getByText("Joined mid-run").waitFor();
+  await tasksOf(second.page).getByText("Needs the host").waitFor();
+  await leadOf(second.page).getByText("Alice", { exact: true }).waitFor();
+  await leadOf(second.page).getByText("Codex", { exact: true }).waitFor();
+  await leadOf(second.page).getByText("Waiting on the host").first().waitFor();
+  // The sub-agent that finished before the switch is not shared.
+  assert.equal(await tasksOf(second.page).locator(".agent-card").count(), 1);
+  // Covers AE3, AE7: the card is no control, nothing opens, and nothing can be approved.
+  assert.equal(await tasksOf(second.page).getByRole("button").count(), 0);
+  await joined.click();
+  assert.equal(
+    await tabsOf(second.page)
+      .getByRole("heading", { name: "Inspect the checkout" })
+      .count(),
+    0,
+  );
+  assert.equal(
+    await second.page.getByRole("button", { name: /Approve|Decline/ }).count(),
+    0,
+  );
+  assert.equal(
+    await tabsOf(second.page)
+      .getByRole("textbox", { name: "Message", exact: true })
+      .count(),
+    0,
+  );
+  // Prompt suggestions stay the member's own while the shared tab is open.
+  await missionOf(second.page)
+    .getByRole("button", { name: "Use prompt", exact: true })
+    .waitFor();
+  await second.page.screenshot({
+    path: join(output, "spectator-mid-run.png"),
+    animations: "disabled",
+  });
+  checkpoint(
+    "A viewer's Mission Control shows the host's mid-run sub-agent, view-only, and that the host is needed",
+  );
+
+  // Covers AE2, AE4: the card completes live, with its summary masked.
+  await hostApproval()
+    .getByRole("button", { name: "Approve once", exact: true })
+    .click();
+  await joined.getByText("Completed", { exact: true }).waitFor();
+  await joined.getByText("Found README.md. OPENAI_API_KEY=•••").waitFor();
+  await joined.getByText("Joined mid-run").waitFor();
+  await until(
+    async () =>
+      (await tasksOf(second.page).getByText("Needs the host").count()) === 0,
+    "the needs-the-host mark to clear",
+  );
+
+  // A turn inside the window: its cards arrive under a new turn, one running and one settled.
+  await until(
+    async () => (await hostTab()).status === "idle",
+    "the woken lead to finish",
+  );
+  await hostSend("FIXTURE_AGENTS");
+  await hostApproval().last().waitFor();
+  await until(
+    async () =>
+      (await tasksOf(second.page).locator(".agent-card").count()) === 3,
+    "the second turn's cards",
+  );
+  const latest = tasksOf(second.page).locator("details.agent-turn").first();
+  await latest.getByText("Running", { exact: true }).waitFor();
+  await latest.getByText("Completed", { exact: true }).waitFor();
+  assert.equal(await latest.getByText("Joined mid-run").count(), 0);
+  await tasksOf(second.page).getByText("Needs the host").waitFor();
+  await missionOf(second.page)
+    .getByText(/1 sub-agent running/)
+    .waitFor();
+  await hostApproval()
+    .last()
+    .getByRole("button", { name: "Approve once", exact: true })
+    .click();
+  await until(
+    async () =>
+      (await latest.getByText("Completed", { exact: true }).count()) === 2,
+    "the second turn's sub-agent to complete",
+  );
+  // No unmasked credential and no entry of a sub-agent's own transcript reached the viewer or
+  // the database; a sub-agent shows only as its card, with its final summary.
+  const viewerText = await second.page.locator("body").innerText();
+  assert.equal(viewerText.includes(SECRET), false);
+  assert.equal(viewerText.includes("A short README."), true);
+  const stored = await pool.query(
+    "select kind, body::text as body from public.desktop_tab_share_entry",
+  );
+  assert.equal(
+    stored.rows.some((row) => row.body.includes(SECRET)),
+    false,
+  );
+  assert.equal(
+    stored.rows.some((row) => /agentKey|"reasoning"/.test(row.body)),
+    false,
+  );
+  assert.equal(stored.rows.filter((row) => row.kind === "agent").length, 3);
+  await second.page.screenshot({
+    path: join(output, "spectator-completed.png"),
+    animations: "disabled",
+  });
+  checkpoint(
+    "Shared sub-agent cards complete live with masked summaries, grouped by turn",
+  );
+
+  // A suggestion used while the shared tab is open lands in the viewer's own composer.
+  await missionOf(second.page)
+    .getByRole("button", { name: "Use prompt", exact: true })
+    .click();
+  // Covers AE1: back on the viewer's own tab, Mission Control is the viewer's own again.
+  await ownChip.click();
+  assert.equal(
+    await tabsOf(second.page)
+      .getByRole("textbox", { name: "Message", exact: true })
+      .inputValue(),
+    "Review selected feedback before implementation.",
+  );
+  await tasksOf(second.page)
+    .getByText(/No sub-agents in this tab yet/)
+    .waitFor();
+  assert.equal(await tasksOf(second.page).locator(".agent-card").count(), 0);
+  assert.equal(await missionOf(second.page).getByText(/Alice/).count(), 0);
+  await leadOf(second.page).getByText("Act", { exact: true }).waitFor();
+
+  // Covers AE6: read-along off leaves the cards as ended history.
+  await until(
+    async () => (await hostTab()).status === "idle",
+    "the host's turns to end",
+  );
+  await readAlongSwitch().uncheck();
+  await until(
+    async () => !(await hostTab()).readAlong,
+    "read-along to turn off",
+  );
+  await sharedChip.click();
+  await seen(
+    tasksOf(second.page).getByText(
+      "The host turned read-along off. These sub-agents stay as history.",
+    ),
+  );
+  assert.equal(await tasksOf(second.page).locator(".agent-card").count(), 3);
+  await leadOf(second.page).getByText("Ended").first().waitFor();
+  await ownChip.click();
+  checkpoint(
+    "Leaving the shared tab restores the viewer's own Mission Control, and an ended share keeps its cards",
+  );
+
   offline = true;
   await second.page
     .getByRole("button", { name: "Refresh shared rooms" })
