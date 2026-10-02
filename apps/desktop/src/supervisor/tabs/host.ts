@@ -167,9 +167,15 @@ export class TabHost {
             : tab.status === "unavailable" && ready
               ? "idle"
               : tab.status;
-        const loadout =
-          !tab.loadout.model && !tabBusy(tab.status)
+        const filled =
+          (!tab.loadout.model || !tab.loadout.effort) && !tabBusy(tab.status)
             ? withDefaultModel(this.registry, tab.loadout)
+            : undefined;
+        const loadout =
+          filled &&
+          (filled.model !== tab.loadout.model ||
+            filled.effort !== tab.loadout.effort)
+            ? filled
             : undefined;
         if (status !== tab.status || (loadout && loadout.model))
           changes.push({

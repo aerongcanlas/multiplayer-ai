@@ -114,6 +114,7 @@ await run.execute(
                 "createInvite",
                 "createSuggestion",
                 "editSuggestion",
+                "deleteSuggestion",
                 "getSnapshot",
                 "onHealth",
                 "onSnapshot",
@@ -144,6 +145,9 @@ await run.execute(
                 "chooseHarnessExecutable",
                 "useManagedHarness",
                 "acknowledgeHarnessNotice",
+                "setHarnessDefault",
+                "updateHarness",
+                "revertHarnessUpdate",
             ].sort(),
         );
         const malformed = await page.evaluate(async () => {
@@ -443,25 +447,13 @@ await run.execute(
             name: "Prompt suggestions",
         });
         await suggestions
-            .getByRole("button", { name: "Dismiss", exact: true })
-            .click();
-        assert.equal(
-            await suggestions
-                .getByRole("button", { name: "Use prompt" })
-                .count(),
-            0,
-        );
-        await suggestions
-            .getByRole("button", { name: "Show 1 dismissed" })
+            .getByRole("button", { name: "Delete", exact: true })
             .click();
         await suggestions
-            .getByRole("button", { name: "Restore", exact: true })
-            .click();
-        await suggestions.getByRole("button", { name: "Use prompt" }).waitFor();
-        assert.equal((await snapshot()).rooms[1].suggestions.length, 1);
-        await checkpoint(
-            "Suggestions dismiss and restore on this desktop only",
-        );
+            .getByRole("button", { name: "Use prompt" })
+            .waitFor({ state: "hidden" });
+        assert.equal((await snapshot()).rooms[1].suggestions.length, 0);
+        await checkpoint("Deleting a suggestion removes it from the room");
 
         const harnessToggle = page.getByRole("button", {
             name: /^Harnesses/,

@@ -257,6 +257,7 @@ export class DesktopCoordinator {
                     [
                         "message.send",
                         "suggestion.edit",
+                        "suggestion.delete",
                         "invite.create",
                     ].includes(command.type)
                 ) {

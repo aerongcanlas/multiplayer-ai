@@ -181,6 +181,12 @@ export class SupervisorService {
         void registry.refresh(command.harness);
       } else if (command.type === "harness.acknowledgeNotice")
         registry.acknowledgeNotice(command.harness);
+      else if (command.type === "harness.update")
+        await registry.updateProgram(command.harness);
+      else if (command.type === "harness.revertUpdate")
+        registry.revertUpdate(command.harness);
+      else if (command.type === "harness.setDefault")
+        registry.setDefault(command.harness, command.model, command.effort);
       else
         throw new Error(
           "Choosing an executable requires the desktop file dialog.",
@@ -248,6 +254,15 @@ export class SupervisorService {
           suggestion.prompt = command.prompt;
           suggestion.revision += 1;
           suggestion.updatedAt = now();
+          break;
+        }
+        // A turn that used the suggestion keeps its own copy, so nothing else refers to it.
+        case "suggestion.delete": {
+          const index = room.suggestions.findIndex(
+            (suggestion) => suggestion.id === command.suggestionId,
+          );
+          if (index < 0) throw new Error("Suggestion not found in this room.");
+          room.suggestions.splice(index, 1);
           break;
         }
       }

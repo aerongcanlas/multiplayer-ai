@@ -24,6 +24,7 @@ import type {
   ProgramAsset,
   ProgramManifest,
 } from "./types";
+import type { ProgramRelease } from "./release";
 
 type ProgramErrorCode =
   | "checksum_mismatch"
@@ -123,6 +124,7 @@ const classify = (error: unknown, fallback: string): ProgramError => {
  */
 export class ProgramManager extends EventEmitter {
   private jobs = new Map<HarnessId, Promise<ResolvedProgram>>();
+  private releases = new Map<HarnessId, ProgramRelease>();
   private readonly fetch: typeof fetch;
   private readonly writer: (path: string) => Writable;
 
@@ -143,20 +145,41 @@ export class ProgramManager extends EventEmitter {
       options.createWriteStream ?? ((path) => createWriteStream(path));
   }
 
+  /** The managed version in use: an applied update, or the one this app ships with. */
   pinned(harness: HarnessId) {
+    return this.releases.get(harness)?.version ?? this.bundled(harness);
+  }
+
+  /** The version this app ships with and was tested against. */
+  bundled(harness: HarnessId) {
     return this.options.manifest[harness].version;
+  }
+
+  /** Switches the managed program to a published release, or back to the bundled one. */
+  use(harness: HarnessId, release: ProgramRelease | null) {
+    if (release) this.releases.set(harness, release);
+    else this.releases.delete(harness);
+  }
+
+  /** The applied update, including the executable digest learned when it was unpacked. */
+  release(harness: HarnessId) {
+    return this.releases.get(harness);
+  }
+
+  platform() {
+    return this.options.platform === undefined
+      ? detectPlatform()
+      : this.options.platform;
   }
 
   private asset(harness: HarnessId): {
     platform: PlatformKey;
     asset: ProgramAsset;
   } {
-    const platform =
-      this.options.platform === undefined
-        ? detectPlatform()
-        : this.options.platform;
+    const platform = this.platform();
     const asset =
-      platform && this.options.manifest[harness].platforms[platform];
+      this.releases.get(harness)?.asset ??
+      (platform && this.options.manifest[harness].platforms[platform]);
     if (!platform || !asset)
       throw new ProgramError(
         "unsupported_platform",
@@ -321,10 +344,13 @@ export class ProgramManager extends EventEmitter {
           `The downloaded harness package could not be unpacked. ${error instanceof Error ? error.message : ""}`.trim(),
         );
       }
-      const binary = asset.binary ?? asset.download;
       const actual = await fileDigest(
         join(staging, ...asset.file.split("/")),
       ).catch(() => ({ sha256: "", size: -1 }));
+      // An update lists only its package's digest, which was just checked; the executable's
+      // digest is recorded from this unpack so later launches can verify it.
+      if (!asset.binary && actual.size > 0) asset.binary = actual;
+      const binary = asset.binary ?? asset.download;
       if (actual.sha256 !== binary.sha256 || actual.size !== binary.size)
         throw new ProgramError(
           "checksum_mismatch",

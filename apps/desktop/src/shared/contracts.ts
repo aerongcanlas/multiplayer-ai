@@ -82,6 +82,13 @@ export const commandSchema = z.discriminatedUnion("type", [
       expectedRevision: z.number().int().positive(),
     })
     .strict(),
+  z
+    .object({
+      type: z.literal("suggestion.delete"),
+      roomId: id,
+      suggestionId: id,
+    })
+    .strict(),
   // Viewing another host's read-along tab; handled by main, never the supervisor.
   z
     .object({ type: z.literal("sharedTab.watch"), roomId: id, tabId: id })
@@ -192,6 +199,7 @@ export interface DesktopBridge {
     prompt: string,
     expectedRevision: number,
   ): Promise<Result>;
+  deleteSuggestion(roomId: string, suggestionId: string): Promise<Result>;
   onSnapshot(listener: (snapshot: Snapshot) => void): () => void;
   onHealth(listener: (health: Health) => void): () => void;
   openTab(roomId: string, harness: HarnessId): Promise<Result>;
@@ -232,6 +240,13 @@ export interface DesktopBridge {
   chooseHarnessExecutable(harness: HarnessId): Promise<Result>;
   useManagedHarness(harness: HarnessId): Promise<Result>;
   acknowledgeHarnessNotice(harness: HarnessId): Promise<Result>;
+  updateHarness(harness: HarnessId): Promise<Result>;
+  revertHarnessUpdate(harness: HarnessId): Promise<Result>;
+  setHarnessDefault(
+    harness: HarnessId,
+    model: string,
+    effort?: string,
+  ): Promise<Result>;
   onTranscript(listener: (batches: TranscriptBatch[]) => void): () => void;
   // Read-along: one watched shared tab at a time; entries arrive on onSharedTranscript.
   watchSharedTab(roomId: string, tabId: string): Promise<Result>;

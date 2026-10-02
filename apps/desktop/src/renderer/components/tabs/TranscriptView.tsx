@@ -445,12 +445,7 @@ export function TranscriptView({
         <ThreadWelcome
           className="h-full py-6"
           description={`Send a message to start a ${HARNESS_LABELS[tab.loadout.harness]} session in this room's repository.`}
-        >
-          <span className="subtle">
-            Your {HARNESS_LABELS[tab.loadout.harness]} skills, plugins, and
-            instructions load as they do in its own terminal.
-          </span>
-        </ThreadWelcome>
+        />
       ) : (
         entries.map((entry) => (
           <Entry

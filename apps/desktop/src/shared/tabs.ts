@@ -289,6 +289,10 @@ export interface HarnessState {
     message?: string;
   };
   signIn: "in_app" | "guidance";
+  // The newest published version of the program, when the check has answered.
+  latestVersion?: string;
+  // The version this app ships with, when the managed program was updated past it.
+  bundledVersion?: string;
   models: HarnessModel[];
   modelsRefreshedAt: string | null;
   limits: { name: string; usedPercent: number; resetsAt: number | null }[];
@@ -401,6 +405,25 @@ export const tabCommandSchemas = [
       harness: harnessIdSchema,
     })
     .strict(),
+  // Moves the managed program to the newest published version, or back to the bundled one.
+  z
+    .object({ type: z.literal("harness.update"), harness: harnessIdSchema })
+    .strict(),
+  z
+    .object({
+      type: z.literal("harness.revertUpdate"),
+      harness: harnessIdSchema,
+    })
+    .strict(),
+  // The model new tabs start on, and the effort that model starts at.
+  z
+    .object({
+      type: z.literal("harness.setDefault"),
+      harness: harnessIdSchema,
+      model: z.string().min(1).max(120),
+      effort,
+    })
+    .strict(),
 ] as const;
 
 export const DEFAULT_LOADOUT = (harness: HarnessId): Loadout => ({
@@ -424,3 +447,14 @@ export type ApprovalDecision = "accept" | "decline";
 export type QuestionAnswers = Record<string, z.infer<typeof answerValues>>;
 // A sub-agent card entry, with its card present.
 export type AgentEntry = TranscriptEntry & { agent: AgentCard };
+
+/** Whether a dotted version is newer than another, comparing number by number. */
+export function newerVersion(candidate: string, current: string) {
+  const parts = (version: string) => version.split(".").map(Number);
+  const [a, b] = [parts(candidate), parts(current)];
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const difference = (a[i] ?? 0) - (b[i] ?? 0);
+    if (difference) return difference > 0;
+  }
+  return false;
+}

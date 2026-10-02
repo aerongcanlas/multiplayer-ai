@@ -429,6 +429,10 @@ export class CollaborationClient {
           };
           method = "PATCH";
           break;
+        case "suggestion.delete":
+          path = `/v1/rooms/${command.roomId}/suggestions/${command.suggestionId}`;
+          method = "DELETE";
+          break;
         default:
           throw new Error("Unsupported shared-room operation.");
       }

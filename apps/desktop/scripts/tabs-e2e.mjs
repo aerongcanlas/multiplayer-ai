@@ -106,13 +106,20 @@ await run.execute(
     assert.equal((await harness("codex")).program.state, "ready");
     assert.equal((await tabNamed("Codex 1")).loadout.model, "fixture-codex");
     // Only the efforts the model reports are offered.
+    await tabsPanel()
+      .getByRole("button", { name: "Model", exact: true })
+      .click();
+    await tabsPanel()
+      .getByRole("menuitem", { name: "Effort", exact: true })
+      .click();
     assert.deepEqual(
       await tabsPanel()
-        .getByRole("combobox", { name: "Effort", exact: true })
-        .locator("option")
+        .getByRole("group", { name: "Effort levels" })
+        .getByRole("menuitemradio")
         .allTextContents(),
       ["medium", "low"],
     );
+    await run.page.keyboard.press("Escape");
     await checkpoint(
       "A first Codex tab downloads, verifies, and becomes ready",
     );
@@ -163,7 +170,10 @@ await run.execute(
     await checkpoint("Stop while an approval is pending ends the turn stopped");
 
     // Plan mode uses Codex's native plan mode, then continues into execution.
-    await tabsPanel().getByRole("checkbox", { name: "Plan mode" }).click();
+    await tabsPanel().getByRole("button", { name: "Add", exact: true }).click();
+    await tabsPanel()
+      .getByRole("menuitemcheckbox", { name: "Plan mode" })
+      .click();
     await until(
       async () => (await tabNamed("Codex 1")).loadout.planMode,
       "plan mode",
@@ -307,7 +317,10 @@ await run.execute(
     await checkpoint("A Claude Code skill question card sends its answer back");
 
     // Claude Code's native plan mode asks before leaving plan mode.
-    await tabsPanel().getByRole("checkbox", { name: "Plan mode" }).click();
+    await tabsPanel().getByRole("button", { name: "Add", exact: true }).click();
+    await tabsPanel()
+      .getByRole("menuitemcheckbox", { name: "Plan mode" })
+      .click();
     await until(
       async () => (await tabNamed("Claude Code 1")).loadout.planMode,
       "plan mode",

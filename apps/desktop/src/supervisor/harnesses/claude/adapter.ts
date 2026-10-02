@@ -11,7 +11,12 @@ import type {
   SDKMessage,
   SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
-import type { HarnessQuestion, Loadout, PlanStep } from "../../../shared/tabs";
+import type {
+  HarnessModel,
+  HarnessQuestion,
+  Loadout,
+  PlanStep,
+} from "../../../shared/tabs";
 import {
   HarnessError,
   type HarnessAdapter,
@@ -827,6 +832,66 @@ class ClaudeSession implements HarnessSession {
 }
 
 /** Claude Code through the Claude Agent SDK, one streaming-input query per open tab. */
+/**
+ * Claude Code's own default effort for a model. The SDK lists the levels a model supports but
+ * not which one it starts at, so this follows Claude Code's documented defaults.
+ */
+export function defaultEffort(
+  model: Pick<ModelInfo, "value" | "resolvedModel" | "supportedEffortLevels">,
+): string | null {
+  const levels: string[] = model.supportedEffortLevels ?? [];
+  const id = model.resolvedModel ?? model.value;
+  const level = /(opus|sonnet)-5-5/.test(id)
+    ? "medium"
+    : /opus-4-7/.test(id)
+      ? "xhigh"
+      : "high";
+  if (levels.includes(level)) return level;
+  return levels.includes("high") ? "high" : null;
+}
+
+const family = (model: ModelInfo) =>
+  (model.resolvedModel ?? model.value).replace(/\[.*\]$/, "");
+
+/** A model's name with its version number, as in "Opus 5.5". */
+function displayName(model: ModelInfo) {
+  const name =
+    model.displayName.replace(/\s*\((recommended|1M context)\)/gi, "").trim() ||
+    model.value;
+  if (/\d/.test(name)) return name;
+  // "claude-opus-5-5[1m]" and "claude-haiku-4-5-20251001" both carry the version after the family.
+  const id = /^claude-[a-z]+-(\d+)(?:-(\d{1,2}))?(?!\d)/.exec(
+    model.resolvedModel ?? model.value,
+  );
+  const version = id
+    ? [id[1], id[2]].filter(Boolean).join(".")
+    : new RegExp(`${name} (\\d+(?:\\.\\d+)?)`, "i").exec(
+        model.description,
+      )?.[1];
+  return version ? `${name} ${version}` : name;
+}
+
+/**
+ * Claude Code's models without its "default" alias: the named model the alias resolves to is
+ * marked as the default instead, or the first one when Claude Code does not say.
+ */
+export function listModels(models: ModelInfo[]): HarnessModel[] {
+  const alias = models.find((model) => model.value === "default");
+  const named = models.filter((model) => model !== alias);
+  const listed = named.length ? named : models;
+  const chosen =
+    (alias?.resolvedModel &&
+      listed.find((model) => family(model) === family(alias))) ||
+    listed[0];
+  return listed.map((model) => ({
+    id: model.value,
+    name: displayName(model),
+    efforts: model.supportedEffortLevels ?? [],
+    defaultEffort: defaultEffort(model),
+    isDefault: model === chosen,
+  }));
+}
+
 export class ClaudeAdapter implements HarnessAdapter {
   readonly id = "claude" as const;
   // Anthropic's terms do not allow third-party products to offer claude.ai sign-in.
@@ -896,13 +961,7 @@ export class ClaudeAdapter implements HarnessAdapter {
             ? { plan: account.subscriptionType ?? status.subscription }
             : {}),
         },
-        models: models.map((model, index) => ({
-          id: model.value,
-          name: model.displayName || model.value,
-          efforts: model.supportedEffortLevels ?? [],
-          defaultEffort: null,
-          isDefault: model.value === "default" || index === 0,
-        })),
+        models: listModels(models),
         limits: [],
       };
     } finally {

@@ -58,6 +58,22 @@ export const steps: readonly Step[] = [
       CREATE INDEX transcript_entries_agent ON transcript_entries (tab_id, agent_key, seq);
       CREATE INDEX transcript_entries_kind ON transcript_entries (tab_id, kind);
     `),
+  // 6: Claude Code tabs were opened at the lowest effort because no default was known. Their
+  // effort is cleared so each one takes its model's default.
+  (db) =>
+    db.exec(`
+      UPDATE tabs SET body = json_remove(body, '$.loadout.effort')
+      WHERE json_extract(body, '$.loadout.harness') = 'claude'
+        AND json_extract(body, '$.loadout.effort') = 'low';
+    `),
+  // 7: Claude Code's "default" alias is no longer listed as a model. Tabs on it take the
+  // default model and its effort.
+  (db) =>
+    db.exec(`
+      UPDATE tabs SET body = json_remove(json_set(body, '$.loadout.model', ''), '$.loadout.effort')
+      WHERE json_extract(body, '$.loadout.harness') = 'claude'
+        AND json_extract(body, '$.loadout.model') = 'default';
+    `),
 ];
 
 export const JOURNAL_SCHEMA_VERSION = steps.length;
