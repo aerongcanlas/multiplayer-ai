@@ -587,12 +587,27 @@ await run.execute(
 
     // A room suggestion fills the active tab, and the sent turn shows its source.
     await selectTab("Codex 1");
-    await run.page
-      .getByRole("textbox", { name: "Group chat message", exact: true })
-      .fill("Keep the README short.");
+    const chatDraft = run.page.getByRole("textbox", {
+      name: "Group chat message",
+      exact: true,
+    });
+    await chatDraft.fill("Keep the README short.");
     await run.page
       .getByRole("button", { name: "Send message", exact: true })
       .click();
+    await until(
+      async () => (await chatDraft.inputValue()) === "",
+      "the local chat message to be accepted",
+    );
+    assert.equal(
+      await chatDraft.evaluate((input) => input === document.activeElement),
+      true,
+    );
+    await run.page.keyboard.type("Keep typing in local group chat");
+    assert.equal(
+      await chatDraft.inputValue(),
+      "Keep typing in local group chat",
+    );
     await run.page
       .getByRole("checkbox", { name: /Select message: Keep the README/ })
       .click();

@@ -1,4 +1,5 @@
 import { MessageList } from "@multiplayer-ai/ui/chat/message-list";
+import type { ChatMessage } from "@multiplayer-ai/ui/chat/types";
 import { useChatScroll } from "@multiplayer-ai/ui/hooks/use-chat-scroll";
 import { MessageSquare, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -11,15 +12,49 @@ import { timeLabel } from "../lib/time";
 export function GroupChatPanel({
   room,
   disabled,
+  unavailable,
 }: {
   room: Room;
   disabled: boolean;
+  unavailable: boolean;
 }) {
   const [draft, setDraft] = useState("");
+  const [outgoing, setOutgoing] = useState<ChatMessage[]>([]);
   const [generating, setGenerating] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const { containerRef: scroll, scrollToBottom } = useChatScroll();
-  useEffect(scrollToBottom, [room.messages.length, scrollToBottom]);
+  useEffect(scrollToBottom, [
+    room.messages.length,
+    outgoing.length,
+    scrollToBottom,
+  ]);
+  async function send(text: string) {
+    const id = crypto.randomUUID();
+    setOutgoing((current) => [
+      ...current,
+      {
+        id,
+        text,
+        author: { name: "You" },
+        isOwn: true,
+        deliveryStatus: "sending",
+      },
+    ]);
+    setDraft("");
+    const sent = Boolean(
+      await perform(() => window.desktop.sendMessage(room.id, text)),
+    );
+    setOutgoing((current) =>
+      sent
+        ? current.filter((message) => message.id !== id)
+        : current.map((message) =>
+            message.id === id
+              ? { ...message, deliveryStatus: "failed" }
+              : message,
+          ),
+    );
+    return sent;
+  }
   async function suggest() {
     setGenerating(true);
     try {
@@ -43,7 +78,7 @@ export function GroupChatPanel({
         </span>
       </header>
       <div className="panel-scroll chat-messages" ref={scroll}>
-        {room.messages.length === 0 ? (
+        {room.messages.length === 0 && outgoing.length === 0 ? (
           <div className="empty-state">
             <MessageSquare size={25} />
             <h3>Keep the conversation human</h3>
@@ -62,18 +97,45 @@ export function GroupChatPanel({
             appearance="compact"
             showAvatars={false}
             disabled={disabled}
-            messages={room.messages.map((message) => ({
-              id: message.id,
-              text: message.text,
-              author: { name: message.authorName },
-              isOwn: !room.shared || message.authorId === room.shared.userId,
-              selectionLabel: `Select message: ${message.text.slice(0, 60)}`,
-              footer: (
-                <>
-                  {message.authorName} · {timeLabel(message.createdAt)}
-                </>
-              ),
-            }))}
+            messages={[
+              ...room.messages.map((message) => ({
+                id: message.id,
+                text: message.text,
+                author: { name: message.authorName },
+                isOwn: !room.shared || message.authorId === room.shared.userId,
+                selectionLabel: `Select message: ${message.text.slice(0, 60)}`,
+                footer: (
+                  <>
+                    {message.authorName} · {timeLabel(message.createdAt)}
+                  </>
+                ),
+              })),
+              ...outgoing.map((message) => ({
+                ...message,
+                footer:
+                  message.deliveryStatus === "failed" ? (
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="ghost"
+                      disabled={Boolean(draft)}
+                      title={
+                        draft
+                          ? "Clear the current draft to restore this message"
+                          : undefined
+                      }
+                      onClick={() => {
+                        setDraft(message.text);
+                        setOutgoing((current) =>
+                          current.filter((item) => item.id !== message.id),
+                        );
+                      }}
+                    >
+                      Use as draft
+                    </Button>
+                  ) : undefined,
+              })),
+            ]}
             selectedMessageIds={selectedIds}
             onMessageSelect={(id, checked) =>
               setSelectedIds((current) => {
@@ -119,12 +181,9 @@ export function GroupChatPanel({
           submitLabel="Send message"
           value={draft}
           onChange={setDraft}
-          disabled={disabled}
-          onSubmit={async (text) =>
-            Boolean(
-              await perform(() => window.desktop.sendMessage(room.id, text)),
-            )
-          }
+          disabled={unavailable}
+          busy={disabled}
+          onSubmit={send}
         />
       </div>
     </section>
