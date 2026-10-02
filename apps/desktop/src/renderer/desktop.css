@@ -1457,21 +1457,32 @@ summary:focus-visible {
   overflow-wrap: anywhere;
 }
 .turn-reasoning,
-.turn-tool {
+.turn-tool,
+.turn-tools {
   color: #9d9da8;
   font-size: 11px;
+}
+.turn-tools-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 6px 0 0 5px;
+  padding-left: 11px;
+  border-left: 1px solid #2d2d35;
 }
 .turn-reasoning p {
   white-space: pre-wrap;
   margin-top: 4px;
 }
-.turn-tool summary {
+.turn-tool summary,
+.turn-tools > summary {
   display: flex;
   align-items: center;
   gap: 6px;
   font-family: var(--font-geist-mono);
 }
-.turn-tool summary span {
+.turn-tool summary span,
+.turn-tools > summary span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
