@@ -354,6 +354,58 @@ summary:focus-visible {
   color: #93939d;
   font-size: 11px;
 }
+.room-members-trigger {
+  padding: 6px 8px;
+  margin-left: -8px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+.room-members-trigger:hover,
+.room-members:has(:popover-open) .room-members-trigger {
+  color: #dedee2;
+  background: #303036;
+}
+.room-members:has(:popover-open) .room-members-trigger > svg:last-child {
+  transform: rotate(180deg);
+}
+.room-members-popover {
+  position-anchor: auto;
+  inset: auto;
+  top: calc(anchor(bottom) + 6px);
+  left: anchor(left);
+  width: 260px;
+  max-width: calc(100vw - 32px);
+  max-height: min(360px, calc(100dvh - 140px));
+  overflow-y: auto;
+  margin: 0;
+  padding: 8px;
+  color: #dedee2;
+  background: #2c2c32;
+  border: 1px solid #45454d;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.4);
+}
+.room-members-popover h2 {
+  padding: 4px 8px 8px;
+  color: #b3b3bb;
+  font-size: 11px;
+  font-weight: 600;
+}
+.room-members-popover li {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 7px 8px;
+}
+.room-members-popover li > span {
+  min-width: 0;
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+.room-members-popover small {
+  color: #93939d;
+  font-size: 11px;
+}
 .room-panels {
   min-height: 0;
   flex: 1;
@@ -732,7 +784,7 @@ summary:focus-visible {
   .empty-state {
     padding: 14px 20px;
   }
-  .room-scope {
+  .room-scope:not(.room-members-trigger) {
     display: none;
   }
   .room-header h1 {

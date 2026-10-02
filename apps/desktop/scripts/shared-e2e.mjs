@@ -239,6 +239,51 @@ try {
   await first.page
     .getByRole("heading", { name: "Shared design", exact: true })
     .waitFor();
+  const membersButton = first.page.getByRole("button", {
+    name: /^Room members, /,
+  });
+  const members = first.page.getByRole("region", { name: "Room members" });
+  await membersButton.click();
+  await members.getByText("Alice", { exact: true }).waitFor();
+  for (const width of [1100, 1440]) {
+    await first.app.evaluate(({ BrowserWindow }, width) => {
+      BrowserWindow.getAllWindows()[0].setContentSize(width, 900);
+    }, width);
+    await first.page.waitForFunction((width) => innerWidth === width, width);
+    const anchor = await membersButton.boundingBox();
+    const popover = await members.boundingBox();
+    assert.ok(
+      Math.abs(popover.x - anchor.x) < 1 &&
+        Math.abs(popover.y - anchor.y - anchor.height - 6) < 1,
+      `Members must open below their button at width ${width}`,
+    );
+    assert.ok(popover.x + popover.width <= width);
+    await first.page.screenshot({
+      path: join(output, `room-members-${width}.png`),
+    });
+  }
+  assert.equal(await members.getByRole("listitem").count(), 1);
+  assert.equal(await membersButton.innerText(), "1 member");
+  assert.equal(await members.getByText("You", { exact: true }).count(), 1);
+  await membersButton.click();
+  await members.waitFor({ state: "hidden" });
+  await membersButton.focus();
+  await first.page.keyboard.press("Enter");
+  await members.waitFor();
+  await first.page.keyboard.press("Escape");
+  await members.waitFor({ state: "hidden" });
+  assert.equal(
+    await membersButton.evaluate((el) => el === document.activeElement),
+    true,
+  );
+  await membersButton.click();
+  await first.page
+    .getByRole("heading", { name: "Shared design", exact: true })
+    .click();
+  await members.waitFor({ state: "hidden" });
+  checkpoint(
+    "Member popover stays anchored at wide and narrow widths, lists the creator, and supports toggle, keyboard, Escape, and outside dismissal",
+  );
   await first.page.getByRole("button", { name: "Invite", exact: true }).click();
   const token = await first.page
     .getByRole("textbox", { name: "Share invitation code" })
@@ -354,6 +399,8 @@ try {
   const joinsBefore = apiCalls.filter(
     (route) => route === "POST /v1/invites/accept",
   ).length;
+  await membersButton.click();
+  await members.getByText("Alice", { exact: true }).waitFor();
   await second.page
     .getByRole("button", { name: "Join room", exact: true })
     .click();
@@ -394,6 +441,15 @@ try {
   checkpoint(
     "Admin creates shared room and single-use invite; second member joins without admin rights",
   );
+  await members.getByText("Bob", { exact: true }).waitFor();
+  assert.equal(await members.getByRole("listitem").count(), 2);
+  assert.equal(await membersButton.innerText(), "2 members");
+  await first.page.screenshot({ path: join(output, "room-members.png") });
+  await writeFile(
+    join(output, "room-members.yml"),
+    await first.page.locator("body").ariaSnapshot(),
+  );
+  checkpoint("Open member list and count update automatically when Bob joins");
   await first.page.getByRole("button", { name: "Close invitation" }).click();
   await second.page
     .getByRole("textbox", { name: "Group chat message" })
@@ -490,10 +546,16 @@ try {
     .getByRole("heading", { name: "Shared design", exact: true })
     .waitFor();
   checkpoint("Encrypted session restores shared rooms after desktop restart");
+  await membersButton.click();
+  await members.getByText("Bob", { exact: true }).waitFor();
   await pool.query(
     "delete from public.room_member where room_id=$1 and member_id=$2",
     [roomId, bob],
   );
+  await members.getByText("Bob", { exact: true }).waitFor({ state: "hidden" });
+  assert.equal(await members.getByRole("listitem").count(), 1);
+  assert.equal(await membersButton.innerText(), "1 member");
+  checkpoint("Open member list and count remove departed members automatically");
   await restored.page
     .getByRole("button", { name: "Refresh shared rooms" })
     .click();

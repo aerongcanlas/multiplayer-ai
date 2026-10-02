@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertCircle,
+  ChevronDown,
   ChevronRight,
   FolderGit2,
   Hash,
@@ -108,10 +109,43 @@ function RoomView({
   return (
     <main className="room-view">
       <header className="room-header">
-        <span className="room-scope">
-          <Hash size={13} />
-          {room.shared ? `${room.shared.members.length} members` : "Local room"}
-        </span>
+        {room.shared ? (
+          <div className="room-members">
+            <button
+              type="button"
+              className="room-scope room-members-trigger"
+              popoverTarget={`room-members-${room.id}`}
+              aria-label={`Room members, ${room.shared.members.length}`}
+            >
+              <Users size={13} aria-hidden="true" />
+              {room.shared.members.length}{" "}
+              {room.shared.members.length === 1 ? "member" : "members"}
+              <ChevronDown size={12} aria-hidden="true" />
+            </button>
+            <div
+              id={`room-members-${room.id}`}
+              className="room-members-popover"
+              popover="auto"
+              role="region"
+              aria-label="Room members"
+            >
+              <h2>Room members</h2>
+              <ul>
+                {room.shared.members.map((member) => (
+                  <li key={member.id}>
+                    <span>{member.name}</span>
+                    {member.id === room.shared?.userId && <small>You</small>}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        ) : (
+          <span className="room-scope">
+            <Hash size={13} />
+            Local room
+          </span>
+        )}
         <h1>{room.name}</h1>
         <div className="room-header-actions">
           {room.shared?.isAdmin && (
