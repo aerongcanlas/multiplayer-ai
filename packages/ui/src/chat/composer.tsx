@@ -265,7 +265,8 @@ export function Composer({
             ) : null)}
         </div>
         <Button
-          aria-label={busy ? "Agent is busy" : submitLabel}
+          aria-label={submitLabel}
+          aria-busy={busy || pendingTargets.has(targetKey)}
           title={submitLabel}
           disabled={sendDisabled}
           size={compact ? "icon-sm" : "icon"}

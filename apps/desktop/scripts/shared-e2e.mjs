@@ -132,10 +132,20 @@ api.log.level = "silent";
 const apiCalls = [];
 let joinGate;
 let releaseJoin;
-api.addHook("onRequest", async (request) => {
+let messageGate;
+let messageReceived = Promise.withResolvers();
+api.addHook("onRequest", async (request, reply) => {
   apiCalls.push(`${request.method} ${request.url}`);
   if (request.method === "POST" && request.url === "/v1/invites/accept")
     await joinGate;
+  if (request.method === "POST" && request.url.endsWith("/messages")) {
+    messageReceived.resolve();
+    if (await messageGate?.promise)
+      return reply.code(400).send({
+        code: "test_rejection",
+        message: "Simulated message rejection",
+      });
+  }
 });
 const apiUrl = await api.listen({ host: "127.0.0.1", port: 0 });
 const apps = [];
@@ -451,12 +461,135 @@ try {
   );
   checkpoint("Open member list and count update automatically when Bob joins");
   await first.page.getByRole("button", { name: "Close invitation" }).click();
+  const chatDraft = second.page.getByRole("textbox", {
+    name: "Group chat message",
+  });
+  const chatSend = second.page.getByRole("button", {
+    name: "Send message",
+    exact: true,
+  });
+  messageGate = Promise.withResolvers();
+  await chatDraft.fill("Keep selected feedback visible");
+  await chatSend.click();
+  await messageReceived.promise;
+  assert.equal(
+    await chatDraft.isEnabled(),
+    true,
+    "Drafting stays available while sending",
+  );
+  assert.equal(
+    await chatDraft.evaluate((input) => input === document.activeElement),
+    true,
+  );
+  assert.equal(
+    await chatDraft.inputValue(),
+    "",
+    "Sending starts a fresh draft immediately",
+  );
+  await second.page.getByText("Sending...", { exact: true }).waitFor();
+  await second.page.keyboard.type("A second message drafted while sending");
+  assert.equal(await chatSend.isDisabled(), true);
+  await second.page.keyboard.press("Enter");
+  assert.equal(
+    apiCalls.filter((route) => route.endsWith("/messages")).length,
+    1,
+  );
+  await second.page.screenshot({
+    path: join(output, "group-chat-sending.png"),
+  });
+  messageGate.resolve();
+  messageGate = undefined;
+  await chatSend.waitFor({ state: "visible" });
+  await second.page.waitForFunction(
+    () => !document.querySelector('[aria-label="Send message"]').disabled,
+  );
+  assert.equal(
+    await chatDraft.inputValue(),
+    "A second message drafted while sending",
+  );
+  assert.equal(
+    await chatDraft.evaluate((input) => input === document.activeElement),
+    true,
+  );
+  await second.page.keyboard.press("Enter");
+  await second.page.waitForFunction(
+    () =>
+      document.querySelector('[aria-label="Group chat message"]').value === "",
+  );
+  assert.equal(
+    await chatDraft.evaluate((input) => input === document.activeElement),
+    true,
+  );
+  await second.page.keyboard.type("Keep typing after sending");
+  assert.equal(await chatDraft.inputValue(), "Keep typing after sending");
+  await first.page
+    .getByRole("paragraph")
+    .filter({ hasText: /^A second message drafted while sending$/ })
+    .waitFor();
+  assert.equal(
+    apiCalls.filter((route) => route.endsWith("/messages")).length,
+    2,
+  );
+  checkpoint(
+    "Group chat keeps focus for click and Enter sends, preserves edits during delayed sends, and blocks duplicate sends",
+  );
+  messageGate = Promise.withResolvers();
+  messageReceived = Promise.withResolvers();
+  await chatDraft.fill("Retry this failed message");
+  await chatSend.click();
+  await messageReceived.promise;
+  assert.equal(await chatDraft.inputValue(), "");
+  await second.page.keyboard.type("Keep this newer draft");
+  messageGate.resolve(true);
+  messageGate = undefined;
+  await second.page.getByText("Failed to send", { exact: true }).waitFor();
+  assert.equal(await chatDraft.inputValue(), "Keep this newer draft");
+  const restoreDraft = second.page.getByRole("button", {
+    name: "Use as draft",
+    exact: true,
+  });
+  assert.equal(await restoreDraft.isDisabled(), true);
+  await second.page.screenshot({
+    path: join(output, "group-chat-failed-send.png"),
+  });
+  const chatPanel = second.page.getByRole("region", {
+    name: "Group Chat",
+    exact: true,
+  });
+  await chatPanel.screenshot({ path: join(output, "failed-message.png") });
   await second.page
-    .getByRole("textbox", { name: "Group chat message" })
-    .fill("Keep selected feedback visible");
-  await second.page
-    .getByRole("button", { name: "Send message", exact: true })
+    .getByRole("button", { name: "Refresh shared rooms" })
     .click();
+  await second.page
+    .getByRole("status")
+    .filter({ hasText: /^Synced$/ })
+    .waitFor();
+  assert.equal(await chatDraft.inputValue(), "Keep this newer draft");
+  await chatDraft.fill("");
+  assert.equal(await restoreDraft.isEnabled(), true);
+  await chatPanel.screenshot({ path: join(output, "recoverable-message.png") });
+  await restoreDraft.click();
+  assert.equal(await chatDraft.inputValue(), "Retry this failed message");
+  await chatPanel.screenshot({
+    path: join(output, "restored-message-draft.png"),
+  });
+  await chatSend.click();
+  await first.page
+    .getByRole("paragraph")
+    .filter({ hasText: /^Retry this failed message$/ })
+    .waitFor();
+  assert.equal(await chatDraft.inputValue(), "");
+  assert.equal(
+    await chatDraft.evaluate((input) => input === document.activeElement),
+    true,
+  );
+  assert.equal(
+    await second.page.getByText("Failed to send", { exact: true }).count(),
+    0,
+  );
+  checkpoint(
+    "Group chat clears on send and keeps failed text recoverable without overwriting the next draft",
+  );
   await first.page
     .getByRole("paragraph")
     .filter({ hasText: /^Keep selected feedback visible$/ })
@@ -555,7 +688,9 @@ try {
   await members.getByText("Bob", { exact: true }).waitFor({ state: "hidden" });
   assert.equal(await members.getByRole("listitem").count(), 1);
   assert.equal(await membersButton.innerText(), "1 member");
-  checkpoint("Open member list and count remove departed members automatically");
+  checkpoint(
+    "Open member list and count remove departed members automatically",
+  );
   await restored.page
     .getByRole("button", { name: "Refresh shared rooms" })
     .click();
@@ -631,6 +766,7 @@ try {
   throw error;
 } finally {
   releaseJoin?.();
+  messageGate?.resolve();
   await Promise.all(apps.map((app) => app.close().catch(() => {})));
   await api.close();
   server.closeAllConnections();

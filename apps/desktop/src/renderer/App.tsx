@@ -274,7 +274,16 @@ function RoomView({
               clockOffsetMs={collaboration?.clockOffsetMs}
             />
           }
-          memberChatPanel={<GroupChatPanel room={room} disabled={disabled} />}
+          memberChatPanel={
+            <GroupChatPanel
+              room={room}
+              disabled={disabled}
+              unavailable={
+                stale ||
+                Boolean(room.shared && collaboration?.status !== "connected")
+              }
+            />
+          }
           promptPanel={
             <MissionControlPanel
               room={room}
