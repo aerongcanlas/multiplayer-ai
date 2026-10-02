@@ -3,9 +3,15 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { signedOutState } from "../shared/collaboration";
 import type { Room, Snapshot, SupervisorRequest } from "../shared/contracts";
-import type { Tab, TranscriptEntry } from "../shared/tabs";
+import type {
+  AgentCard,
+  HarnessState,
+  Tab,
+  TranscriptEntry,
+} from "../shared/tabs";
 import {
   ReadAlongPublisher,
+  projectPlan,
   recordStatus,
   type PublishedEntry,
   type PublishedRecord,
@@ -54,6 +60,8 @@ function setup(
     tabs: [tab],
   };
   let revision = 0;
+  // Set by a test to report harness state in the next snapshots.
+  const extras: { harnesses?: HarnessState[] } = {};
   const journal = new Map<number, TranscriptEntry>();
   const calls: { name: string; args: Record<string, unknown> }[] = [];
   const replies: Record<string, ReadAlongOutcome<unknown>[]> = {};
@@ -92,13 +100,25 @@ function setup(
     hostId,
     sync: "local-only",
     rooms: [structuredClone(room)],
+    ...(extras.harnesses ? { harnesses: extras.harnesses } : {}),
   });
   const supervisor = {
     async request(command: SupervisorRequest["command"]) {
       requests.push(command);
       let transcript;
+      if (command.type === "tab.agents")
+        transcript = {
+          tabId: tab.id,
+          entries: [...journal.values()]
+            .filter((entry) => entry.kind === "agent")
+            .sort((a, b) => a.seq - b.seq),
+          nextSeq: null,
+        };
       if (command.type === "tab.transcript") {
-        const lead = [...journal.values()].sort((a, b) => a.seq - b.seq);
+        // Like the journal, transcript pages leave sub-agent cards out.
+        const lead = [...journal.values()]
+          .filter((entry) => entry.kind !== "agent")
+          .sort((a, b) => a.seq - b.seq);
         if (command.afterSeq !== undefined) {
           const rows = lead.filter((entry) => entry.seq > command.afterSeq!);
           const limit = command.limit ?? 200;
@@ -152,6 +172,26 @@ function setup(
     journal.set(seq, value);
     return value;
   };
+  // A sub-agent card entry: the summary is its task and the detail its final summary.
+  const card = (
+    seq: number,
+    agent: Partial<AgentCard> = {},
+    patch: Partial<TranscriptEntry> = {},
+  ) =>
+    entry(seq, {
+      kind: "agent",
+      summary: `Task ${seq}`,
+      ...patch,
+      agent: {
+        key: `agent-${seq}`,
+        status: "running",
+        background: false,
+        startedAt: "2026-09-26T00:00:00.000Z",
+        toolUses: 0,
+        ...journal.get(seq)?.agent,
+        ...agent,
+      },
+    });
   const emit = (...entries: TranscriptEntry[]) =>
     publisher.acceptBatches([{ roomId, tabId: tab.id, entries }]);
   const publishes = () =>
@@ -176,7 +216,9 @@ function setup(
     requests,
     collaboration,
     publisher,
+    extras,
     entry,
+    card,
     emit,
     publishes,
     flush,
@@ -695,5 +737,389 @@ test("text past the writer's clamp stops updating instead of shifting", async ()
   await s.flush();
   assert.equal(s.publishes().length, 1);
   assert.equal(published, head);
+  s.publisher.close();
+});
+
+const SECRET = "OPENAI_API_KEY=q8Zr2mVx4TnL7pWc";
+const published = (s: ReturnType<typeof setup>) =>
+  s.publishes().flatMap((publish) => publish.entries);
+const leaked = (s: ReturnType<typeof setup>) =>
+  JSON.stringify(s.calls).includes("q8Zr2mVx4TnL7pWc");
+
+test("a card inside a window publishes running, then completed with its masked summary", async () => {
+  const s = setup();
+  s.local();
+  await idle();
+  // Covers AE2, AE4: the card, and nothing a sub-agent itself produced.
+  s.emit(
+    s.card(
+      3,
+      { name: "explorer", type: "Explore", parentKey: "lead" },
+      { summary: `Find the key ${SECRET}` },
+    ),
+    s.entry(4, { kind: "reasoning", share: "none", agentKey: "agent-3" }),
+    s.entry(5, { kind: "tool", share: "summary", agentKey: "agent-3" }),
+    s.entry(6, { kind: "assistant", agentKey: "agent-3", summary: "Hi" }),
+    s.entry(7, { kind: "user", agentKey: "agent-3", summary: "Prompt" }),
+  );
+  await s.flush();
+  assert.deepEqual(published(s), [
+    {
+      seq: 3,
+      kind: "agent",
+      share: "full",
+      summary: "Find the key OPENAI_API_KEY=•••",
+      agent: {
+        key: "agent-3",
+        parentKey: "lead",
+        name: "explorer",
+        type: "Explore",
+        status: "running",
+        background: false,
+        startedAt: "2026-09-26T00:00:00.000Z",
+        toolUses: 0,
+        turnId,
+      },
+      version: 1,
+    },
+  ]);
+  // A tool use, then a summary still being written: only its safe prefix leaves the host.
+  s.emit(
+    s.card(
+      3,
+      { toolUses: 1, latestTool: `curl -H "x-api-key: q8Zr2mVx4TnL7pWc"` },
+      { detail: "Found it. OPENAI_API_KEY=q8Zr2m" },
+    ),
+  );
+  await s.flush();
+  const partial = published(s).at(-1)!;
+  assert.equal(partial.version, 2);
+  assert.equal(partial.text, "Found it. ");
+  assert.equal(partial.agent?.latestTool, 'curl -H "x-api-key: •••"');
+  s.emit(
+    s.card(
+      3,
+      { status: "completed", endedAt: "2026-09-26T00:01:00.000Z" },
+      { detail: `Found it. ${SECRET} in .env` },
+    ),
+  );
+  await s.flush();
+  const done = published(s).at(-1)!;
+  assert.equal(done.version, 3);
+  assert.equal(done.agent?.status, "completed");
+  assert.equal(done.agent?.endedAt, "2026-09-26T00:01:00.000Z");
+  assert.equal(done.text, "Found it. OPENAI_API_KEY=••• in .env");
+  assert.equal(published(s).length, 3);
+  assert.equal(leaked(s), false);
+  s.publisher.close();
+});
+
+test("a long task masks before it is cut and never fails the batch", async () => {
+  const s = setup();
+  s.local();
+  await idle();
+  // The credential straddles character 400 of a 2,000-character task.
+  const task = `${"a".repeat(388)} ${SECRET} ${"b".repeat(1_580)}`;
+  s.emit(
+    s.card(
+      3,
+      { name: `n ${SECRET}`, type: `t ${SECRET}`, latestTool: `l ${SECRET}` },
+      { summary: task },
+    ),
+  );
+  await s.flush();
+  const [entry] = published(s);
+  assert.equal(entry.summary.length, 400);
+  assert.ok(entry.summary.endsWith(" OPENAI_API…"));
+  assert.equal(entry.agent?.name, "n OPENAI_API_KEY=•••");
+  assert.equal(entry.agent?.type, "t OPENAI_API_KEY=•••");
+  assert.equal(entry.agent?.latestTool, "l OPENAI_API_KEY=•••");
+  assert.equal(leaked(s), false);
+  assert.ok(!/q8Z/.test(JSON.stringify(s.calls)));
+  s.publisher.close();
+});
+
+test("a sub-agent running when the window opens joins mid-run; a finished one stays private", async () => {
+  const s = setup({ windows: [] });
+  s.tab.readAlong = false;
+  s.local();
+  await idle();
+  s.card(1, { status: "completed" }, { detail: "Done before" });
+  s.card(2, { toolUses: 4, latestTool: "Read notes.txt" });
+  // Covers AE5: the switch goes on while agent-2 runs.
+  s.tab.readAlong = true;
+  s.tab.readAlongWindows = [{ onSeq: 5, offSeq: null }];
+  s.local();
+  await idle();
+  assert.equal(
+    s.requests.filter((command) => command.type === "tab.agents").length,
+    1,
+  );
+  await s.flush();
+  assert.deepEqual(
+    published(s).map((entry) => [entry.seq, entry.agent?.joinedMidRun]),
+    [[2, true]],
+  );
+  // Work from before the switch stays private.
+  assert.equal(published(s)[0].agent?.latestTool, undefined);
+  assert.equal(published(s)[0].agent?.status, "running");
+  // Later updates publish although the card sits before the window, and the fetch ran once.
+  s.emit(s.card(2, { toolUses: 5, latestTool: "Edit notes.txt" }));
+  s.emit(s.card(1, {}, { detail: "Changed" }));
+  await s.flush();
+  s.emit(s.card(2, { status: "completed" }, { detail: "All done" }));
+  await s.flush();
+  assert.deepEqual(
+    published(s).map((entry) => [
+      entry.seq,
+      entry.version,
+      entry.agent?.status,
+      entry.agent?.latestTool,
+      entry.text,
+    ]),
+    [
+      [2, 1, "running", undefined, undefined],
+      [2, 2, "running", "Edit notes.txt", undefined],
+      [2, 3, "completed", "Edit notes.txt", "All done"],
+    ],
+  );
+  assert.ok(published(s).every((entry) => entry.agent?.joinedMidRun));
+  assert.equal(
+    s.requests.filter((command) => command.type === "tab.agents").length,
+    1,
+  );
+  s.publisher.close();
+});
+
+test("after the switch goes off no card update publishes and the record reads ended", async () => {
+  const s = setup();
+  s.extras.harnesses = [{ id: "codex", reportsAgents: true } as HarnessState];
+  s.tab.runningAgents = 1;
+  s.local();
+  await idle();
+  s.emit(s.card(3));
+  await s.flush();
+  assert.equal(s.publishes().at(-1)!.record.runningAgents, 1);
+  // Covers AE6.
+  s.tab.readAlong = false;
+  s.tab.readAlongWindows = [{ onSeq: 3, offSeq: 4 }];
+  s.tab.runningAgents = 0;
+  s.local();
+  s.emit(s.card(3, { status: "completed" }, { detail: "Finished later" }));
+  await s.flush();
+  const ended = s.publishes().at(-1)!;
+  assert.equal(ended.record.status, "ended");
+  assert.deepEqual(ended.entries, []);
+  // The ended record leaves the plan fields out, so the server keeps what was last shared.
+  assert.equal("plan" in ended.record, false);
+  assert.equal("runningAgents" in ended.record, false);
+  assert.equal("reportsAgents" in ended.record, false);
+  assert.equal(published(s).length, 1);
+  // Switching back on refreshes the card the viewers still see as running.
+  s.tab.readAlong = true;
+  s.tab.readAlongWindows = [
+    { onSeq: 3, offSeq: 4 },
+    { onSeq: 9, offSeq: null },
+  ];
+  s.local();
+  await idle();
+  await s.flush();
+  const refreshed = published(s).at(-1)!;
+  assert.deepEqual(
+    [refreshed.seq, refreshed.version, refreshed.agent?.status],
+    [3, 2, "completed"],
+  );
+  assert.equal(refreshed.agent?.joinedMidRun, undefined);
+  s.publisher.close();
+});
+
+test("a waiting sub-agent publishes awaiting_host and its approval as a summary", async () => {
+  const s = setup();
+  s.local();
+  await idle();
+  // Covers AE7.
+  s.tab.agentRequests = 1;
+  s.local();
+  s.emit(
+    s.card(3),
+    s.entry(4, {
+      kind: "approval",
+      share: "summary",
+      state: "pending",
+      agentKey: "agent-3",
+      summary: `Run deploy --password hunter2hunter2`,
+      detail: "local only",
+    }),
+  );
+  await s.flush();
+  const publish = s.publishes().at(-1)!;
+  assert.equal(publish.record.status, "awaiting_host");
+  assert.deepEqual(publish.entries[1], {
+    seq: 4,
+    kind: "approval",
+    state: "pending",
+    share: "summary",
+    summary: "Run deploy --password •••",
+    version: 1,
+  });
+  s.publisher.close();
+});
+
+test("the record carries the masked plan, the running count, and whether agents are reported", async () => {
+  const s = setup();
+  s.local();
+  await idle();
+  await s.flush();
+  // No harness state in the snapshot: null, never a guess.
+  assert.deepEqual(
+    [
+      s.publishes().at(-1)!.record.plan,
+      s.publishes().at(-1)!.record.runningAgents,
+      s.publishes().at(-1)!.record.reportsAgents,
+    ],
+    [null, 0, null],
+  );
+  s.extras.harnesses = [{ id: "codex", reportsAgents: false } as HarnessState];
+  s.tab.runningAgents = 2;
+  s.tab.plan = {
+    turnId,
+    explanation: `Use ${SECRET}`,
+    steps: [
+      { text: `Export ${SECRET}\nthen go`, status: "done" },
+      { text: "x".repeat(400), status: "active" },
+      ...Array.from({ length: 60 }, () => ({
+        text: "More",
+        status: "pending" as const,
+      })),
+    ],
+    updatedAt: stamp(),
+  };
+  s.local();
+  await s.flush();
+  const { record } = s.publishes().at(-1)!;
+  assert.equal(record.runningAgents, 2);
+  assert.equal(record.reportsAgents, false);
+  assert.equal(record.plan?.explanation, "Use OPENAI_API_KEY=•••");
+  assert.equal(record.plan?.steps.length, 50);
+  assert.deepEqual(record.plan?.steps[0], {
+    text: "Export OPENAI_API_KEY=••• then go",
+    status: "done",
+  });
+  assert.equal(record.plan?.steps[1].text.length, 300);
+  assert.equal(leaked(s), false);
+  // A changed count or harness state republishes the record on the next tick.
+  const before = s.publishes().length;
+  s.tab.runningAgents = 1;
+  s.extras.harnesses = [{ id: "codex", reportsAgents: true } as HarnessState];
+  s.local();
+  await s.flush();
+  assert.equal(s.publishes().length, before + 1);
+  assert.equal(s.publishes().at(-1)!.record.runningAgents, 1);
+  assert.equal(s.publishes().at(-1)!.record.reportsAgents, true);
+  assert.equal(projectPlan(undefined), null);
+  assert.equal(
+    projectPlan({ turnId: null, steps: [], updatedAt: stamp() }),
+    null,
+  );
+  s.publisher.close();
+});
+
+test("a relaunch republishes cards that settled while away and leaves unchanged ones alone", async () => {
+  const s = setup({ windows: [{ onSeq: 3, offSeq: null }] });
+  // Before the window and running when it opened, published mid-run, settled while away.
+  s.card(
+    2,
+    { status: "interrupted" },
+    { detail: "Interrupted before finishing" },
+  );
+  s.card(3, { status: "completed" }, { detail: "Unchanged" });
+  // Published running, settled while the host app was down.
+  s.card(
+    4,
+    { status: "interrupted" },
+    { detail: "Interrupted before finishing" },
+  );
+  s.entry(5, { summary: "Head" });
+  // Filed after the head: the server has not seen it.
+  s.card(6, { status: "completed" }, { detail: "New" });
+  s.replies.desktop_tab_share_head = [
+    {
+      ok: true,
+      data: {
+        maxSeq: 5,
+        version: 1,
+        rev: 9,
+        pending: [
+          { seq: 2, version: 4 },
+          { seq: 4, version: 6 },
+        ],
+      },
+    },
+  ];
+  s.tab.status = "interrupted";
+  s.local();
+  await idle();
+  await s.flush();
+  assert.deepEqual(
+    published(s).map((entry) => [
+      entry.seq,
+      entry.version,
+      entry.agent?.status,
+      entry.agent?.joinedMidRun,
+    ]),
+    [
+      [2, 5, "interrupted", true],
+      [4, 7, "interrupted", undefined],
+      [5, 2, undefined, undefined],
+      [6, 1, "completed", undefined],
+    ],
+  );
+  s.publisher.close();
+});
+
+test("a mid-run card still completes after a relaunch rebuilds the key set", async () => {
+  const s = setup({ windows: [{ onSeq: 3, offSeq: null }] });
+  // Main restarted while the supervisor kept the sub-agent running.
+  s.card(2);
+  s.replies.desktop_tab_share_head = [
+    {
+      ok: true,
+      data: {
+        maxSeq: 2,
+        version: 3,
+        rev: 9,
+        pending: [{ seq: 2, version: 3 }],
+      },
+    },
+  ];
+  s.local();
+  await idle();
+  await s.flush();
+  s.emit(s.card(2, { status: "completed" }, { detail: "Done" }));
+  await s.flush();
+  const done = published(s).at(-1)!;
+  assert.deepEqual(
+    [done.seq, done.agent?.status, done.agent?.joinedMidRun, done.text],
+    [2, "completed", true, "Done"],
+  );
+  assert.ok(done.version > 3);
+  s.publisher.close();
+});
+
+test("a database that refuses cards keeps publishing the transcript without them", async () => {
+  const s = setup();
+  s.local();
+  await idle();
+  s.emit(s.entry(3, { kind: "user", summary: "Go" }), s.card(4));
+  s.replies.desktop_tab_share_publish = [{ ok: false, reason: "invalid" }];
+  await s.flush();
+  await s.flush();
+  s.emit(s.card(4, { toolUses: 1 }), s.card(5));
+  await s.flush();
+  assert.deepEqual(
+    s.publishes().map((publish) => publish.entries.map((entry) => entry.seq)),
+    [[3, 4], [3]],
+  );
+  assert.deepEqual(s.publisher.status()[s.tab.id], { state: "publishing" });
   s.publisher.close();
 });

@@ -73,7 +73,7 @@ declare
   next_rev bigint;
   head_seq integer;
   head_version integer;
-  -- A JSON null and an absent field both store NULL.
+  -- A JSON null stores NULL; an absent field keeps the stored value.
   tab_plan jsonb := nullif(p_tab->'plan', 'null'::jsonb);
   tab_running jsonb := nullif(p_tab->'runningAgents', 'null'::jsonb);
   tab_reports jsonb := nullif(p_tab->'reportsAgents', 'null'::jsonb);
@@ -149,8 +149,11 @@ begin
   -- The lock serializes publishes per tab, so rev is gap-free and monotonic.
   next_rev := shared.rev + 1;
   update public.desktop_tab_share set title = p_tab->>'title', harness = p_tab->>'harness', model = p_tab->>'model',
-    status = p_tab->>'status', switch_on = (p_tab->>'switchOn')::boolean, plan = tab_plan,
-    running_agents = (tab_running #>> '{}')::integer, reports_agents = (tab_reports #>> '{}')::boolean,
+    status = p_tab->>'status', switch_on = (p_tab->>'switchOn')::boolean,
+    -- A host omits these once read-along is off, so the record keeps what it last shared.
+    plan = case when p_tab ? 'plan' then tab_plan else plan end,
+    running_agents = case when p_tab ? 'runningAgents' then (tab_running #>> '{}')::integer else running_agents end,
+    reports_agents = case when p_tab ? 'reportsAgents' then (tab_reports #>> '{}')::boolean else reports_agents end,
     rev = next_rev, updated_at = now()
     where tab_id = tab;
   insert into public.desktop_tab_share_entry(tab_id, seq, kind, share, state, body, version, rev)
