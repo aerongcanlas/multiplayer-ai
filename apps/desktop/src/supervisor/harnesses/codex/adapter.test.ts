@@ -205,7 +205,7 @@ test("inspect lists fixture models with their efforts and the account", () =>
     ]);
     assert.equal(inspection.limits[0].usedPercent, 20);
     const { version } = await adapter.handshake(setup_.context);
-    assert.equal(version, "0.155.1");
+    assert.equal(version, "0.160.0");
   }));
 
 test("a send streams an assistant message on a thread in the tab's checkout with the loadout", () =>

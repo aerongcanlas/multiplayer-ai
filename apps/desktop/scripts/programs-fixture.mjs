@@ -75,7 +75,7 @@ export async function startProgramServer(manifestPath) {
     manifestPath,
     JSON.stringify({
       codex: {
-        version: "0.155.1",
+        version: "0.160.0",
         platforms: {
           [platform]: {
             url: `${url}/codex`,

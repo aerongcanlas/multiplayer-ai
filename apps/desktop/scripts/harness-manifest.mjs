@@ -11,7 +11,7 @@ import { writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { gunzipSync, zstdDecompressSync } from "node:zlib";
 
-const CODEX_VERSION = "0.155.1";
+const CODEX_VERSION = "0.160.0";
 const SDK_VERSION = "0.3.280";
 const CLAUDE_VERSION = "2.1.280";
 const print = process.argv.includes("--print");

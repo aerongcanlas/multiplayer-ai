@@ -3,134 +3,134 @@ import type { ProgramManifest } from "./types";
 
 export const HARNESS_MANIFEST: ProgramManifest = {
   codex: {
-    version: "0.155.1",
+    version: "0.160.0",
     platforms: {
       "darwin-arm64": {
-        url: "https://github.com/openai/codex/releases/download/rust-v0.155.1/codex-package-aarch64-apple-darwin.tar.zst",
+        url: "https://github.com/openai/codex/releases/download/rust-v0.160.0/codex-package-aarch64-apple-darwin.tar.zst",
         file: "bin/codex",
         download: {
           sha256:
-            "f31d84b9ad8dddd3763e441871008df82ecc803d1ec273d25fc5e26b0ce31673",
-          size: 89295596,
+            "d9206758c252f10a4cc51fcca45d3321f5e386b57c3657d11caaf61c5d3d5ce2",
+          size: 93874548,
         },
         compression: "zstd",
         archive: "tar",
         binary: {
           sha256:
-            "8eaf1ad12fe6bf89b1710330f58900014322c7c5af677e43be116d8ac5fc0a9e",
-          size: 228803200,
+            "112fae7a5a1223e673c8a1791d32338f37df8b527ff1159bb8adac6c4dbf1b4b",
+          size: 241555024,
         },
       },
       "darwin-x64": {
-        url: "https://github.com/openai/codex/releases/download/rust-v0.155.1/codex-package-x86_64-apple-darwin.tar.zst",
+        url: "https://github.com/openai/codex/releases/download/rust-v0.160.0/codex-package-x86_64-apple-darwin.tar.zst",
         file: "bin/codex",
         download: {
           sha256:
-            "637d3897fcc7b36e3562961a139b34313dff016aec9b9e8aed71a88382c50605",
-          size: 97886284,
+            "e37ae66eefbf7571eae40518676e4119ea92ed2136e66d8a0ca885e984bb0c5c",
+          size: 102998566,
         },
         compression: "zstd",
         archive: "tar",
         binary: {
           sha256:
-            "3e824474baa0667a19547f3b3633c091579163b5ffd03c976fb376d773479eac",
-          size: 245974512,
+            "5383ef71dd1bd8d2f3658c04a219e2cf165c7969aebd0cceced1bc9f0f68877f",
+          size: 260633072,
         },
       },
       "linux-arm64": {
-        url: "https://github.com/openai/codex/releases/download/rust-v0.155.1/codex-package-aarch64-unknown-linux-musl.tar.zst",
+        url: "https://github.com/openai/codex/releases/download/rust-v0.160.0/codex-package-aarch64-unknown-linux-musl.tar.zst",
         file: "bin/codex",
         download: {
           sha256:
-            "4238cb9be3eae4ab683c087907a881ec52b84a39c80fa4358803abb85e2c84db",
-          size: 95763508,
+            "83d68fdeb6022722b66f50459363aa43f55ce0fb70778aa1cfeaa70e46ce97fe",
+          size: 109633979,
         },
         compression: "zstd",
         archive: "tar",
         binary: {
           sha256:
-            "298d3d73d0bbc1367e58a370df5b6216fe30ce0a92e8b6b0afb0377a958dc335",
-          size: 232726912,
+            "50b06603bdcdac39b714f5c3e68583c002b8ad8779ebfdaaf4932ff016b379c0",
+          size: 248966648,
         },
       },
       "linux-x64": {
-        url: "https://github.com/openai/codex/releases/download/rust-v0.155.1/codex-package-x86_64-unknown-linux-musl.tar.zst",
+        url: "https://github.com/openai/codex/releases/download/rust-v0.160.0/codex-package-x86_64-unknown-linux-musl.tar.zst",
         file: "bin/codex",
         download: {
           sha256:
-            "8312d172da663e4eb4b809447dcf12e248d5174ae18d68e54bbd4c92d37bd8ae",
-          size: 101320931,
+            "c98a0003f1c858676c52f20c93f3832761c899e331c44ea15d8e20634626a4c2",
+          size: 115769608,
         },
         compression: "zstd",
         archive: "tar",
         binary: {
           sha256:
-            "0753dfe1d8b87a52436deb13eb1c549661ef4c84fee2c5aa688385eebeccb761",
-          size: 269273536,
+            "12eb3e81114588aca3b7998f4f19e8997b056aca08e57a7ca7c8a3ec8c652aad",
+          size: 289101384,
         },
       },
       "linux-arm64-musl": {
-        url: "https://github.com/openai/codex/releases/download/rust-v0.155.1/codex-package-aarch64-unknown-linux-musl.tar.zst",
+        url: "https://github.com/openai/codex/releases/download/rust-v0.160.0/codex-package-aarch64-unknown-linux-musl.tar.zst",
         file: "bin/codex",
         download: {
           sha256:
-            "4238cb9be3eae4ab683c087907a881ec52b84a39c80fa4358803abb85e2c84db",
-          size: 95763508,
+            "83d68fdeb6022722b66f50459363aa43f55ce0fb70778aa1cfeaa70e46ce97fe",
+          size: 109633979,
         },
         compression: "zstd",
         archive: "tar",
         binary: {
           sha256:
-            "298d3d73d0bbc1367e58a370df5b6216fe30ce0a92e8b6b0afb0377a958dc335",
-          size: 232726912,
+            "50b06603bdcdac39b714f5c3e68583c002b8ad8779ebfdaaf4932ff016b379c0",
+          size: 248966648,
         },
       },
       "linux-x64-musl": {
-        url: "https://github.com/openai/codex/releases/download/rust-v0.155.1/codex-package-x86_64-unknown-linux-musl.tar.zst",
+        url: "https://github.com/openai/codex/releases/download/rust-v0.160.0/codex-package-x86_64-unknown-linux-musl.tar.zst",
         file: "bin/codex",
         download: {
           sha256:
-            "8312d172da663e4eb4b809447dcf12e248d5174ae18d68e54bbd4c92d37bd8ae",
-          size: 101320931,
+            "c98a0003f1c858676c52f20c93f3832761c899e331c44ea15d8e20634626a4c2",
+          size: 115769608,
         },
         compression: "zstd",
         archive: "tar",
         binary: {
           sha256:
-            "0753dfe1d8b87a52436deb13eb1c549661ef4c84fee2c5aa688385eebeccb761",
-          size: 269273536,
+            "12eb3e81114588aca3b7998f4f19e8997b056aca08e57a7ca7c8a3ec8c652aad",
+          size: 289101384,
         },
       },
       "win32-arm64": {
-        url: "https://github.com/openai/codex/releases/download/rust-v0.155.1/codex-package-aarch64-pc-windows-msvc.tar.zst",
+        url: "https://github.com/openai/codex/releases/download/rust-v0.160.0/codex-package-aarch64-pc-windows-msvc.tar.zst",
         file: "bin/codex.exe",
         download: {
           sha256:
-            "f8ca4ee8ceced787e10b9c94c540a5993a69a60a8e21f6fade844e816fd8cef3",
-          size: 96952926,
+            "b73719b94d94ae6377fe10a596c20d9527f0cca3732048fb69ecff286b1a77ed",
+          size: 108775952,
         },
         compression: "zstd",
         archive: "tar",
         binary: {
           sha256:
-            "30bbe48875b79f8c4715d079812e9ca82176870e948992324abb941c15e4d5f6",
-          size: 258754352,
+            "1f090167e94ed25969c47381868c6ffb78be2a195e13891fcdc969531ca16eaf",
+          size: 274925872,
         },
       },
       "win32-x64": {
-        url: "https://github.com/openai/codex/releases/download/rust-v0.155.1/codex-package-x86_64-pc-windows-msvc.tar.zst",
+        url: "https://github.com/openai/codex/releases/download/rust-v0.160.0/codex-package-x86_64-pc-windows-msvc.tar.zst",
         file: "bin/codex.exe",
         download: {
           sha256:
-            "2b66a491fff1406d112c6c6cf403ceb4033f58495ccb3aa5cd69e00f21039241",
-          size: 104608720,
+            "f1053d8592da7938fe39156911bcd823caa43c766e5d3d0939a34db0aab60dd1",
+          size: 117446483,
         },
         compression: "zstd",
         archive: "tar",
         binary: {
           sha256:
-            "eba0f32c976667cb9298efafd98513e823eeda7b576a03ec658bb8be8d336316",
-          size: 307108144,
+            "fdda5fa3cf3fb3d000b876720742857676293e4315e4b045fae6f8bd7e866d1d",
+          size: 326872368,
         },
       },
     },
