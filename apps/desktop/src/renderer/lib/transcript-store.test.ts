@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { SharedEntry, SharedTab } from "../../shared/collaboration";
+import type { HarnessState } from "../../shared/tabs";
 import {
   acceptShared,
   sharedAgents,
@@ -10,6 +11,7 @@ import {
   ageLabel,
   asTranscriptEntry,
   sharedGroups,
+  sharedModelName,
   switchCaption,
 } from "./read-along";
 
@@ -283,4 +285,17 @@ test("availability tells an older host from a harness that reports no sub-agents
   );
   const capped = state({ reportsAgents: true }, "capped");
   assert.deepEqual([capped.availability, capped.capped], ["ready", true]);
+});
+
+test("a shared tab's model reads by the name this desktop's harness gives it", () => {
+  const harnesses = [
+    { id: "codex", models: [{ id: "gpt-5", name: "GPT-5" }] },
+  ] as HarnessState[];
+  assert.equal(sharedModelName(record({ model: "gpt-5" }), harnesses), "GPT-5");
+  // An unlisted model, or another harness's, keeps the id the host shared.
+  assert.equal(sharedModelName(record({ model: "other" }), harnesses), "other");
+  assert.equal(
+    sharedModelName(record({ harness: "claude", model: "gpt-5" }), harnesses),
+    "gpt-5",
+  );
 });

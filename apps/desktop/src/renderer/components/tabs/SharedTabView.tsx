@@ -1,11 +1,12 @@
 import { Eye } from "lucide-react";
 import { useEffect, useMemo } from "react";
 import type { SharedTab } from "../../../shared/collaboration";
-import { HARNESS_LABELS } from "../../../shared/tabs";
+import { HARNESS_LABELS, type HarnessState } from "../../../shared/tabs";
 import {
   ageLabel,
   asTranscriptEntry,
   SHARED_STATUS_LABELS,
+  sharedModelName,
 } from "../../lib/read-along";
 import { useNow } from "../../lib/time";
 import {
@@ -38,6 +39,7 @@ export function SharedTabView({
   roomId,
   tabId,
   listed,
+  harnesses,
   connected,
   clockOffsetMs,
   onLeave,
@@ -46,6 +48,8 @@ export function SharedTabView({
   tabId: string;
   // The tab's row in the room list, or undefined once it left the list.
   listed: SharedTab | undefined;
+  // This desktop's harnesses, which name the host's model.
+  harnesses: HarnessState[];
   connected: boolean;
   clockOffsetMs: number | undefined;
   // Returns selection to the viewer's own tab.
@@ -79,7 +83,7 @@ export function SharedTabView({
         )}
         <span className="subtle">
           {record
-            ? `${record.sameUser ? "You on another desktop" : record.hostName} · ${HARNESS_LABELS[record.harness]}${record.model ? ` · ${record.model}` : ""}`
+            ? `${record.sameUser ? "You on another desktop" : record.hostName} · ${HARNESS_LABELS[record.harness]}${record.model ? ` · ${sharedModelName(record, harnesses)}` : ""}`
             : ""}
           {record && (
             <>

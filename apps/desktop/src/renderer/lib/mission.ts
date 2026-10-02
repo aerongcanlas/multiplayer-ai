@@ -8,7 +8,11 @@ import {
   type Tab,
 } from "../../shared/tabs";
 import { AGENT_STATUS_LABELS, STATUS_LABELS } from "../components/tabs/labels";
-import { SHARED_STATUS_LABELS, type SharedAgentEntry } from "./read-along";
+import {
+  SHARED_STATUS_LABELS,
+  sharedModelName,
+  type SharedAgentEntry,
+} from "./read-along";
 import { durationLabel } from "./time";
 import type { SharedAgents } from "./transcript-store";
 import { plural } from "./utils";
@@ -88,11 +92,7 @@ function spectatorSource(
   harnesses: HarnessState[],
 ): MissionSource | null {
   if (!record) return null;
-  // The host shares the model's id; this desktop names it when its own harness lists it.
-  const model =
-    harnesses
-      .find((item) => item.id === record.harness)
-      ?.models.find((item) => item.id === record.model)?.name ?? record.model;
+  const model = sharedModelName(record, harnesses);
   const ended = record.status === "ended" || record.status === "closed";
   const hostName = record.sameUser ? "You on another desktop" : record.hostName;
   return {

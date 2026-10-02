@@ -4,7 +4,11 @@ import type {
   SharedTab,
   SharedTabStatus,
 } from "../../shared/collaboration";
-import type { AgentEntry, TranscriptEntry } from "../../shared/tabs";
+import type {
+  AgentEntry,
+  HarnessState,
+  TranscriptEntry,
+} from "../../shared/tabs";
 import { durationLabel } from "./time";
 
 export const SHARED_STATUS_LABELS: Record<SharedTabStatus, string> = {
@@ -28,6 +32,15 @@ export function ageLabel(
   if (!Number.isFinite(updated)) return "";
   return `Updated ${durationLabel(now + clockOffsetMs - updated)} ago`;
 }
+
+/** A shared tab's model by name. The host shares its id; this desktop's own harness names it. */
+export const sharedModelName = (
+  record: Pick<SharedTab, "harness" | "model">,
+  harnesses: HarnessState[],
+) =>
+  harnesses
+    .find((item) => item.id === record.harness)
+    ?.models.find((item) => item.id === record.model)?.name ?? record.model;
 
 export interface SharedGroup {
   key: string;
