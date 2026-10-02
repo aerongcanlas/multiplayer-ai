@@ -134,6 +134,31 @@ await run.execute(
       async () => (await tabNamed("Codex 1")).status === "awaiting_host",
       "the approval to pause the turn",
     );
+    const agentDraft = tabsPanel().getByRole("textbox", {
+      name: "Message",
+      exact: true,
+    });
+    const agentSend = tabsPanel().locator('button[type="submit"]');
+    assert.equal(
+      await agentDraft.isEnabled(),
+      true,
+      "Drafting stays available during a turn",
+    );
+    assert.equal(
+      await agentDraft.evaluate((input) => input === document.activeElement),
+      true,
+      "Clicking Send keeps focus in the agent composer",
+    );
+    await run.page.keyboard.type("Follow up after approval");
+    await agentDraft.press("Shift+Enter");
+    await agentDraft.pressSequentially("Keep this second line.");
+    const followUp = await agentDraft.inputValue();
+    assert.equal(followUp, "Follow up after approval\nKeep this second line.");
+    assert.equal(await agentSend.isDisabled(), true);
+    const startedTurns = (await codexRequests("turn/start")).length;
+    await agentDraft.press("Enter");
+    assert.equal(await agentDraft.inputValue(), followUp);
+    assert.equal((await codexRequests("turn/start")).length, startedTurns);
     await run.page.screenshot({ path: join(output, "01-approval.png") });
     await approval
       .getByRole("button", { name: "Approve once", exact: true })
@@ -147,8 +172,32 @@ await run.execute(
       .getByText(/^Turn completed\./)
       .first()
       .waitFor();
+    await until(
+      () => agentSend.isEnabled(),
+      "Send to enable after turn completion",
+    );
+    assert.equal(await agentDraft.inputValue(), followUp);
+    assert.equal((await codexRequests("turn/start")).length, startedTurns);
+    await agentDraft.focus();
+    await run.page.keyboard.press("Enter");
+    await until(
+      async () => (await agentDraft.inputValue()) === "",
+      "the follow-up to be accepted",
+    );
+    await settled("Codex 1");
+    assert.equal((await codexRequests("turn/start")).length, startedTurns + 1);
+    assert.equal(
+      await agentDraft.evaluate((input) => input === document.activeElement),
+      true,
+      "Sending with Enter keeps focus in the agent composer",
+    );
+    await run.page.keyboard.type("Keep typing without another click");
+    assert.equal(
+      await agentDraft.inputValue(),
+      "Keep typing without another click",
+    );
     await checkpoint(
-      "An approval card shows, Approve continues, and the tool summary lands",
+      "Click and Enter preserve composer focus; drafting works during turns while sending waits",
     );
 
     // Stop while an approval is pending ends the turn stopped.
@@ -477,9 +526,24 @@ await run.execute(
       );
       return tabs.every((tab) => tab.status === "running");
     }, "both tabs to run");
+    assert.equal(await agentDraft.isEnabled(), true);
+    await agentDraft.fill("Keep this draft after stopping");
+    assert.equal(await agentSend.isDisabled(), true);
+    await agentDraft.press("Enter");
+    assert.equal(
+      await agentDraft.inputValue(),
+      "Keep this draft after stopping",
+    );
     await tabsPanel()
       .getByRole("button", { name: "Stop", exact: true })
       .click();
+    await settled("Codex 1");
+    await until(() => agentSend.isEnabled(), "Send to enable after Stop");
+    assert.equal(
+      await agentDraft.inputValue(),
+      "Keep this draft after stopping",
+    );
+    await agentDraft.fill("");
     await selectTab("Claude Code 1");
     await tabsPanel()
       .getByRole("button", { name: "Stop", exact: true })

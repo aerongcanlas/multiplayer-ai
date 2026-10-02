@@ -7,6 +7,7 @@ interface Props {
   onSubmit(text: string): Promise<boolean>;
   targetKey: string;
   disabled?: boolean;
+  busy?: boolean;
   label: string;
   placeholder: string;
   submitLabel: string;

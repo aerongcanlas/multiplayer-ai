@@ -493,15 +493,16 @@ export function TabsPanel({
                 !room.workspace
                   ? "Select a repository to get started…"
                   : busy
-                    ? "Wait for this turn, or stop it."
+                    ? "Draft your next message while the agent works…"
                     : `Message ${tab.title}`
               }
               submitLabel="Send"
               value={draft}
               onChange={onDraftChange}
+              busy={disabled || busy}
               disabled={
-                disabled ||
-                busy ||
+                stale ||
+                Boolean(room.shared && !connected) ||
                 !room.workspace ||
                 tab.status === "unavailable" ||
                 tab.status === "resume_failed" ||

@@ -72,6 +72,10 @@ try {
     await input.fill("first draft");
     await input.press("Enter");
     await count(1);
+    assert.equal(
+      await input.evaluate((element) => element === document.activeElement),
+      true,
+    );
     await input.press("Enter");
     await count(1);
     // Editing back to the same text still represents a newer revision.
@@ -79,14 +83,24 @@ try {
     await input.fill("first draft");
     await page.getByRole("button", { name: "Accept", exact: true }).click();
     assert.equal(await input.inputValue(), "first draft");
-    await input.press("Enter");
+    await page
+      .getByRole("button", { name: "Send message", exact: true })
+      .click();
     await count(2);
+    assert.equal(
+      await input.evaluate((element) => element === document.activeElement),
+      true,
+    );
     await page
       .getByRole("button", { name: "Switch room", exact: true })
       .click();
     await input.fill("room b draft");
     await page.getByRole("button", { name: "Accept", exact: true }).click();
     assert.equal(await input.inputValue(), "room b draft");
+    assert.equal(
+      await input.evaluate((element) => element === document.activeElement),
+      false,
+    );
 
     await input.press("Enter");
     await count(3);

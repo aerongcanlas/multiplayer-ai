@@ -118,6 +118,7 @@ export function Composer({
       lengthUnit,
     });
     if (!submission) return;
+    textareaRef.current?.focus({ preventScroll: true });
     inFlight.current.add(submission.targetKey);
     setPendingTargets(new Set(inFlight.current));
     setSubmissionError(null);
