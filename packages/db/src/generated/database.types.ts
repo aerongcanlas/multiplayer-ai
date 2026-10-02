@@ -176,8 +176,11 @@ export type Database = {
           harness: string;
           host_id: string;
           model: string;
+          plan: Json | null;
+          reports_agents: boolean | null;
           rev: number;
           room_id: string;
+          running_agents: number | null;
           status: string;
           switch_on: boolean;
           tab_id: string;
@@ -190,8 +193,11 @@ export type Database = {
           harness: string;
           host_id: string;
           model: string;
+          plan?: Json | null;
+          reports_agents?: boolean | null;
           rev?: number;
           room_id: string;
+          running_agents?: number | null;
           status: string;
           switch_on: boolean;
           tab_id: string;
@@ -204,8 +210,11 @@ export type Database = {
           harness?: string;
           host_id?: string;
           model?: string;
+          plan?: Json | null;
+          reports_agents?: boolean | null;
           rev?: number;
           room_id?: string;
+          running_agents?: number | null;
           status?: string;
           switch_on?: boolean;
           tab_id?: string;
@@ -523,11 +532,13 @@ export type Database = {
         };
         Returns: Json;
       };
+      desktop_tab_share_agent_valid: { Args: { card: Json }; Returns: boolean };
       desktop_tab_share_head: { Args: { p_tab_id: string }; Returns: Json };
       desktop_tab_share_json: {
         Args: { t: Database["public"]["Tables"]["desktop_tab_share"]["Row"] };
         Returns: Json;
       };
+      desktop_tab_share_plan_valid: { Args: { plan: Json }; Returns: boolean };
       desktop_tab_share_publish: {
         Args: { p_entries: Json; p_tab: Json };
         Returns: Json;
@@ -538,6 +549,7 @@ export type Database = {
           p_after_seq: number;
           p_before_seq: number;
           p_byte_budget: number;
+          p_kinds?: string[];
           p_limit: number;
           p_tab_id: string;
         };

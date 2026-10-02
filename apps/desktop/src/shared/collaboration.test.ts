@@ -103,3 +103,75 @@ test("pull pages accept fields a newer server adds and a host without a name", (
     false,
   );
 });
+
+test("pull pages parse sub-agent cards and the record's plan fields", () => {
+  const record = {
+    tabId: randomUUID(),
+    roomId: randomUUID(),
+    hostId: randomUUID(),
+    hostName: "Alice",
+    deviceId: randomUUID(),
+    title: "Tab",
+    harness: "claude",
+    model: "m",
+    status: "running",
+    switchOn: true,
+    rev: 1,
+    updatedAt: "now",
+  };
+  const card = {
+    seq: 2,
+    kind: "agent",
+    share: "full",
+    summary: "Map the codebase",
+    text: "Found it",
+    agent: {
+      key: "agent-1",
+      status: "completed",
+      background: false,
+      startedAt: "then",
+      endedAt: "now",
+      toolUses: 3,
+      latestTool: "Read a file",
+      joinedMidRun: true,
+      turnId: randomUUID(),
+    },
+    version: 2,
+    rev: 4,
+    updatedAt: "now",
+  };
+  const parse = (patch: object, entry: object = card) =>
+    sharedPullSchema.safeParse({
+      record: { ...record, ...patch },
+      entries: [entry],
+      next: null,
+      now: "now",
+    });
+  // An older database omits the record fields; an older host stores them as null.
+  const old = parse({});
+  assert.equal(old.data?.record.reportsAgents, undefined);
+  assert.deepEqual(old.data?.entries[0].agent, card.agent);
+  assert.equal(
+    parse({ plan: null, runningAgents: null, reportsAgents: null }).data?.record
+      .reportsAgents,
+    null,
+  );
+  const plan = { steps: [{ text: "Read", status: "active" }] };
+  const current = parse({ plan, runningAgents: 2, reportsAgents: false });
+  assert.deepEqual(current.data?.record.plan, plan);
+  assert.equal(current.data?.record.runningAgents, 2);
+  assert.equal(current.data?.record.reportsAgents, false);
+  // Rows stay strict: unknown card fields, bad enums, and cards on the wrong kind fail.
+  for (const bad of [
+    { ...card, agent: { ...card.agent, model: "leak" } },
+    { ...card, agent: { ...card.agent, status: "paused" } },
+    { ...card, agent: { ...card.agent, turnId: "nope" } },
+    { ...card, agent: undefined },
+    { ...card, kind: "assistant" },
+  ])
+    assert.equal(parse({}, bad).success, false);
+  assert.equal(
+    parse({ plan: { steps: [{ text: "x", status: "blocked" }] } }).success,
+    false,
+  );
+});
