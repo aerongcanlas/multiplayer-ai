@@ -8,7 +8,12 @@ export default tseslint.config(
   { ignores: [".turbo/**", "node_modules/**"] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
-  { languageOptions: { globals: globals.browser } },
+  {
+    languageOptions: {
+      globals: globals.browser,
+      parserOptions: { tsconfigRootDir: import.meta.dirname },
+    },
+  },
   {
     files: ["src/**/*.{ts,tsx}", "tests/fixture/**/*.{ts,tsx}"],
     plugins: { "react-hooks": hooks },

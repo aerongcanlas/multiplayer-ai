@@ -14,7 +14,12 @@ export default tseslint.config(
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
-  { languageOptions: { globals: { ...globals.node, ...globals.browser } } },
+  {
+    languageOptions: {
+      globals: { ...globals.node, ...globals.browser },
+      parserOptions: { tsconfigRootDir: import.meta.dirname },
+    },
+  },
   {
     files: ["src/renderer/**/*.{ts,tsx}"],
     plugins: { "react-hooks": hooks },
