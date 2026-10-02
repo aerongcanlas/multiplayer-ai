@@ -262,10 +262,7 @@ function RoomView({
                   : null
               }
               onSourceClear={() => setSource(null)}
-              onSent={(message) => {
-                setDraft("");
-                setAnnouncement(message);
-              }}
+              onSent={setAnnouncement}
               sharedTabId={sharedTabId}
               onSelectShared={(id) => {
                 setViewing(null);
