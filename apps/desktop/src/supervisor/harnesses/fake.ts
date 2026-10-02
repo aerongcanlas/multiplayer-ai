@@ -1,6 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
-import type { HarnessId, HarnessModel, Loadout } from "../../shared/tabs";
+import type {
+  HarnessId,
+  HarnessModel,
+  Loadout,
+  SlashCommand,
+} from "../../shared/tabs";
 import {
   HarnessError,
   type HarnessAdapter,
@@ -324,6 +329,10 @@ export class FakeHarness implements HarnessAdapter {
   sessions: FakeSession[] = [];
   signedIn: boolean;
   models: HarnessModel[];
+  slashCommands: SlashCommand[] = [
+    { name: "review", description: "Review the current changes" },
+    { name: "plan", description: "Plan a change", argumentHint: "<goal>" },
+  ];
   inspectDelayMs: number;
   resumable: boolean;
   failFirstResumedTurn: boolean;
@@ -377,6 +386,11 @@ export class FakeHarness implements HarnessAdapter {
           models: [],
           limits: [],
         };
+  }
+
+  async commands(request: LaunchContext & { cwd: string }) {
+    this.calls.push(`commands:${request.cwd}`);
+    return structuredClone(this.slashCommands);
   }
 
   async startSignIn() {

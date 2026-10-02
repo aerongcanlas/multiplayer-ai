@@ -111,8 +111,10 @@ parent.on("message", ({ data }) => {
       });
     }
   };
-  // Generation waits on the model; other commands, including Stop, keep flowing.
-  if (data.command.type === "suggestion.create") void pending.then(respond);
+  // Generation waits on the model and a command list on the harness; other commands, including
+  // Stop, keep flowing.
+  if (["suggestion.create", "tab.commands"].includes(data.command.type))
+    void pending.then(respond);
   else pending = pending.then(respond);
 });
 process.on("exit", () => {

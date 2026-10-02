@@ -523,6 +523,18 @@ export function claudeFixture(
         email: "fixture@example.invalid",
         subscriptionType: "max",
       }),
+      supportedCommands: async () => [
+        {
+          name: "review",
+          description: "Review the current changes",
+          argumentHint: "<focus>",
+        },
+        {
+          name: "compact",
+          description: "Compact the conversation",
+          argumentHint: "",
+        },
+      ],
       supportedModels: async () => [
         {
           value: "default",

@@ -1119,3 +1119,26 @@ test("only a closed chat can be deleted, and deleting removes its transcript", (
     assert.deepEqual(setup.service.snapshot().rooms[0].closedTabs, []);
     assert.equal(setup.journal.lastSeq(tab.id), 0);
   }));
+
+test("a tab lists its harness's slash commands for the room's repository, briefly cached", () =>
+  withHost(async (setup, fake) => {
+    const tab = await setup.open();
+    const list = async () =>
+      (
+        await setup.dispatch({
+          type: "tab.commands",
+          roomId: setup.roomId,
+          tabId: tab.id,
+        })
+      ).commands;
+    assert.deepEqual(await list(), fake.slashCommands);
+    assert.deepEqual(await list(), fake.slashCommands);
+    assert.equal(
+      fake.calls.filter((call) => call.startsWith("commands:")).length,
+      1,
+    );
+    // A signed-out harness offers nothing.
+    fake.signedIn = false;
+    await setup.registry.refresh(fake.id);
+    assert.deepEqual(await list(), []);
+  }));

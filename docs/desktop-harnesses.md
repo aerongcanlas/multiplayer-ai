@@ -43,6 +43,15 @@ Tabs load the host's own setup as the harness's terminal would: skills, plugins,
 
 Harnesses launch with your login-shell environment, so `PATH`, `SSH_AUTH_SOCK`, proxies, `CODEX_HOME`, and `CLAUDE_CONFIG_DIR` match your terminal. Provider credentials such as `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `CODEX_API_KEY`, and `CURSOR_API_KEY` are removed so harnesses bill your subscription sign-in. Claude Code also runs with `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` and `DISABLE_AUTOUPDATER=1`. On Windows, Claude Code uses its PowerShell tool when Git for Windows is absent.
 
+## Slash commands and skills
+
+Type `/` at the start of a tab's message to list what the tab's harness offers in the room's repository. Up and Down move through the list, Enter or Tab completes the command so you can add arguments, and Escape closes the list. Sending the message runs the command.
+
+- **Claude Code** lists its own commands and your user, project, and plugin skills.
+- **Codex** lists your enabled skills. A message that starts with a skill's `/name` is sent as a mention of that skill.
+
+The list refreshes each time it opens, at most every 30 seconds per repository. A `/name` the harness does not know is sent as typed.
+
 ## Transcripts and recovery
 
 Transcript entries are marked for what they may share with a future read-along view: messages and plans in full, tool calls and approvals as a one-line summary (command output and diffs stay local), and reasoning and question answers not at all. Nothing is shared in this release.

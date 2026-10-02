@@ -747,3 +747,15 @@ test("the query ending with background work and no turn reports a crash", () =>
     const next = await run(session, "Hello");
     assert.match(assistant(next), /previous turns: 1/);
   }));
+
+test("the CLI's commands for a repository list as slash commands", () =>
+  withAdapter(async (adapter, { context, dir }) => {
+    assert.deepEqual(await adapter.commands({ ...context, cwd: dir }), [
+      {
+        name: "review",
+        description: "Review the current changes",
+        argumentHint: "<focus>",
+      },
+      { name: "compact", description: "Compact the conversation" },
+    ]);
+  }));

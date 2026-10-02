@@ -7,7 +7,9 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  type KeyboardEvent,
   type ReactNode,
+  type TextareaHTMLAttributes,
 } from "react";
 import { Button } from "../primitives/button";
 import { cn } from "../lib/utils";
@@ -44,6 +46,13 @@ export interface ComposerProps {
   onRetry?(): void;
   className?: string;
   appearance?: "default" | "compact";
+  /** Runs before the submit key check; a prevented event does not submit. */
+  onKeyDown?(event: KeyboardEvent<HTMLTextAreaElement>): void;
+  /** Attributes for a host that attaches a completion list. */
+  textareaProps?: Pick<
+    TextareaHTMLAttributes<HTMLTextAreaElement>,
+    "aria-autocomplete" | "aria-controls" | "aria-activedescendant"
+  >;
 }
 
 /** Transport-independent input. Only an acknowledged, unchanged draft is cleared. */
@@ -67,6 +76,8 @@ export function Composer({
   onRetry,
   className,
   appearance = "default",
+  onKeyDown,
+  textareaProps,
 }: ComposerProps) {
   const [composing, setComposing] = useState(false);
   const [pendingTargets, setPendingTargets] = useState<ReadonlySet<string>>(
@@ -195,6 +206,7 @@ export function Composer({
         </div>
       )}
       <textarea
+        {...textareaProps}
         ref={textareaRef}
         aria-label={label}
         aria-describedby={
@@ -227,6 +239,8 @@ export function Composer({
         onCompositionEnd={() => setComposing(false)}
         onCompositionStart={() => setComposing(true)}
         onKeyDown={(event) => {
+          onKeyDown?.(event);
+          if (event.defaultPrevented) return;
           if (
             !shouldSubmitComposerKey({
               key: event.key,

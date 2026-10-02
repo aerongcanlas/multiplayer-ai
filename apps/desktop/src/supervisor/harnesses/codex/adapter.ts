@@ -15,6 +15,7 @@ import {
   type OpenRequest,
   type SuggestionRequest,
 } from "../contract";
+import { slashCommands } from "../commands";
 import { clip, object, string } from "../json";
 import { accessSettings } from "./access";
 import { EventQueue } from "../queue";
@@ -23,6 +24,7 @@ import type { ThreadResumeParams } from "./generated/v2/ThreadResumeParams";
 import type { ThreadStartParams } from "./generated/v2/ThreadStartParams";
 import { ARGS, CodexProcess, versionOf, type Launcher } from "./process";
 import { CodexSession } from "./session";
+import { listSkills } from "./skills";
 import {
   JsonRpcTransport,
   RpcError,
@@ -291,6 +293,15 @@ export class CodexAdapter implements HarnessAdapter {
         models,
         limits,
       };
+    } finally {
+      process.release();
+    }
+  }
+
+  async commands(request: LaunchContext & { cwd: string }) {
+    const process = await this.process(request);
+    try {
+      return slashCommands(await listSkills(process.transport, request.cwd));
     } finally {
       process.release();
     }

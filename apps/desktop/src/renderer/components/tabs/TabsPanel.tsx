@@ -510,6 +510,17 @@ export function TabsPanel({
                 modelMissing
               }
               onSubmit={send}
+              commands={{
+                key: `${room.id}:${tab.loadout.harness}`,
+                load: async () => {
+                  const result = await window.desktop.loadCommands(
+                    room.id,
+                    tab.id,
+                  );
+                  if (!result.ok) throw new Error(result.error);
+                  return result.commands ?? [];
+                },
+              }}
               footer={
                 <LoadoutBar
                   loadout={tab.loadout}

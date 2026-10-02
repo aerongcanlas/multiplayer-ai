@@ -5,6 +5,7 @@ import {
   HARNESS_LABELS,
   tabBusy,
   type Loadout,
+  type SlashCommand,
   type Tab,
   type TranscriptEntry,
   type TranscriptPage,
@@ -19,6 +20,8 @@ import type { HarnessRegistry } from "../harnesses/registry";
 import { AgentCards } from "./cards";
 import { validateLoadout, withDefaultModel } from "./loadout";
 import type { TranscriptWriter } from "./transcript";
+
+const COMMANDS_TTL_MS = 30_000;
 
 export type TabCommand = Extract<
   Command,
@@ -86,6 +89,11 @@ function findTab(
  */
 export class TabHost {
   private live = new Map<string, Live>();
+  // Command lists per harness and repository path.
+  private commandLists = new Map<
+    string,
+    { at: number; list: Promise<SlashCommand[]> }
+  >();
   private cards: AgentCards;
   private closed = false;
 
@@ -144,6 +152,28 @@ export class TabHost {
       this.live.set(tabId, live);
     }
     return live;
+  }
+
+  /** The slash commands the tab's harness offers in the room's repository, briefly cached. */
+  async commands(roomId: string, tabId: string): Promise<SlashCommand[]> {
+    const { tab } = findTab(this.store.read(), roomId, tabId);
+    const harness = tab.loadout.harness;
+    const adapter = this.registry.adapter(harness);
+    const cwd = this.store.workspacePath(roomId);
+    if (!cwd || !adapter.commands || !this.ready(tab)) return [];
+    const key = `${harness}\n${cwd}`;
+    const cached = this.commandLists.get(key);
+    if (cached && Date.now() - cached.at < COMMANDS_TTL_MS) return cached.list;
+    const list = this.registry
+      .context(harness)
+      .then((context) => adapter.commands!({ ...context, cwd }));
+    this.commandLists.set(key, { at: Date.now(), list });
+    // A failed listing is not cached, so the next request tries again.
+    list.catch(() => {
+      if (this.commandLists.get(key)?.list === list)
+        this.commandLists.delete(key);
+    });
+    return list;
   }
 
   private ready(tab: Tab) {

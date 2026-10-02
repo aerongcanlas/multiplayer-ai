@@ -83,6 +83,8 @@ const bridge: DesktopBridge = {
       ...(agentKey ? { agentKey } : {}),
     }),
   loadAgents: (roomId, tabId) => invoke({ type: "tab.agents", roomId, tabId }),
+  loadCommands: (roomId, tabId) =>
+    invoke({ type: "tab.commands", roomId, tabId }),
   resetTabSession: (roomId, tabId) =>
     invoke({ type: "tab.resetSession", roomId, tabId }),
   respondToTabApproval: (roomId, tabId, approvalId, decision) =>

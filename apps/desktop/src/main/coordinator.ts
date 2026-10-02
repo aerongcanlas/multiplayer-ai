@@ -6,7 +6,12 @@ import {
     type Snapshot,
     type SupervisorRequest,
 } from "../shared/contracts";
-import { tabBusy, type HarnessId, type TranscriptPage } from "../shared/tabs";
+import {
+    tabBusy,
+    type HarnessId,
+    type SlashCommand,
+    type TranscriptPage,
+} from "../shared/tabs";
 import type { CollaborationClient } from "./collaboration-client";
 
 // Commands that start work wait on shared-room checks; everything else reaches the supervisor
@@ -17,6 +22,7 @@ const DIRECT = new Set([
     "tab.rename",
     "tab.transcript",
     "tab.agents",
+    "tab.commands",
     "tab.resetSession",
     // Deleting a closed chat touches only this desktop's journal.
     "tab.delete",
@@ -161,6 +167,7 @@ export class DesktopCoordinator {
             if (!this.local) await this.localCommand({ type: "snapshot" });
             let notice: Extract<Result, { ok: true }>["notice"];
             let transcript: TranscriptPage | undefined;
+            let commands: SlashCommand[] | undefined;
             if (command.type === "harness.chooseExecutable") {
                 // The path comes from main's native dialog, never from the renderer.
                 const path = await this.chooseExecutable(command.harness);
@@ -335,8 +342,8 @@ export class DesktopCoordinator {
                                 held?.shared?.project !== room.shared.project)
                         )
                             throw new Error("Room membership changed.");
-                        transcript = (await this.localCommand(command))
-                            .transcript;
+                        ({ transcript, commands } =
+                            await this.localCommand(command));
                     }
                 }
             }
@@ -345,6 +352,7 @@ export class DesktopCoordinator {
                 snapshot: this.view!,
                 ...(notice ? { notice } : {}),
                 ...(transcript ? { transcript } : {}),
+                ...(commands ? { commands } : {}),
             };
         } catch (error) {
             return {

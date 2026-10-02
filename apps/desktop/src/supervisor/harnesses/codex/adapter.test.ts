@@ -712,3 +712,29 @@ test("a process exit with no turn reports a crash for the tab", () =>
       "crash report",
     );
   }));
+
+test("enabled skills list as slash commands, and a leading /skill attaches the skill", () =>
+  withAdapter(async (adapter, fixture) => {
+    assert.deepEqual(
+      await adapter.commands({ ...fixture.context, cwd: fixture.dir }),
+      [{ name: "review", description: "Review changes" }],
+    );
+    const session = await fixture.open(adapter);
+    await run(session, "/review the last commit");
+    await run(session, "/unknown stays as typed");
+    const inputs = (await fixture.requests("turn/start")).map(
+      (request) => request.params!.input,
+    );
+    assert.deepEqual(inputs, [
+      [
+        { type: "text", text: "$review the last commit", text_elements: [] },
+        {
+          type: "skill",
+          name: "review",
+          path: "/fixture/skills/review/SKILL.md",
+        },
+      ],
+      [{ type: "text", text: "/unknown stays as typed", text_elements: [] }],
+    ]);
+    session.close();
+  }));

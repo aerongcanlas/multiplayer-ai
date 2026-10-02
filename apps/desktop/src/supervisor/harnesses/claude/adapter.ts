@@ -10,12 +10,14 @@ import type {
   PermissionResult,
   SDKMessage,
   SDKUserMessage,
+  SlashCommand as ClaudeCommand,
 } from "@anthropic-ai/claude-agent-sdk";
 import type {
   HarnessModel,
   HarnessQuestion,
   Loadout,
   PlanStep,
+  SlashCommand,
 } from "../../../shared/tabs";
 import {
   HarnessError,
@@ -27,6 +29,7 @@ import {
   type OpenRequest,
   type SessionEvent,
 } from "../contract";
+import { slashCommands } from "../commands";
 import { clip, object, string } from "../json";
 import { EventQueue } from "../queue";
 import { SessionRelay } from "../relay";
@@ -38,6 +41,7 @@ const IDLE_MS = 10 * 60_000;
 export interface ClaudeQuery extends AsyncIterable<SDKMessage> {
   accountInfo(): Promise<AccountInfo>;
   supportedModels(): Promise<ModelInfo[]>;
+  supportedCommands(): Promise<ClaudeCommand[]>;
   interrupt(): Promise<unknown>;
   stopTask(taskId: string): Promise<void>;
   setPermissionMode(mode: PermissionMode): Promise<void>;
@@ -972,6 +976,42 @@ export class ClaudeAdapter implements HarnessAdapter {
         limits: [],
       };
     } finally {
+      channel.end();
+      query.close();
+    }
+  }
+
+  async commands(
+    request: LaunchContext & { cwd: string },
+  ): Promise<SlashCommand[]> {
+    const channel = new PromptChannel();
+    // The same settings a tab's session loads, so project and plugin skills are listed.
+    const query = this.startQuery({
+      prompt: channel,
+      options: {
+        pathToClaudeCodeExecutable: request.executable,
+        cwd: request.cwd,
+        env: claudeEnvironment(request),
+        systemPrompt: { type: "preset", preset: "claude_code" },
+        settingSources: ["user", "project", "local"],
+        stderr: () => {},
+      },
+    });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return slashCommands(
+        await Promise.race([
+          query.supportedCommands(),
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(
+              () => reject(new Error("Claude Code did not list its commands.")),
+              15_000,
+            );
+          }),
+        ]),
+      );
+    } finally {
+      clearTimeout(timer);
       channel.end();
       query.close();
     }
