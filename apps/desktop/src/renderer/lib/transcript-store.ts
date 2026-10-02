@@ -1,9 +1,11 @@
 import { useEffect, useSyncExternalStore } from "react";
 import type {
   SharedEntry,
+  SharedPlan,
   SharedTab,
   SharedTranscriptMessage,
 } from "../../shared/collaboration";
+import { asAgentEntry, type SharedAgentEntry } from "./read-along";
 import type {
   AgentEntry,
   TranscriptBatch,
@@ -204,7 +206,11 @@ export function useAgents(roomId: string, tabId: string | null) {
 
 // Another host's read-along tab, keyed `shared:<tabId>` apart from this desktop's own tabs.
 export interface SharedTranscript {
+  // The lead's entries; sub-agent cards are held apart in `cards`.
   entries: SharedEntry[];
+  cards: SharedEntry[];
+  // Set once main's cards load answers: all cards, the latest ones, or none available.
+  cardsState?: "ready" | "capped" | "unavailable";
   record: SharedTab | null;
   state: Extract<SharedTranscriptMessage, { type: "status" }>["state"];
   // The seq to page back from, or null once the start is loaded.
@@ -213,6 +219,7 @@ export interface SharedTranscript {
 }
 const emptyShared: SharedTranscript = {
   entries: [],
+  cards: [],
   record: null,
   state: "loading",
   earlierSeq: null,
@@ -243,9 +250,20 @@ export function acceptShared(message: SharedTranscriptMessage) {
     set(shared, key, { ...current, state: message.state });
     return;
   }
+  if (message.type === "cards") {
+    set(shared, key, {
+      ...current,
+      cards: mergeShared(current.cards, message.cards),
+      ...(message.state ? { cardsState: message.state } : {}),
+    });
+    return;
+  }
   set(shared, key, {
     ...current,
-    entries: mergeShared(current.entries, message.entries),
+    entries: mergeShared(
+      current.entries,
+      message.entries.filter((entry) => entry.kind !== "agent"),
+    ),
     record: message.record,
     ...(message.earlierSeq !== undefined
       ? { earlierSeq: message.earlierSeq, loadingEarlier: false }
@@ -255,6 +273,65 @@ export function acceptShared(message: SharedTranscriptMessage) {
 
 export const sharedTranscript = (tabId: string) =>
   shared.get(sharedKey(tabId)) ?? emptyShared;
+
+// What Mission Control shows for a watched tab's sub-agents.
+export type SharedAgentsAvailability =
+  // The record or the cards have not arrived yet.
+  | "loading"
+  | "ready"
+  // The host's app, or the shared database, predates sub-agent sharing.
+  | "unsupported_host"
+  // The host's harness does not report sub-agents.
+  | "no_reporting";
+export interface SharedAgents {
+  // Cards in the host's own shape, oldest first.
+  cards: SharedAgentEntry[];
+  plan: SharedPlan | null;
+  runningAgents: number;
+  availability: SharedAgentsAvailability;
+  // Only the latest cards were loaded.
+  capped: boolean;
+}
+const emptySharedAgents: SharedAgents = {
+  cards: [],
+  plan: null,
+  runningAgents: 0,
+  availability: "loading",
+  capped: false,
+};
+// One derived value per stored transcript, so the hook's snapshot stays stable.
+const derived = new WeakMap<SharedTranscript, SharedAgents>();
+
+/** A watched tab's cards, plan, and whether its host shares sub-agents at all. */
+export function sharedAgents(tabId: string | null): SharedAgents {
+  const held = tabId ? shared.get(sharedKey(tabId)) : undefined;
+  if (!tabId || !held) return emptySharedAgents;
+  const known = derived.get(held);
+  if (known) return known;
+  const { record, cardsState } = held;
+  const value: SharedAgents = {
+    cards: held.cards.flatMap((entry) => asAgentEntry(tabId, entry) ?? []),
+    plan: record?.plan ?? null,
+    runningAgents: record?.runningAgents ?? 0,
+    availability:
+      cardsState === "unavailable" ||
+      (record && typeof record.reportsAgents !== "boolean")
+        ? "unsupported_host"
+        : !record || !cardsState
+          ? "loading"
+          : record.reportsAgents
+            ? "ready"
+            : "no_reporting",
+    capped: cardsState === "capped",
+  };
+  derived.set(held, value);
+  return value;
+}
+
+/** The watched shared tab's sub-agents; the shared tab's view does the watching. */
+export function useSharedAgents(tabId: string | null) {
+  return useSyncExternalStore(subscribe, () => sharedAgents(tabId));
+}
 
 export async function loadEarlierShared(roomId: string, tabId: string) {
   const key = sharedKey(tabId);

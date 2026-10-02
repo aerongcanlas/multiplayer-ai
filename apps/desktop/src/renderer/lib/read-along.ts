@@ -4,7 +4,7 @@ import type {
   SharedTab,
   SharedTabStatus,
 } from "../../shared/collaboration";
-import type { TranscriptEntry } from "../../shared/tabs";
+import type { AgentEntry, TranscriptEntry } from "../../shared/tabs";
 import { durationLabel } from "./time";
 
 export const SHARED_STATUS_LABELS: Record<SharedTabStatus, string> = {
@@ -68,6 +68,32 @@ export const asTranscriptEntry = (
   createdAt: entry.updatedAt,
   updatedAt: entry.updatedAt,
 });
+
+// A host's card in this desktop's card shape, plus whether it joined mid-run.
+export type SharedAgentEntry = AgentEntry & { joinedMidRun?: boolean };
+
+/** A shared card as the host's own card entry: the text is its final summary. */
+export function asAgentEntry(
+  tabId: string,
+  entry: SharedEntry,
+): SharedAgentEntry | null {
+  if (!entry.agent) return null;
+  const { joinedMidRun, turnId, ...agent } = entry.agent;
+  return {
+    id: `shared:${tabId}:${entry.seq}`,
+    tabId,
+    seq: entry.seq,
+    turnId: turnId ?? null,
+    kind: "agent",
+    share: "full",
+    summary: entry.summary,
+    ...(entry.text ? { detail: entry.text } : {}),
+    agent,
+    ...(joinedMidRun ? { joinedMidRun } : {}),
+    createdAt: entry.agent.startedAt,
+    updatedAt: entry.updatedAt,
+  };
+}
 
 /** The host's switch caption. */
 export function switchCaption(

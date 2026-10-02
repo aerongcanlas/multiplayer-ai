@@ -161,6 +161,16 @@ export type SharedTranscriptMessage =
       tabId: string;
       state: "loading" | "failed" | "reconnecting" | "live" | "unshared";
     }
+  // Sub-agent cards of the watched tab, apart from its transcript entries. `state` is set once
+  // by the first load: every card, only the latest ones, or none because the database predates
+  // sub-agent sharing.
+  | {
+      type: "cards";
+      roomId: string;
+      tabId: string;
+      cards: SharedEntry[];
+      state?: "ready" | "capped" | "unavailable";
+    }
   // The account changed or signed out: drop every shared transcript.
   | { type: "clear" };
 
