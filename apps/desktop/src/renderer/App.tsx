@@ -6,6 +6,7 @@ import {
   Hash,
   Layers3,
   PanelLeft,
+  PanelRight,
   Plus,
   Radio,
   X,
@@ -18,6 +19,7 @@ import { getStored, setStored } from "./lib/storage";
 import { Button } from "./components/ui/Button";
 import { Input } from "./components/ui/Input";
 import { RoomWorkspace } from "@multiplayer-ai/ui/layouts/room-workspace";
+import type { ResizablePanelHandle } from "./components/ui/Resizable";
 import { GroupChatPanel } from "./components/GroupChatPanel";
 import { MissionControlPanel } from "./components/MissionControlPanel";
 import { SharedConnection } from "./components/SharedConnection";
@@ -29,6 +31,8 @@ import { ChatList } from "./components/ChatList";
 
 const roomBusy = (room: Room) => room.tabs.some((tab) => tabBusy(tab.status));
 const tabKey = (roomId: string) => `multiplayer:tab:${roomId}`;
+const missionKey = "multiplayer:mission-collapsed";
+const chatKey = "multiplayer:chat-collapsed";
 
 function RoomView({
   room,
@@ -62,6 +66,19 @@ function RoomView({
     tabId: string;
     key: string;
   } | null>(null);
+  const missionPanel = useRef<ResizablePanelHandle | null>(null);
+  const chatPanel = useRef<ResizablePanelHandle | null>(null);
+  const [chatCollapsed, setChatCollapsed] = useState(
+    () => getStored(chatKey) === "1",
+  );
+  const [missionCollapsed, setMissionCollapsed] = useState(
+    () => getStored(missionKey) === "1",
+  );
+  // The stored choice is applied once the panel exists.
+  useEffect(() => {
+    if (getStored(missionKey) === "1") missionPanel.current?.collapse();
+    if (getStored(chatKey) === "1") chatPanel.current?.collapse();
+  }, []);
   const tab = room.tabs.find((item) => item.id === selectedTab) ?? room.tabs[0];
   const harness = harnesses.find((item) => item.id === tab?.loadout.harness);
   const agentKey = viewing && viewing.tabId === tab?.id ? viewing.key : null;
@@ -126,6 +143,20 @@ function RoomView({
             <FolderGit2 size={14} />
             <span>{room.workspace?.name ?? "Select repository"}</span>
           </Button>
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            aria-label={chatCollapsed ? "Show Group Chat" : "Hide Group Chat"}
+            title={chatCollapsed ? "Show Group Chat" : "Hide Group Chat"}
+            aria-pressed={!chatCollapsed}
+            onClick={() =>
+              chatCollapsed
+                ? chatPanel.current?.expand()
+                : chatPanel.current?.collapse()
+            }
+          >
+            <PanelRight size={15} />
+          </Button>
         </div>
       </header>
       {invite && (
@@ -161,6 +192,18 @@ function RoomView({
         <RoomWorkspace
           mode="window"
           promptResizeLabel="Resize Mission Control"
+          promptCollapsedSize="43px"
+          promptPanelRef={missionPanel}
+          chatCollapsible
+          chatPanelRef={chatPanel}
+          onChatCollapsedChange={(collapsed) => {
+            setChatCollapsed(collapsed);
+            setStored(chatKey, collapsed ? "1" : "0");
+          }}
+          onPromptCollapsedChange={(collapsed) => {
+            setMissionCollapsed(collapsed);
+            setStored(missionKey, collapsed ? "1" : "0");
+          }}
           aiPanel={
             <TabsPanel
               room={room}
@@ -173,7 +216,12 @@ function RoomView({
               stale={stale}
               draft={draft}
               onDraftChange={setDraft}
-              source={source}
+              // A deleted suggestion no longer travels with the draft.
+              source={
+                source && room.suggestions.some((item) => item.id === source.id)
+                  ? source
+                  : null
+              }
               onSourceClear={() => setSource(null)}
               onSent={(message) => {
                 setDraft("");
@@ -197,6 +245,12 @@ function RoomView({
               tab={tab}
               harness={harness}
               agentKey={agentKey}
+              collapsed={missionCollapsed}
+              onToggle={() =>
+                missionCollapsed
+                  ? missionPanel.current?.expand()
+                  : missionPanel.current?.collapse()
+              }
               onSelectAgent={(key) =>
                 key && tab ? setViewing({ tabId: tab.id, key }) : leaveAgent()
               }

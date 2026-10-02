@@ -1,56 +1,25 @@
-import { Pencil, RotateCcw, Sparkles } from "lucide-react";
+import { Pencil, Sparkles, Trash2 } from "lucide-react";
 import { useState } from "react";
 import type { Room, Suggestion } from "../../shared/contracts";
 import { Button } from "./ui/Button";
 import { timeLabel } from "../lib/time";
 import { perform } from "../lib/desktop-store";
-import { getStored, setStored } from "../lib/storage";
 import { plural } from "../lib/utils";
-
-const dismissedKey = (roomId: string) => `multiplayer:dismissed:${roomId}`;
-
-/** Suggestions hidden on this desktop only; the room keeps them for everyone else. */
-function useDismissed(roomId: string) {
-  const [ids, setIds] = useState<Set<string>>(() => {
-    try {
-      return new Set(JSON.parse(getStored(dismissedKey(roomId)) ?? "[]"));
-    } catch {
-      return new Set();
-    }
-  });
-  function update(next: Set<string>) {
-    setIds(next);
-    setStored(dismissedKey(roomId), JSON.stringify([...next]));
-  }
-  return {
-    ids,
-    dismiss: (id: string) => update(new Set(ids).add(id)),
-    restore: (id: string) => {
-      const next = new Set(ids);
-      next.delete(id);
-      update(next);
-    },
-  };
-}
 
 function SuggestionCard({
   suggestion,
   roomId,
   disabled,
   canEdit,
-  dismissed,
   onUse,
-  onDismiss,
-  onRestore,
+  onDeleted,
 }: {
   suggestion: Suggestion;
   roomId: string;
   disabled: boolean;
   canEdit: boolean;
-  dismissed: boolean;
   onUse: (suggestion: Suggestion) => void;
-  onDismiss: () => void;
-  onRestore: () => void;
+  onDeleted: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(suggestion.prompt);
@@ -67,14 +36,10 @@ function SuggestionCard({
     if (result) setEditing(false);
   }
   return (
-    <article
-      className={`suggestion-card ${dismissed ? "suggestion-dismissed" : ""}`}
-    >
+    <article className="suggestion-card">
       <div className="card-meta">
         <span>Edit {suggestion.revision}</span>
-        <span>
-          {dismissed ? "Dismissed" : submitted ? "Submitted" : "Draft"}
-        </span>
+        <span>{submitted ? "Submitted" : "Draft"}</span>
       </div>
       {editing ? (
         <textarea
@@ -100,12 +65,7 @@ function SuggestionCard({
         ))}
       </details>
       <div className="card-actions">
-        {dismissed ? (
-          <Button size="xs" variant="outline" onClick={onRestore}>
-            <RotateCcw size={12} />
-            Restore
-          </Button>
-        ) : editing ? (
+        {editing ? (
           <>
             <Button
               size="xs"
@@ -143,8 +103,23 @@ function SuggestionCard({
               <Pencil size={12} />
               Edit
             </Button>
-            <Button size="xs" variant="ghost" onClick={onDismiss}>
-              Dismiss
+            <Button
+              size="xs"
+              variant="ghost"
+              disabled={disabled || !canEdit}
+              title={
+                canEdit
+                  ? "Delete this suggestion from the room"
+                  : "Only the author or a room admin can delete this suggestion"
+              }
+              onClick={() =>
+                void perform(() =>
+                  window.desktop.deleteSuggestion(roomId, suggestion.id),
+                ).then((result) => result && onDeleted())
+              }
+            >
+              <Trash2 size={12} />
+              Delete
             </Button>
           </>
         )}
@@ -162,39 +137,28 @@ export function SuggestionColumn({
   disabled: boolean;
   onUseSuggestion: (suggestion: Suggestion) => void;
 }) {
-  const { ids, dismiss, restore } = useDismissed(room.id);
-  const [showDismissed, setShowDismissed] = useState(false);
   const [announcement, setAnnouncement] = useState("");
-  const all = [...room.suggestions].reverse();
-  const visible = all.filter((item) => !ids.has(item.id));
-  const hidden = all.filter((item) => ids.has(item.id));
-  const shown = showDismissed ? [...visible, ...hidden] : visible;
+  const shown = [...room.suggestions].reverse();
   return (
     <section className="mission-column" aria-label="Prompt suggestions">
       <h3>
         <Sparkles size={14} />
-        Prompt suggestions<span>{visible.length}</span>
+        Prompt suggestions<span>{shown.length}</span>
       </h3>
       <p className="sr-only" role="status">
         {announcement}
       </p>
       <div className="mission-scroll">
-        {visible.length === 0 && !showDismissed ? (
+        {shown.length === 0 ? (
           <div className="column-empty">
-            {hidden.length > 0 ? (
-              <p>All suggestions are dismissed.</p>
-            ) : (
-              <>
-                <p>
-                  Select messages in Group Chat, then choose{" "}
-                  <strong>Suggest prompts</strong>.
-                </p>
-                <p>
-                  Edit the draft and choose <strong>Use prompt</strong> to fill
-                  the active tab. Send it when you’re ready.
-                </p>
-              </>
-            )}
+            <p>
+              Select messages in Group Chat, then choose{" "}
+              <strong>Suggest prompts</strong>.
+            </p>
+            <p>
+              Edit the draft and choose <strong>Use prompt</strong> to fill the
+              active tab. Send it when you’re ready.
+            </p>
           </div>
         ) : (
           shown.map((suggestion) => (
@@ -208,31 +172,10 @@ export function SuggestionColumn({
                 suggestion.authorId === room.shared.userId
               }
               disabled={disabled}
-              dismissed={ids.has(suggestion.id)}
               onUse={onUseSuggestion}
-              onDismiss={() => {
-                dismiss(suggestion.id);
-                setAnnouncement("Suggestion dismissed.");
-              }}
-              onRestore={() => {
-                restore(suggestion.id);
-                setAnnouncement("Suggestion restored.");
-              }}
+              onDeleted={() => setAnnouncement("Suggestion deleted.")}
             />
           ))
-        )}
-        {hidden.length > 0 && (
-          <Button
-            size="xs"
-            variant="ghost"
-            className="suggestion-toggle"
-            aria-expanded={showDismissed}
-            onClick={() => setShowDismissed(!showDismissed)}
-          >
-            {showDismissed
-              ? "Hide dismissed"
-              : `Show ${hidden.length} dismissed`}
-          </Button>
         )}
       </div>
     </section>

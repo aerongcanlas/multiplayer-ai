@@ -123,7 +123,10 @@ await run.execute(
         );
 
         // A read-only plan-mode turn: the access mode keeps Codex in its read-only sandbox.
-        await run.page.getByRole("checkbox", { name: "Plan mode" }).click();
+        await run.page
+            .getByRole("button", { name: "Add", exact: true })
+            .click();
+        await run.page.getByRole("menuitemcheckbox", { name: "Plan mode" }).click();
         await until(async () => (await tab()).loadout.planMode, "plan mode");
         await send(
             live
@@ -203,7 +206,10 @@ await run.execute(
                 .getByRole("region", { name: "Agent tasks" })
                 .locator(".agent-card");
             await run.page
-                .getByRole("checkbox", { name: "Plan mode" })
+                .getByRole("button", { name: "Add", exact: true })
+                .click();
+            await run.page
+                .getByRole("menuitemcheckbox", { name: "Plan mode" })
                 .click();
             await until(
                 async () => !(await tab()).loadout.planMode,
@@ -238,7 +244,10 @@ await run.execute(
             const idle = (label) => run.settled(tab, label, 10 * 60_000);
             // Ask mode routes a write to the tab; declining keeps the repository unchanged.
             await run.page
-                .getByRole("checkbox", { name: "Plan mode" })
+                .getByRole("button", { name: "Add", exact: true })
+                .click();
+            await run.page
+                .getByRole("menuitemcheckbox", { name: "Plan mode" })
                 .click();
             await until(
                 async () => !(await tab()).loadout.planMode,

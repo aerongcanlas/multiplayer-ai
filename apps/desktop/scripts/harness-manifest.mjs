@@ -1,6 +1,7 @@
 // Maintainer script: regenerates the embedded harness program manifest when pins move.
 //   node scripts/harness-manifest.mjs            writes src/supervisor/programs/manifest.ts
 //   node scripts/harness-manifest.mjs --print    prints the digests instead
+//   node scripts/harness-manifest.mjs --check    fails when a pin is behind the newest release
 // Codex comes from the release's per-platform `codex-package` archive, because the codex binary
 // needs its companions (codex-code-mode-host, rg) beside it. Digests come from the GitHub release
 // (trust on first use); the executable's digest is computed by downloading and unpacking each one. Claude Code digests come from the manifest.json
@@ -14,6 +15,25 @@ const CODEX_VERSION = "0.155.1";
 const SDK_VERSION = "0.3.280";
 const CLAUDE_VERSION = "2.1.280";
 const print = process.argv.includes("--print");
+
+if (process.argv.includes("--check")) {
+  const newest = async (name) =>
+    (await (await fetch(`https://registry.npmjs.org/${name}/latest`)).json())
+      .version;
+  const pins = [
+    ["Codex", CODEX_VERSION, await newest("@openai/codex")],
+    ["Claude Code", CLAUDE_VERSION, await newest("@anthropic-ai/claude-code")],
+    [
+      "Claude Agent SDK",
+      SDK_VERSION,
+      await newest("@anthropic-ai/claude-agent-sdk"),
+    ],
+  ];
+  const behind = pins.filter(([, pinned, latest]) => pinned !== latest);
+  for (const [name, pinned, latest] of pins)
+    console.log(`${name}: pinned ${pinned}, newest ${latest}`);
+  process.exit(behind.length ? 1 : 0);
+}
 
 const codexTargets = {
   "darwin-arm64": "aarch64-apple-darwin",

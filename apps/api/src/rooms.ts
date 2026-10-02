@@ -318,4 +318,33 @@ export function registerRooms(app: FastifyInstance, pool: Pool) {
       return { roomId };
     });
   });
+
+  app.delete("/v1/rooms/:roomId/suggestions/:suggestionId", async (request) => {
+    const { roomId, suggestionId } = editParams.parse(request.params);
+    return mutate(pool, request.actor, async (db) => {
+      const membership = await member(db, request.actor, roomId);
+      const { rows } = await db.query<{ author_id: string }>(
+        "select author_id from public.desktop_prompt_suggestion where id = $1 and room_id = $2 for update",
+        [suggestionId, roomId],
+      );
+      const suggestion = rows[0];
+      if (!suggestion)
+        throw new ApiError(
+          404,
+          "not_found",
+          "Suggestion not found in this room.",
+        );
+      if (suggestion.author_id !== request.actor && !membership.is_admin)
+        throw new ApiError(
+          403,
+          "forbidden",
+          "Only the author or a room admin can delete this suggestion.",
+        );
+      await db.query(
+        "delete from public.desktop_prompt_suggestion where id = $1",
+        [suggestionId],
+      );
+      return { roomId };
+    });
+  });
 }

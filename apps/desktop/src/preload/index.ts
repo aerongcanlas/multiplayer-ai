@@ -41,6 +41,8 @@ const bridge: DesktopBridge = {
       prompt,
       expectedRevision,
     }),
+  deleteSuggestion: (roomId, suggestionId) =>
+    invoke({ type: "suggestion.delete", roomId, suggestionId }),
   onSnapshot: (listener) => {
     const handler = (_event: Electron.IpcRendererEvent, snapshot: Snapshot) =>
       listener(snapshot);
@@ -95,6 +97,16 @@ const bridge: DesktopBridge = {
     invoke({ type: "harness.useManaged", harness }),
   acknowledgeHarnessNotice: (harness) =>
     invoke({ type: "harness.acknowledgeNotice", harness }),
+  updateHarness: (harness) => invoke({ type: "harness.update", harness }),
+  revertHarnessUpdate: (harness) =>
+    invoke({ type: "harness.revertUpdate", harness }),
+  setHarnessDefault: (harness, model, effort) =>
+    invoke({
+      type: "harness.setDefault",
+      harness,
+      model,
+      ...(effort ? { effort } : {}),
+    }),
   onTranscript: (listener) => {
     const handler = (
       _event: Electron.IpcRendererEvent,

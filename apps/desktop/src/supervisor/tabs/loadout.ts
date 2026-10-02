@@ -7,8 +7,11 @@ export function withDefaultModel(
   loadout: Loadout,
 ): Loadout {
   const models = registry.state(loadout.harness).models;
-  const model = models.find((model) => model.isDefault) ?? models[0];
-  if (!model) return loadout;
+  // A chosen model keeps its place and only a missing effort is filled in.
+  const model = loadout.model
+    ? models.find((model) => model.id === loadout.model)
+    : (models.find((model) => model.isDefault) ?? models[0]);
+  if (!model || (loadout.model && loadout.effort)) return loadout;
   const effort =
     model.defaultEffort && model.efforts.includes(model.defaultEffort)
       ? model.defaultEffort

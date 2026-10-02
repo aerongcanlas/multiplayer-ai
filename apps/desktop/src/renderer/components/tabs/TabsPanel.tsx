@@ -44,12 +44,15 @@ function ReadAlongSwitch({
   status: ReadAlongStatus | undefined;
   disabled: boolean;
 }) {
+  const shares =
+    "Room members see your prompts and the agent's messages, masked. Tool output and files stay on this desktop.";
   return (
-    <div className="read-along-bar">
+    <div className="read-along-bar" title={shares}>
       <label className="read-along-switch">
         <input
           type="checkbox"
           role="switch"
+          aria-description={shares}
           checked={tab.readAlong}
           disabled={disabled}
           onChange={() =>
@@ -63,10 +66,6 @@ function ReadAlongSwitch({
       </label>
       <span className={`read-along-caption state-${status?.state ?? "off"}`}>
         {switchCaption(status, tab.readAlong)}
-      </span>
-      <span className="subtle">
-        Room members see your prompts and the agent&apos;s messages, masked.
-        Tool output and files stay on this desktop.
       </span>
     </div>
   );
@@ -471,16 +470,6 @@ export function TabsPanel({
             />
           )}
           <div className="panel-composer" hidden={Boolean(agentKey)}>
-            <LoadoutBar
-              loadout={tab.loadout}
-              harness={harness}
-              disabled={disabled || busy}
-              onChange={(loadout) =>
-                void perform(() =>
-                  window.desktop.setLoadout(room.id, tab.id, loadout),
-                )
-              }
-            />
             {source && (
               <div className="source-chip">
                 <span>
@@ -519,6 +508,27 @@ export function TabsPanel({
                 modelMissing
               }
               onSubmit={send}
+              footer={
+                <LoadoutBar
+                  loadout={tab.loadout}
+                  harness={harness}
+                  disabled={disabled || busy}
+                  onChange={(loadout) =>
+                    void perform(() =>
+                      window.desktop.setLoadout(room.id, tab.id, loadout),
+                    )
+                  }
+                  onSetDefault={(model, effort) =>
+                    void perform(() =>
+                      window.desktop.setHarnessDefault(
+                        tab.loadout.harness,
+                        model,
+                        effort,
+                      ),
+                    )
+                  }
+                />
+              }
             />
             <p className="composer-hint">
               {HARNESS_LABELS[tab.loadout.harness]} · runs on this desktop with

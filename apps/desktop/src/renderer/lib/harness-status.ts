@@ -1,4 +1,4 @@
-import type { HarnessState } from "../../shared/tabs";
+import { newerVersion, type HarnessState } from "../../shared/tabs";
 import { plural } from "./utils";
 
 export const programFailed = (program: HarnessState["program"]) =>
@@ -53,5 +53,20 @@ export function readiness(harness: HarnessState | undefined) {
   return {
     ready: true,
     text: models ? `Ready · ${plural(models, "model")}` : "Ready",
+  };
+}
+
+/** The newer published version a harness program is behind, and whether the app can fetch it. */
+export function updateAvailable({ program, latestVersion }: HarnessState) {
+  const custom = program.state === "custom";
+  const current = custom ? program.version : program.pinned;
+  // Versions report as "codex-cli 0.154.0" or "2.1.280 (Claude Code)".
+  const running = current?.match(/\d+\.\d+\.\d+/)?.[0];
+  if (!latestVersion || !running || !newerVersion(latestVersion, running))
+    return null;
+  return {
+    version: latestVersion,
+    // A custom executable is the host's to update; a download in flight finishes first.
+    installable: ["ready", "missing", "failed"].includes(program.state),
   };
 }

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { setTimeout as wait } from "node:timers/promises";
-import { ClaudeAdapter } from "./adapter";
+import { ClaudeAdapter, defaultEffort, listModels } from "./adapter";
 import { claudeFixture } from "./fixture";
 import {
   HarnessError,
@@ -253,7 +253,14 @@ test("inspect reuses the machine's login, and a signed-out machine gets guidance
     assert.equal(signedIn.auth.state, "signed_in");
     assert.equal(signedIn.auth.account, "fixture@example.invalid");
     assert.deepEqual(signedIn.models[0].efforts, ["low", "medium", "high"]);
-    assert.deepEqual(signedIn.models[1].efforts, []);
+    assert.deepEqual(
+      signedIn.models.map((model) => [model.id, model.efforts.length]),
+      [
+        ["sonnet", 3],
+        ["opus", 3],
+        ["haiku", 0],
+      ],
+    );
     assert.equal(adapter.signIn, "guidance");
     assert.equal("startSignIn" in adapter, false);
     fixture.setSignedIn(false);
@@ -262,6 +269,61 @@ test("inspect reuses the machine's login, and a signed-out machine gets guidance
     assert.match(signedOut.auth.message ?? "", /\/login/);
     assert.deepEqual(signedOut.models, []);
   }));
+
+test("a model starts at Claude Code's own default effort, within the levels it supports", () => {
+  const all = ["low", "medium", "high", "xhigh", "max"] as const;
+  const effort = (resolvedModel: string, levels: readonly string[] = all) =>
+    defaultEffort({
+      value: "default",
+      resolvedModel,
+      supportedEffortLevels: [...levels] as (typeof all)[number][],
+    });
+  assert.equal(effort("claude-opus-5-5"), "medium");
+  assert.equal(effort("claude-sonnet-5-5"), "medium");
+  assert.equal(effort("claude-opus-4-7"), "xhigh");
+  assert.equal(effort("claude-fable-5-1"), "high");
+  assert.equal(effort("claude-opus-4-7", ["low", "medium", "high"]), "high");
+  assert.equal(effort("claude-haiku-4-5", []), null);
+});
+
+test("the default alias is dropped and the model it resolves to is the default", () => {
+  const levels = ["low", "medium", "high"] as const;
+  const row = (value: string, displayName: string, resolvedModel: string) => ({
+    value,
+    displayName,
+    description: "",
+    resolvedModel,
+    supportedEffortLevels: [...levels],
+  });
+  const models = listModels([
+    row("default", "Default (recommended)", "claude-opus-5-5"),
+    row("sonnet", "Sonnet", "claude-sonnet-5"),
+    row("opus", "Opus (1M context)", "claude-opus-5-5[1m]"),
+    {
+      value: "haiku",
+      displayName: "Haiku",
+      description: "",
+      resolvedModel: "claude-haiku-4-5-20251001",
+    },
+  ]);
+  assert.deepEqual(
+    models.map((model) => [model.id, model.name, model.isDefault]),
+    [
+      ["sonnet", "Sonnet 5", false],
+      ["opus", "Opus 5.5", true],
+      ["haiku", "Haiku 4.5", false],
+    ],
+  );
+  assert.equal(models[1]?.defaultEffort, "medium");
+  // Without a resolved alias the first named model is the default.
+  assert.equal(
+    listModels([
+      { value: "default", displayName: "Default", description: "" },
+      { value: "haiku", displayName: "Haiku", description: "" },
+    ])[0]?.isDefault,
+    true,
+  );
+});
 
 test("a missing custom binary is reported as program state without a download", async () => {
   const { dir, fixture } = await setup();

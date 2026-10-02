@@ -1,5 +1,6 @@
 import {
   CheckCircle2,
+  ChevronDown,
   Circle,
   CircleDot,
   ClipboardList,
@@ -15,6 +16,7 @@ import {
 import { plural } from "../lib/utils";
 import { AgentTasks } from "./AgentTasks";
 import { SuggestionColumn } from "./SuggestionColumn";
+import { Button } from "./ui/Button";
 import { STATUS_LABELS } from "./tabs/labels";
 
 const STEP_ICONS: Record<PlanStep["status"], typeof Circle> = {
@@ -108,6 +110,8 @@ export function MissionControlPanel({
   onUseSuggestion,
   disabled,
   watching,
+  collapsed,
+  onToggle,
 }: {
   room: Room;
   tab: Tab | undefined;
@@ -118,6 +122,8 @@ export function MissionControlPanel({
   disabled: boolean;
   // The shared tab filling the main area; Mission Control keeps following your own tab.
   watching?: string;
+  collapsed: boolean;
+  onToggle: () => void;
 }) {
   const running = tab?.runningAgents ?? 0;
   return (
@@ -133,8 +139,20 @@ export function MissionControlPanel({
             : "Follows the active chat tab"}
           {watching && ` · you are watching ${watching}`}
         </span>
+        <Button
+          size="icon-xs"
+          variant="ghost"
+          className="mission-toggle"
+          aria-label={
+            collapsed ? "Expand Mission Control" : "Collapse Mission Control"
+          }
+          aria-expanded={!collapsed}
+          onClick={onToggle}
+        >
+          <ChevronDown size={14} />
+        </Button>
       </header>
-      <div className="mission-grid">
+      <div className="mission-grid" hidden={collapsed}>
         <LeadContext tab={tab} harness={harness} />
         <AgentTasks
           roomId={room.id}

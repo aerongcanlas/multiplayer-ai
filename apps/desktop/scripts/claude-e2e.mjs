@@ -102,7 +102,8 @@ await run.execute(async () => {
     "A project skill's question appears as a card and the answer reaches the skill",
   );
 
-  await panel().getByRole("checkbox", { name: "Plan mode" }).check();
+  await panel().getByRole("button", { name: "Add", exact: true }).click();
+  await panel().getByRole("menuitemcheckbox", { name: "Plan mode" }).click();
   await until(async () => (await tab()).loadout.planMode, "plan mode");
   await send(
     "Plan, in two short steps, how you would add a CONTRIBUTING.md with one sentence. When the plan is ready, exit plan mode.",

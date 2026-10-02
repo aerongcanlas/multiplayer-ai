@@ -1,7 +1,18 @@
-import { FolderOpen, LogIn, RefreshCw, RotateCcw } from "lucide-react";
+import {
+  ArrowUpCircle,
+  FolderOpen,
+  LogIn,
+  RefreshCw,
+  RotateCcw,
+} from "lucide-react";
 import type { HarnessState } from "../../shared/tabs";
 import { perform } from "../lib/desktop-store";
-import { authLabel, programFailed, programLabel } from "../lib/harness-status";
+import {
+  authLabel,
+  programFailed,
+  programLabel,
+  updateAvailable,
+} from "../lib/harness-status";
 import { plural } from "../lib/utils";
 import { Button } from "./ui/Button";
 
@@ -93,6 +104,58 @@ export function HarnessStatus({
   );
 }
 
+/** A newer published program version, with the way to get it or to go back. */
+function UpdateNotice({
+  harness,
+  disabled,
+}: {
+  harness: HarnessState;
+  disabled: boolean;
+}) {
+  const update = updateAvailable(harness);
+  if (!update && !harness.bundledVersion) return null;
+  return (
+    <>
+      {update && (
+        <span className="harness-line harness-update">
+          <ArrowUpCircle size={11} aria-hidden="true" />
+          {update.version} available
+          {update.installable ? (
+            <Button
+              size="xs"
+              variant="outline"
+              disabled={disabled}
+              title={`Downloads ${harness.label} ${update.version}, newer than the version this app was tested with.`}
+              onClick={() =>
+                void perform(() => window.desktop.updateHarness(harness.id))
+              }
+            >
+              Update
+            </Button>
+          ) : (
+            harness.program.state === "custom" && " · update your executable"
+          )}
+        </span>
+      )}
+      {harness.bundledVersion && (
+        <span className="harness-line harness-update-applied">
+          Newer than tested {harness.bundledVersion}
+          <Button
+            size="xs"
+            variant="ghost"
+            disabled={disabled}
+            onClick={() =>
+              void perform(() => window.desktop.revertHarnessUpdate(harness.id))
+            }
+          >
+            Revert
+          </Button>
+        </span>
+      )}
+    </>
+  );
+}
+
 export function HarnessSettings({
   harnesses,
   disabled,
@@ -126,6 +189,7 @@ export function HarnessSettings({
             </Button>
           </div>
           <span className="harness-line">{programLabel(harness)}</span>
+          <UpdateNotice harness={harness} disabled={disabled} />
           {harness.program.customPath && (
             <span
               className="harness-line harness-path"

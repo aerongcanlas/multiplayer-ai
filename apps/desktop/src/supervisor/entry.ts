@@ -7,6 +7,8 @@ import { CodexAdapter } from "./harnesses/codex/adapter";
 import { ClaudeAdapter } from "./harnesses/claude/adapter";
 import { ProgramManager } from "./programs/manager";
 import { HARNESS_MANIFEST } from "./programs/manifest";
+import { latestVersion } from "./programs/latest";
+import { findRelease } from "./programs/release";
 import type { ProgramManifest } from "./programs/types";
 import type { SupervisorMessage, SupervisorRequest } from "../shared/contracts";
 
@@ -60,6 +62,10 @@ const started = (async () => {
     programs: new ProgramManager({ root: directory, manifest }),
     settings: journal,
     changed: () => harnessesChanged(),
+    // An E2E run stays offline.
+    ...(fixture || claudeFixturePath || process.argv[5]
+      ? {}
+      : { latest: latestVersion, release: findRelease }),
     openLogin: (harness, url) =>
       parent.postMessage({ type: "open-login", harness, url }),
   });

@@ -1,6 +1,8 @@
 import {
   HARNESS_LABELS,
+  newerVersion,
   type HarnessId,
+  type HarnessModel,
   type HarnessState,
 } from "../../shared/tabs";
 import { ProgramError, type ProgramManager } from "../programs/manager";
@@ -10,6 +12,8 @@ import {
   type LaunchContext,
 } from "./contract";
 import { launchEnvironment } from "./environment";
+import type { ProgramRelease } from "../programs/release";
+import type { PlatformKey } from "../programs/types";
 
 interface Settings {
   getSetting<T>(key: string): T | undefined;
@@ -19,6 +23,29 @@ interface Settings {
 const executableKey = (harness: HarnessId) => `harness.${harness}.executable`;
 const noticeKey = (harness: HarnessId) =>
   `harness.${harness}.noticeAcknowledged`;
+const defaultKey = (harness: HarnessId) => `harness.${harness}.default`;
+const releaseKey = (harness: HarnessId) => `harness.${harness}.release`;
+
+/** The host's own default model, and the effort each model starts at. */
+interface DefaultChoice {
+  model: string;
+  efforts: Record<string, string>;
+}
+
+/** The harness's models with the host's saved defaults laid over the harness's own. */
+function withChoice(models: HarnessModel[], choice?: DefaultChoice) {
+  if (!choice) return models;
+  const chosen = models.some((model) => model.id === choice.model);
+  return models.map((model) => {
+    const effort = choice.efforts[model.id];
+    return {
+      ...model,
+      isDefault: chosen ? model.id === choice.model : model.isDefault,
+      defaultEffort:
+        effort && model.efforts.includes(effort) ? effort : model.defaultEffort,
+    };
+  });
+}
 
 /**
  * Per-harness program, sign-in, and model state. Program acquisition, handshakes, and inspection
@@ -28,6 +55,9 @@ export class HarnessRegistry {
   private states = new Map<HarnessId, HarnessState>();
   private adapters = new Map<HarnessId, HarnessAdapter>();
   private refreshing = new Map<HarnessId, Promise<void>>();
+  // Models as the harness reported them, before the host's saved defaults.
+  private reported = new Map<HarnessId, HarnessModel[]>();
+  private latestCheckedAt = new Map<HarnessId, number>();
   // Bumped when the executable changes so work started for the old one stops writing state.
   private generations = new Map<HarnessId, number>();
   // Custom executables that passed the handshake, so turns do not repeat it.
@@ -44,6 +74,14 @@ export class HarnessRegistry {
       settings: Settings;
       changed: () => void;
       openLogin?: (harness: HarnessId, url: string) => void;
+      // Reads the newest published program version; left out, no update check runs.
+      latest?: (harness: HarnessId) => Promise<string | null>;
+      // Finds a published version's download and digest; left out, updates are unavailable.
+      release?: (
+        harness: HarnessId,
+        version: string,
+        platform: PlatformKey,
+      ) => Promise<ProgramRelease>;
       // Main sends the login-shell environment; until then (or after the timeout) the
       // supervisor's own environment is used.
       environmentTimeoutMs?: number;
@@ -59,6 +97,15 @@ export class HarnessRegistry {
     this.fallback.unref?.();
     for (const adapter of options.adapters) {
       this.adapters.set(adapter.id, adapter);
+      // An earlier update stays in use until the app ships that version or a newer one.
+      const release = options.settings.getSetting<ProgramRelease>(
+        releaseKey(adapter.id),
+      );
+      if (release) {
+        if (newerVersion(release.version, options.programs.bundled(adapter.id)))
+          options.programs.use(adapter.id, release);
+        else options.settings.setSetting(releaseKey(adapter.id), undefined);
+      }
       const customPath = options.settings.getSetting<string>(
         executableKey(adapter.id),
       );
@@ -74,6 +121,9 @@ export class HarnessRegistry {
         auth: { state: "unknown" },
         signIn: adapter.signIn,
         reportsAgents: adapter.reportsAgents,
+        ...(options.programs.release(adapter.id)
+          ? { bundledVersion: options.programs.bundled(adapter.id) }
+          : {}),
         models: [],
         modelsRefreshedAt: null,
         limits: [],
@@ -194,7 +244,11 @@ export class HarnessRegistry {
           };
         });
         this.handshaken.set(harness, program.path);
-      } else if (program.source === "managed")
+      } else if (program.source === "managed") {
+        // Keeps the executable digest an update learned when it was unpacked.
+        const release = this.options.programs.release(harness);
+        if (release?.asset.binary)
+          this.options.settings.setSetting(releaseKey(harness), release);
         update((state) => {
           state.program = {
             state: "ready",
@@ -202,6 +256,7 @@ export class HarnessRegistry {
             pinned: state.program.pinned,
           };
         });
+      }
       return context;
     } catch (error) {
       this.handshaken.delete(harness);
@@ -235,6 +290,7 @@ export class HarnessRegistry {
     const running = this.refreshing.get(harness);
     if (running) return running;
     const update = this.updater(harness);
+    this.checkLatest(harness);
     const job: Promise<void> = (async () => {
       const context = await this.context(harness);
       // A known sign-in state stays in place while it is re-read, so ready tabs stay usable.
@@ -245,7 +301,13 @@ export class HarnessRegistry {
         const inspection = await this.adapter(harness).inspect(context);
         update((state) => {
           state.auth = inspection.auth;
-          state.models = inspection.models;
+          this.reported.set(harness, inspection.models);
+          state.models = withChoice(
+            inspection.models,
+            this.options.settings.getSetting<DefaultChoice>(
+              defaultKey(harness),
+            ),
+          );
           state.limits = inspection.limits;
           state.modelsRefreshedAt = new Date().toISOString();
         });
@@ -270,6 +332,22 @@ export class HarnessRegistry {
       });
     this.refreshing.set(harness, job);
     return job;
+  }
+
+  /** Looks up the newest published version in the background, at most every six hours. */
+  private checkLatest(harness: HarnessId) {
+    const latest = this.options.latest;
+    const checked = this.latestCheckedAt.get(harness) ?? 0;
+    if (!latest || Date.now() - checked < 6 * 60 * 60_000) return;
+    this.latestCheckedAt.set(harness, Date.now());
+    void latest(harness)
+      .catch(() => null)
+      .then((version) => {
+        if (!version) return this.latestCheckedAt.delete(harness);
+        this.update(harness, (state) => {
+          state.latestVersion = version;
+        });
+      });
   }
 
   async signIn(harness: HarnessId) {
@@ -303,6 +381,78 @@ export class HarnessRegistry {
       };
       state.auth = { state: "unknown" };
       state.models = [];
+    });
+    this.reported.delete(harness);
+  }
+
+  /** Moves the managed program to the newest published version and re-reads the harness. */
+  async updateProgram(harness: HarnessId) {
+    const label = HARNESS_LABELS[harness];
+    const version = this.state(harness).latestVersion;
+    const platform = this.options.programs.platform();
+    if (this.customPath(harness))
+      throw new Error(
+        `${label} runs your own executable. Update that program yourself.`,
+      );
+    if (!this.options.release || !platform)
+      throw new Error(`${label} cannot be updated from this build.`);
+    if (
+      !version ||
+      !newerVersion(version, this.options.programs.pinned(harness))
+    )
+      throw new Error(`${label} is already on the newest version.`);
+    const release = await this.options.release(harness, version, platform);
+    this.switchProgram(harness, release);
+  }
+
+  /** Returns the managed program to the version this app ships with. */
+  revertUpdate(harness: HarnessId) {
+    if (this.options.programs.release(harness))
+      this.switchProgram(harness, null);
+  }
+
+  private switchProgram(harness: HarnessId, release: ProgramRelease | null) {
+    this.options.programs.use(harness, release);
+    this.options.settings.setSetting(releaseKey(harness), release ?? undefined);
+    this.generations.set(harness, (this.generations.get(harness) ?? 0) + 1);
+    this.refreshing.delete(harness);
+    this.handshaken.delete(harness);
+    this.reported.delete(harness);
+    this.update(harness, (state) => {
+      state.program = {
+        state: "unknown",
+        version: null,
+        pinned: this.options.programs.pinned(harness),
+      };
+      if (release)
+        state.bundledVersion = this.options.programs.bundled(harness);
+      else delete state.bundledVersion;
+    });
+    void this.refresh(harness).catch(() => {
+      /* The failure is recorded in the harness state. */
+    });
+  }
+
+  /** Saves the model new tabs start on and the effort that model starts at. */
+  setDefault(harness: HarnessId, model: string, effort?: string) {
+    const reported = this.reported.get(harness) ?? [];
+    const target = reported.find((item) => item.id === model);
+    if (!target)
+      throw new Error(
+        `${model} is not offered by ${HARNESS_LABELS[harness]} right now.`,
+      );
+    if (effort && !target.efforts.includes(effort))
+      throw new Error(`${target.name} does not support ${effort} effort.`);
+    const previous = this.options.settings.getSetting<DefaultChoice>(
+      defaultKey(harness),
+    );
+    const choice: DefaultChoice = {
+      model,
+      efforts: { ...previous?.efforts, ...(effort ? { [model]: effort } : {}) },
+    };
+    this.options.settings.setSetting(defaultKey(harness), choice);
+    this.update(harness, (state) => {
+      state.models = withChoice(reported, choice);
     });
   }
 
