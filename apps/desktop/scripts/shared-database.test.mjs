@@ -582,7 +582,7 @@ test("read-along RPCs store sub-agent cards and the plan record, and pull them b
     assert.deepEqual(stored.agent, agent());
     assert.equal(stored.agent.turnId, turnId);
 
-    // Record: fields never published stay null; published ones return in the pull's record and the snapshot.
+    // Record: fields never published stay null; published ones return in the pull's record.
     const bare = (await pull(bob)).record;
     assert.deepEqual(
       [bare.plan, bare.runningAgents, bare.reportsAgents],
@@ -603,9 +603,8 @@ test("read-along RPCs store sub-agent cards and the plan record, and pull them b
     assert.deepEqual(full.plan, plan);
     assert.equal(full.runningAgents, 1);
     assert.equal(full.reportsAgents, true);
-    const listed = (await rpc(bob)).rooms[0].sharedTabs[0];
-    assert.deepEqual(listed.plan, plan);
-    assert.equal(listed.reportsAgents, true);
+    // The room snapshot's list keeps its shape.
+    assert.equal("plan" in (await rpc(bob)).rooms[0].sharedTabs[0], false);
     // An ended record omits the fields and keeps what it last shared; a null clears one.
     await publish(alice, record({ status: "ended", switchOn: false }));
     assert.deepEqual((await pull(bob)).record.plan, plan);

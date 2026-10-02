@@ -8,17 +8,6 @@ alter table public.desktop_tab_share
   add column if not exists running_agents integer,
   add column if not exists reports_agents boolean;
 
--- Null plan, runningAgents, and reportsAgents mean the host's app predates sub-agent sharing.
-create or replace function public.desktop_tab_share_json(t public.desktop_tab_share)
-returns jsonb language sql stable set search_path = '' as $$
-  select jsonb_build_object(
-    'tabId', t.tab_id, 'roomId', t.room_id, 'hostId', t.host_id,
-    'hostName', (select p.name from public.user_profile p where p.id = t.host_id),
-    'deviceId', t.device_id, 'title', t.title, 'harness', t.harness, 'model', t.model,
-    'status', t.status, 'switchOn', t.switch_on, 'rev', t.rev, 'updatedAt', t.updated_at,
-    'plan', t.plan, 'runningAgents', t.running_agents, 'reportsAgents', t.reports_agents);
-$$;
-
 -- Whether a published sub-agent card is well formed. Coalesced by the caller, so a mistyped
 -- field fails instead of yielding NULL.
 create or replace function public.desktop_tab_share_agent_valid(card jsonb)
@@ -250,12 +239,14 @@ begin
     row_count := row_count + 1;
     last_row := item;
   end loop;
-  return jsonb_build_object('record', public.desktop_tab_share_json(shared), 'entries', result,
-    'next', next_cursor, 'now', now());
+  -- The pull's record adds the plan fields; the room snapshot's list keeps its shape. All three
+  -- are null when the host's app predates sub-agent sharing.
+  return jsonb_build_object('record', public.desktop_tab_share_json(shared) || jsonb_build_object(
+      'plan', shared.plan, 'runningAgents', shared.running_agents, 'reportsAgents', shared.reports_agents),
+    'entries', result, 'next', next_cursor, 'now', now());
 end;
 $$;
 
-revoke all on function public.desktop_tab_share_json(public.desktop_tab_share) from public, anon, authenticated;
 revoke all on function public.desktop_tab_share_agent_valid(jsonb) from public, anon, authenticated;
 revoke all on function public.desktop_tab_share_plan_valid(jsonb) from public, anon, authenticated;
 revoke all on function public.desktop_tab_share_publish(jsonb, jsonb) from public, anon;
