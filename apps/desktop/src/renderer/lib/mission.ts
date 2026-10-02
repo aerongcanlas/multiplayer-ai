@@ -100,9 +100,10 @@ function spectatorSource(
     harness: record.harness,
     status: SHARED_STATUS_LABELS[record.status],
     facts: [
-      { label: "Host", value: hostName },
+      // The same order as an own tab; the host takes the place of the mode, which is not shared.
       { label: "Harness", value: HARNESS_LABELS[record.harness] },
       { label: "Model", value: record.model || "Not chosen" },
+      { label: "Host", value: hostName },
       { label: "Status", value: SHARED_STATUS_LABELS[record.status] },
     ],
     plan: shared.plan ?? { steps: [] },

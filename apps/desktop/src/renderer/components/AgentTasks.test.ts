@@ -137,9 +137,9 @@ test("Mission Control follows the tab in the main area and never mixes the two",
   assert.deepEqual(
     watching.facts.map((fact) => [fact.label, fact.value]),
     [
-      ["Host", "Alice"],
       ["Harness", "Codex"],
       ["Model", "gpt-5"],
+      ["Host", "Alice"],
       ["Status", "Live"],
     ],
   );
