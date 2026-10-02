@@ -85,8 +85,14 @@ function ownSource(
 function spectatorSource(
   record: SharedTab | undefined,
   shared: SharedAgents,
+  harnesses: HarnessState[],
 ): MissionSource | null {
   if (!record) return null;
+  // The host shares the model's id; this desktop names it when its own harness lists it.
+  const model =
+    harnesses
+      .find((item) => item.id === record.harness)
+      ?.models.find((item) => item.id === record.model)?.name ?? record.model;
   const ended = record.status === "ended" || record.status === "closed";
   const hostName = record.sameUser ? "You on another desktop" : record.hostName;
   return {
@@ -102,7 +108,7 @@ function spectatorSource(
     facts: [
       // The same order as an own tab; the host takes the place of the mode, which is not shared.
       { label: "Harness", value: HARNESS_LABELS[record.harness] },
-      { label: "Model", value: record.model || "Not chosen" },
+      { label: "Model", value: model || "Not chosen" },
       { label: "Host", value: hostName },
       { label: "Status", value: SHARED_STATUS_LABELS[record.status] },
     ],
@@ -123,9 +129,15 @@ export function missionSource(input: {
   own: OwnAgents;
   // The shared tab filling the main area, if one does.
   watched: { record: SharedTab | undefined; agents: SharedAgents } | null;
+  // Every harness this desktop knows, to name a host's model.
+  harnesses?: HarnessState[];
 }): MissionSource | null {
   if (input.watched)
-    return spectatorSource(input.watched.record, input.watched.agents);
+    return spectatorSource(
+      input.watched.record,
+      input.watched.agents,
+      input.harnesses ?? [],
+    );
   return input.tab ? ownSource(input.tab, input.harness, input.own) : null;
 }
 

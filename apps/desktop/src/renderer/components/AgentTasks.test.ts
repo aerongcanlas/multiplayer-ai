@@ -169,6 +169,20 @@ test("Mission Control follows the tab in the main area and never mixes the two",
     }),
     null,
   );
+  // A model this desktop's harness lists reads by its name; an unknown one keeps its id.
+  const named = (model: string) =>
+    missionSource({
+      ...base,
+      harnesses: [
+        {
+          id: "codex",
+          models: [{ id: "gpt-5", name: "GPT-5" }],
+        } as HarnessState,
+      ],
+      watched: { record: record({ model }), agents: shared() },
+    })!.facts[1].value;
+  assert.equal(named("gpt-5"), "GPT-5");
+  assert.equal(named("gpt-other"), "gpt-other");
   assert.equal(missionSubtitle(null), "Follows the active chat tab");
   assert.equal(agentCount(null), null);
 });

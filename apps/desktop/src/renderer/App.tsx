@@ -97,6 +97,7 @@ function RoomView({
     tab,
     harness,
     own: ownAgents,
+    harnesses,
     watched: sharedTabId
       ? {
           record:
