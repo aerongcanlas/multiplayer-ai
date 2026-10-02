@@ -26,6 +26,10 @@ async function json(request: typeof fetch, url: string, accept: string) {
     headers: { accept },
     signal: AbortSignal.timeout(20_000),
   });
+  if (response.status === 403 || response.status === 429)
+    throw new Error(
+      "The release lookup is rate limited on this network. Try again in an hour.",
+    );
   if (!response.ok)
     throw new Error(`The release lookup failed (HTTP ${response.status}).`);
   return (await response.json()) as Record<string, unknown>;

@@ -74,10 +74,15 @@ function RoomView({
   const [missionCollapsed, setMissionCollapsed] = useState(
     () => getStored(missionKey) === "1",
   );
-  // The stored choice is applied once the panel exists.
+  // The stored choice is applied once the panels are laid out, and the panels have the last word.
   useEffect(() => {
-    if (getStored(missionKey) === "1") missionPanel.current?.collapse();
-    if (getStored(chatKey) === "1") chatPanel.current?.collapse();
+    const frame = requestAnimationFrame(() => {
+      if (getStored(missionKey) === "1") missionPanel.current?.collapse();
+      if (getStored(chatKey) === "1") chatPanel.current?.collapse();
+      setMissionCollapsed(missionPanel.current?.isCollapsed() ?? false);
+      setChatCollapsed(chatPanel.current?.isCollapsed() ?? false);
+    });
+    return () => cancelAnimationFrame(frame);
   }, []);
   const tab = room.tabs.find((item) => item.id === selectedTab) ?? room.tabs[0];
   const harness = harnesses.find((item) => item.id === tab?.loadout.harness);

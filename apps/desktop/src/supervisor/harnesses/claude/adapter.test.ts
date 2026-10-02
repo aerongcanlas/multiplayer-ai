@@ -315,6 +315,14 @@ test("the default alias is dropped and the model it resolves to is the default",
     ],
   );
   assert.equal(models[1]?.defaultEffort, "medium");
+  // The 1M suffix stays when dropping it would leave two models with one name.
+  assert.deepEqual(
+    listModels([
+      row("sonnet", "Sonnet", "claude-sonnet-5"),
+      row("sonnet[1m]", "Sonnet (1M context)", "claude-sonnet-5[1m]"),
+    ]).map((model) => model.name),
+    ["Sonnet 5", "Sonnet 5 (1M)"],
+  );
   // Without a resolved alias the first named model is the default.
   assert.equal(
     listModels([

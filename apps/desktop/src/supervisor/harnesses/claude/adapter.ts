@@ -859,13 +859,14 @@ function displayName(model: ModelInfo) {
     model.displayName.replace(/\s*\((recommended|1M context)\)/gi, "").trim() ||
     model.value;
   if (/\d/.test(name)) return name;
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   // "claude-opus-5-5[1m]" and "claude-haiku-4-5-20251001" both carry the version after the family.
   const id = /^claude-[a-z]+-(\d+)(?:-(\d{1,2}))?(?!\d)/.exec(
     model.resolvedModel ?? model.value,
   );
   const version = id
     ? [id[1], id[2]].filter(Boolean).join(".")
-    : new RegExp(`${name} (\\d+(?:\\.\\d+)?)`, "i").exec(
+    : new RegExp(`${escaped} (\\d+(?:\\.\\d+)?)`, "i").exec(
         model.description,
       )?.[1];
   return version ? `${name} ${version}` : name;
@@ -883,9 +884,15 @@ export function listModels(models: ModelInfo[]): HarnessModel[] {
     (alias?.resolvedModel &&
       listed.find((model) => family(model) === family(alias))) ||
     listed[0];
-  return listed.map((model) => ({
+  const names = listed.map(displayName);
+  return listed.map((model, index) => ({
     id: model.value,
-    name: displayName(model),
+    // The 1M-context suffix is dropped unless that would leave two models with one name.
+    name:
+      names.indexOf(names[index]!) !== names.lastIndexOf(names[index]!) &&
+      /\(1M context\)/i.test(model.displayName)
+        ? `${names[index]} (1M)`
+        : names[index]!,
     efforts: model.supportedEffortLevels ?? [],
     defaultEffort: defaultEffort(model),
     isDefault: model === chosen,

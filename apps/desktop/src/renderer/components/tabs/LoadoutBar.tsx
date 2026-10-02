@@ -269,10 +269,8 @@ export function LoadoutBar({
                     key={item.id}
                     className="loadout-menu-item"
                     onClick={() => {
-                      const next =
-                        loadout.effort && item.efforts.includes(loadout.effort)
-                          ? loadout.effort
-                          : (item.defaultEffort ?? item.efforts[0]);
+                      // A model starts at the effort its row shows.
+                      const next = item.defaultEffort ?? item.efforts[0];
                       onChange({
                         ...loadout,
                         model: item.id,

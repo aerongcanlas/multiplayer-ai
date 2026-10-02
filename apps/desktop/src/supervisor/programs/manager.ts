@@ -5,6 +5,7 @@ import {
   access,
   chmod,
   mkdir,
+  readdir,
   readFile,
   rename,
   rm,
@@ -214,9 +215,27 @@ export class ProgramManager extends EventEmitter {
     if (customPath) return this.custom(customPath);
     const running = this.jobs.get(harness);
     if (running) return running;
-    const job = this.acquire(harness).finally(() => this.jobs.delete(harness));
+    const job = this.acquire(harness)
+      .then(async (program) => {
+        await this.prune(harness);
+        return program;
+      })
+      .finally(() => this.jobs.delete(harness));
     this.jobs.set(harness, job);
     return job;
+  }
+
+  /** Removes stored versions other than the one in use and the bundled one a revert returns to. */
+  private async prune(harness: HarnessId) {
+    const root = join(this.options.root, "harnesses", harness);
+    const keep = new Set([this.pinned(harness), this.bundled(harness)]);
+    try {
+      for (const name of await readdir(root))
+        if (!keep.has(name))
+          await rm(join(root, name), { recursive: true, force: true });
+    } catch {
+      /* Leftover versions only cost disk space. */
+    }
   }
 
   private async custom(path: string): Promise<ResolvedProgram> {
