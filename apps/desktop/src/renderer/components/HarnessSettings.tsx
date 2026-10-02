@@ -113,7 +113,8 @@ function UpdateNotice({
   disabled: boolean;
 }) {
   const update = updateAvailable(harness);
-  if (!update && !harness.bundledVersion) return null;
+  if (!update && (!harness.bundledVersion || harness.program.customPath))
+    return null;
   return (
     <>
       {update && (
@@ -137,7 +138,7 @@ function UpdateNotice({
           )}
         </span>
       )}
-      {harness.bundledVersion && (
+      {harness.bundledVersion && !harness.program.customPath && (
         <span className="harness-line harness-update-applied">
           Newer than tested {harness.bundledVersion}
           <Button

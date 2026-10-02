@@ -236,9 +236,9 @@ export class HarnessRegistry {
             version,
             pinned: state.program.pinned,
             customPath: program.path,
-            ...(version !== state.program.pinned
+            ...(version !== this.options.programs.bundled(harness)
               ? {
-                  warning: `This executable reports version ${version ?? "unknown"}; the app is tested with ${state.program.pinned}.`,
+                  warning: `This executable reports version ${version ?? "unknown"}; the app is tested with ${this.options.programs.bundled(harness)}.`,
                 }
               : {}),
           };
@@ -424,6 +424,8 @@ export class HarnessRegistry {
         version: null,
         pinned: this.options.programs.pinned(harness),
       };
+      state.auth = { state: "unknown" };
+      state.models = [];
       if (release)
         state.bundledVersion = this.options.programs.bundled(harness);
       else delete state.bundledVersion;
