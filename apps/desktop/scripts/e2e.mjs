@@ -146,7 +146,10 @@ await run.execute(
                 "chooseHarnessExecutable",
                 "useManagedHarness",
                 "acknowledgeHarnessNotice",
+                "setNewTabHarness",
                 "setHarnessDefault",
+                "setHarnessModelHidden",
+                "setHarnessOutputStyle",
                 "updateHarness",
                 "revertHarnessUpdate",
             ].sort(),
@@ -425,6 +428,20 @@ await run.execute(
             if ((await snapshot()).rooms[1].tabs[0].status === "idle") break;
             await page.waitForTimeout(100);
         }
+        // Only the transcript and chat messages select text, one region at a time.
+        const selectable = (selector) =>
+            page.evaluate(
+                (target) =>
+                    getComputedStyle(document.querySelector(target)).userSelect,
+                selector,
+            );
+        assert.equal(await selectable(".sidebar"), "none");
+        await page.locator(".chat-messages").click({ position: { x: 5, y: 5 } });
+        assert.equal(await selectable(".chat-messages"), "text");
+        assert.equal(await selectable(".transcript"), "none");
+        await page.locator(".transcript").click({ position: { x: 5, y: 5 } });
+        assert.equal(await selectable(".transcript"), "text");
+        assert.equal(await selectable(".chat-messages"), "none");
         // A leading slash lists the harness's commands; Enter completes the picked one.
         const prompt = page.getByRole("textbox", {
             name: "Message",
@@ -474,23 +491,111 @@ await run.execute(
         assert.equal((await snapshot()).rooms[1].suggestions.length, 0);
         await checkpoint("Deleting a suggestion removes it from the room");
 
-        const harnessToggle = page.getByRole("button", {
-            name: /^Harnesses/,
+        const roomsToggle = page.getByRole("button", {
+            name: /^Rooms/,
         });
-        await harnessToggle.click();
+        await roomsToggle.click();
         assert.equal(
-            await harnessToggle.getAttribute("aria-expanded"),
+            await roomsToggle.getAttribute("aria-expanded"),
             "false",
         );
+        await roomsToggle.click();
+        assert.equal(
+            await roomsToggle.getAttribute("aria-expanded"),
+            "true",
+        );
+        await checkpoint("Sidebar sections collapse and expand");
+
+        // Rooms reorder with Alt+Up/Down (and drag); the order stays on this desktop.
+        const roomNames = async () =>
+            (
+                await page
+                    .getByRole("navigation", { name: "Rooms" })
+                    .locator(":scope > button")
+                    .allInnerTexts()
+            ).map((text) => text.trim());
+        const initialRooms = await roomNames();
+        await page
+            .getByRole("navigation", { name: "Rooms" })
+            .getByRole("button", { name: initialRooms[0], exact: true })
+            .press("Alt+ArrowDown");
+        assert.deepEqual(await roomNames(), [
+            initialRooms[1],
+            initialRooms[0],
+            ...initialRooms.slice(2),
+        ]);
+        await page
+            .getByRole("navigation", { name: "Rooms" })
+            .getByRole("button", { name: initialRooms[0], exact: true })
+            .press("Alt+ArrowUp");
+        assert.deepEqual(await roomNames(), initialRooms);
+        await checkpoint("Rooms reorder from the keyboard");
+
+        // Back and forward retrace the rooms shown, from the header and the keyboard.
+        const roomsNav = page.getByRole("navigation", { name: "Rooms" });
+        const currentRoom = async () =>
+            (
+                await roomsNav.locator('button[aria-current="page"]').innerText()
+            ).trim();
+        const startRoom = await currentRoom();
+        const otherRoom = initialRooms.find((name) => name !== startRoom);
+        await roomsNav.getByRole("button", { name: otherRoom, exact: true }).click();
+        assert.equal(await currentRoom(), otherRoom);
+        await page.getByRole("button", { name: "Back", exact: true }).click();
+        assert.equal(await currentRoom(), startRoom);
         assert.equal(
             await page
-                .getByRole("region", { name: "Harness settings" })
-                .count(),
+                .getByRole("button", { name: "Forward", exact: true })
+                .isEnabled(),
+            true,
+        );
+        await page.keyboard.press("Control+]");
+        assert.equal(await currentRoom(), otherRoom);
+        await page.keyboard.press("Control+[");
+        assert.equal(await currentRoom(), startRoom);
+        await checkpoint("Back and forward retrace rooms");
+
+        // Signed out, the footer offers sign-in and the header stays quiet.
+        await page
+            .locator(".sidebar-footer")
+            .getByText("Not signed in", { exact: true })
+            .waitFor();
+        assert.equal(
+            (await page.locator(".app-bar .connection").innerText()).trim(),
+            "",
+        );
+
+        // Harness setup lives in Settings, not the sidebar.
+        assert.equal(
+            await page.getByRole("region", { name: "Harness settings" }).count(),
             0,
         );
-        await harnessToggle.click();
-        await page.getByRole("region", { name: "Harness settings" }).waitFor();
-        await checkpoint("Sidebar sections collapse and expand");
+        const settingsButton = page.getByRole("button", {
+            name: "Settings",
+            exact: true,
+        });
+        await settingsButton.click();
+        const settingsDialog = page.getByRole("dialog", { name: "Settings" });
+        await settingsDialog.getByRole("tab", { name: "Codex" }).click();
+        await settingsDialog
+            .getByRole("region", { name: "Harness settings" })
+            .getByText(/fixture@example.invalid/)
+            .waitFor();
+        const shown = settingsDialog.getByRole("switch", {
+            name: /in the model picker/,
+        });
+        assert.ok((await shown.count()) > 0, "Settings lists Codex models");
+        // The default model always stays in the picker.
+        assert.equal(await shown.first().isDisabled(), true);
+        await page.waitForTimeout(200);
+        await page.screenshot({ path: join(output, "03-settings.png") });
+        await settingsDialog.getByRole("tab", { name: "Claude Code" }).click();
+        await settingsDialog
+            .getByRole("button", { name: "Refresh Claude Code", exact: true })
+            .waitFor();
+        await page.keyboard.press("Escape");
+        assert.equal(await settingsDialog.count(), 0);
+        await checkpoint("Settings shows harness connections and models");
 
         await page.keyboard.press("Control+b");
         assert.equal(
@@ -560,8 +665,7 @@ await run.execute(
             process.kill(child.pid);
         });
         await page
-            .getByRole("status")
-            .filter({ hasText: "Progress is stale" })
+            .locator('.desktop-shell[data-health="stale"] .stale-banner')
             .waitFor();
         assert.equal(
             await page

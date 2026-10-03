@@ -13,7 +13,7 @@ import {
   type Tab,
   type TranscriptEntry,
 } from "../../../shared/tabs";
-import { perform } from "../../lib/desktop-store";
+import { perform, useDesktop } from "../../lib/desktop-store";
 import { programLabel } from "../../lib/harness-status";
 import {
   ageLabel,
@@ -164,6 +164,7 @@ export function TabsPanel({
   connected: boolean;
   clockOffsetMs: number | undefined;
 }) {
+  const newTabSetting = useDesktop().snapshot?.newTabHarness;
   const sharedTabs = room.shared?.sharedTabs ?? [];
   const [closing, setClosing] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -196,6 +197,25 @@ export function TabsPanel({
     setClosing(null);
     await perform(() => window.desktop.closeTab(room.id, target.id, confirm));
   }
+  // Cmd/Ctrl+T opens a tab on the host's new-tab harness; Cmd/Ctrl+W closes the active tab,
+  // asking first when it is running.
+  const newTabHarness =
+    newTabSetting ?? harnesses[0]?.id ?? ("claude" as const);
+  useEffect(() => {
+    const listener = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey)
+        return;
+      const key = event.key.toLowerCase();
+      if (key !== "t" && key !== "w") return;
+      event.preventDefault();
+      // Dialogs own the keyboard while open.
+      if (disabled || document.querySelector('[role="dialog"]')) return;
+      if (key === "t") void open(newTabHarness);
+      else if (tab && !sharedTabId) void close(tab, false);
+    };
+    window.addEventListener("keydown", listener);
+    return () => window.removeEventListener("keydown", listener);
+  });
   async function send(text: string) {
     if (!tab) return false;
     const result = await perform(() =>

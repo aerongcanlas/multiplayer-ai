@@ -178,10 +178,7 @@ export function createRun({
       if (message.type() === "error" && capture) errors.push(message.text());
     });
     page.on("request", (request) => network.push(request.url()));
-    await page
-      .getByRole("status")
-      .filter({ hasText: "Local supervisor connected" })
-      .waitFor();
+    await page.locator('.desktop-shell[data-health="live"]').waitFor();
     await page
       .getByRole("heading", { name: "My workspace", exact: true })
       .waitFor();

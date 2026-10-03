@@ -184,7 +184,7 @@ export class ProgramManager extends EventEmitter {
     if (!platform || !asset)
       throw new ProgramError(
         "unsupported_platform",
-        "No managed build of this harness exists for this platform. Choose a custom executable in Harness settings.",
+        "No managed build of this harness exists for this platform. Choose a custom executable in Settings.",
       );
     return { platform, asset };
   }

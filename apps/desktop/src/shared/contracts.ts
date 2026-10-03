@@ -157,6 +157,8 @@ export interface Room {
 
 export interface Snapshot {
   harnesses?: HarnessState[];
+  // The harness Cmd/Ctrl+T and an empty room open new tabs with.
+  newTabHarness?: HarnessId;
   collaboration?: CollaborationState;
   protocolVersion: typeof PROTOCOL_VERSION;
   revision: number;
@@ -250,6 +252,16 @@ export interface DesktopBridge {
     harness: HarnessId,
     model: string,
     effort?: string,
+  ): Promise<Result>;
+  setNewTabHarness(harness: HarnessId): Promise<Result>;
+  setHarnessModelHidden(
+    harness: HarnessId,
+    model: string,
+    hidden: boolean,
+  ): Promise<Result>;
+  setHarnessOutputStyle(
+    harness: HarnessId,
+    style: string | null,
   ): Promise<Result>;
   onTranscript(listener: (batches: TranscriptBatch[]) => void): () => void;
   // Read-along: one watched shared tab at a time; entries arrive on onSharedTranscript.

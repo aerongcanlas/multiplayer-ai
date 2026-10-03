@@ -333,6 +333,7 @@ export class FakeHarness implements HarnessAdapter {
     { name: "review", description: "Review the current changes" },
     { name: "plan", description: "Plan a change", argumentHint: "<goal>" },
   ];
+  outputStyles?: string[];
   inspectDelayMs: number;
   resumable: boolean;
   failFirstResumedTurn: boolean;
@@ -377,6 +378,7 @@ export class FakeHarness implements HarnessAdapter {
           auth: { state: "signed_in", account: "fake@example.invalid" },
           models: structuredClone(this.models),
           limits: [],
+          ...(this.outputStyles ? { outputStyles: this.outputStyles } : {}),
         }
       : {
           auth: {
@@ -401,6 +403,7 @@ export class FakeHarness implements HarnessAdapter {
 
   async open(request: OpenRequest): Promise<HarnessSession> {
     this.calls.push(`open:${request.sessionId ?? "new"}`);
+    if (request.outputStyle) this.calls.push(`style:${request.outputStyle}`);
     if (request.sessionId && !this.resumable)
       throw new HarnessError(
         "resume_failed",

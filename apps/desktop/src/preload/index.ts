@@ -109,6 +109,11 @@ const bridge: DesktopBridge = {
       model,
       ...(effort ? { effort } : {}),
     }),
+  setNewTabHarness: (harness) => invoke({ type: "harness.setNewTab", harness }),
+  setHarnessModelHidden: (harness, model, hidden) =>
+    invoke({ type: "harness.setModelHidden", harness, model, hidden }),
+  setHarnessOutputStyle: (harness, style) =>
+    invoke({ type: "harness.setOutputStyle", harness, style }),
   onTranscript: (listener) => {
     const handler = (
       _event: Electron.IpcRendererEvent,

@@ -42,6 +42,7 @@ export interface ClaudeQuery extends AsyncIterable<SDKMessage> {
   accountInfo(): Promise<AccountInfo>;
   supportedModels(): Promise<ModelInfo[]>;
   supportedCommands(): Promise<ClaudeCommand[]>;
+  initializationResult(): Promise<{ available_output_styles?: string[] }>;
   interrupt(): Promise<unknown>;
   stopTask(taskId: string): Promise<void>;
   setPermissionMode(mode: PermissionMode): Promise<void>;
@@ -239,6 +240,9 @@ class ClaudeSession implements HarnessSession {
           ? { effort: this.loadout.effort as Options["effort"] }
           : {}),
         ...(this.sessionId ? { resume: this.sessionId } : {}),
+        ...(this.request.outputStyle
+          ? { settings: { outputStyle: this.request.outputStyle } }
+          : {}),
         includePartialMessages: true,
         canUseTool: this.canUseTool,
         // Raw stderr never enters app state; a short tail is kept only to classify failures.
@@ -960,9 +964,17 @@ export class ClaudeAdapter implements HarnessAdapter {
       },
     });
     try {
-      const [models, account] = await Promise.all([
+      const [models, account, outputStyles] = await Promise.all([
         query.supportedModels(),
         query.accountInfo().catch((): AccountInfo => ({})),
+        query
+          .initializationResult()
+          .then((result) =>
+            (result.available_output_styles ?? [])
+              .filter((style) => style && style.length <= 120)
+              .slice(0, 100),
+          )
+          .catch((): string[] => []),
       ]);
       return {
         auth: {
@@ -974,6 +986,7 @@ export class ClaudeAdapter implements HarnessAdapter {
         },
         models: listModels(models),
         limits: [],
+        outputStyles,
       };
     } finally {
       channel.end();

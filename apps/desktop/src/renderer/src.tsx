@@ -37,6 +37,27 @@ if (import.meta.hot)
     disconnect();
     disconnectTranscripts();
   });
+// macOS insets its window buttons into the app bar, which leaves room for them.
+if (navigator.userAgent.includes("Macintosh"))
+  document.documentElement.classList.add("platform-mac");
+// A press inside the transcript or the chat messages keeps the selection it starts in that
+// region, so a drag never runs from one into the other.
+document.addEventListener(
+  "mousedown",
+  (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    const region = target?.closest(".transcript")
+      ? "transcript"
+      : target?.closest(".chat-messages")
+        ? "chat"
+        : null;
+    const root = document.documentElement;
+    if (!region || root.dataset.selectRegion === region) return;
+    getSelection()?.removeAllRanges();
+    root.dataset.selectRegion = region;
+  },
+  true,
+);
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <ErrorBoundary>

@@ -1,6 +1,8 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertCircle,
+  ArrowLeft,
+  ArrowRight,
   ChevronDown,
   ChevronRight,
   FolderGit2,
@@ -10,25 +12,29 @@ import {
   PanelRight,
   Plus,
   Radio,
+  Settings,
   X,
   Users,
 } from "lucide-react";
-import type { Room, Snapshot, Suggestion } from "../shared/contracts";
+import type { CollaborationState } from "../shared/collaboration";
+import type { Health, Room, Snapshot, Suggestion } from "../shared/contracts";
 import { tabBusy, type HarnessState, type Tab } from "../shared/tabs";
 import { dismissError, perform, useDesktop } from "./lib/desktop-store";
 import { missionSource } from "./lib/mission";
 import { useAgents, useSharedAgents } from "./lib/transcript-store";
 import { getStored, setStored } from "./lib/storage";
+import { ordered, useReorder, useSavedOrder } from "./lib/reorder";
+import { emptyHistory, step, visit, type Location } from "./lib/navigation";
 import { Button } from "./components/ui/Button";
 import { Input } from "./components/ui/Input";
 import { RoomWorkspace } from "@multiplayer-ai/ui/layouts/room-workspace";
 import type { ResizablePanelHandle } from "./components/ui/Resizable";
 import { GroupChatPanel } from "./components/GroupChatPanel";
 import { MissionControlPanel } from "./components/MissionControlPanel";
-import { SharedConnection } from "./components/SharedConnection";
+import { AccountFooter } from "./components/SharedConnection";
 import { RoomEntryDialog } from "./components/RoomEntryDialog";
 import { SidebarSection } from "./components/SidebarSection";
-import { HarnessSettings } from "./components/HarnessSettings";
+import { SettingsDialog } from "./components/SettingsDialog";
 import { TabsPanel } from "./components/tabs/TabsPanel";
 import { ChatList } from "./components/ChatList";
 
@@ -345,6 +351,58 @@ function RoomView({
   );
 }
 
+const SHARED_PROBLEMS: Partial<Record<CollaborationState["status"], string>> = {
+  syncing: "Connecting to shared rooms…",
+  offline: "Shared rooms offline",
+  setup_required: "Shared rooms need setup",
+  disconnected: "Shared rooms disconnected",
+};
+
+/** Header status: silent while everything works, a short notice when something does not. */
+function ConnectionStatus({
+  health,
+  connection,
+  disabled,
+}: {
+  health: Health["status"];
+  connection?: CollaborationState;
+  disabled: boolean;
+}) {
+  const shared =
+    connection?.auth === "signed_in"
+      ? SHARED_PROBLEMS[connection.status]
+      : undefined;
+  return (
+    <div className="connection" role="status">
+      {health === "connecting" && (
+        <span className="connection-notice">
+          <span className="status-dot" />
+          Starting this desktop…
+        </span>
+      )}
+      {shared && (
+        <span
+          className="connection-notice"
+          title={connection?.message ?? undefined}
+        >
+          <span className="status-dot stale" />
+          {shared}
+          {connection?.status !== "syncing" && (
+            <Button
+              size="xs"
+              variant="ghost"
+              disabled={disabled}
+              onClick={() => void perform(() => window.desktop.refreshShared())}
+            >
+              Retry
+            </Button>
+          )}
+        </span>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
   const { snapshot, health, pending, error } = useDesktop();
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(() =>
@@ -355,6 +413,20 @@ export default function App() {
   );
   const [roomDialog, setRoomDialog] = useState<"create" | "join" | null>(null);
   const addRoomRef = useRef<HTMLButtonElement>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [roomOrder, setRoomOrder] = useSavedOrder("multiplayer:roomOrder");
+  const rooms = ordered(
+    snapshot?.rooms ?? [],
+    (item) => item.id,
+    roomOrder,
+    "last",
+  );
+  const reorderRoom = useReorder(
+    "rooms",
+    rooms.map((item) => item.id),
+    setRoomOrder,
+  );
+  const settingsRef = useRef<HTMLButtonElement>(null);
   // Each room's active tab, remembered across launches.
   const [selectedTabs, setSelectedTabs] = useState<Record<string, string>>({});
   // Another host's read-along tab open in a room's main area.
@@ -366,6 +438,11 @@ export default function App() {
     snapshot?.rooms.find((room) => room.id === selectedRoomId) ??
     snapshot?.rooms[0];
   const disabled = pending > 0 || health.status !== "live";
+  // The listener below always calls the latest travel, which reads the latest history.
+  const travelRef = useRef(travel);
+  useEffect(() => {
+    travelRef.current = travel;
+  });
   function toggleSidebar() {
     setSidebarOpen((current) => {
       setStored("multiplayer:sidebar", current ? "closed" : "open");
@@ -374,33 +451,107 @@ export default function App() {
   }
   useEffect(() => {
     const listener = (event: KeyboardEvent) => {
-      if (roomDialog) return;
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "b") {
+      if (roomDialog || settingsOpen) return;
+      const command = event.ctrlKey || event.metaKey;
+      if (command && event.key.toLowerCase() === "b") {
         event.preventDefault();
         toggleSidebar();
       }
+      // Cmd/Ctrl+[ and ], or Alt+Left and Right outside text fields, go back and forward.
+      const editing =
+        event.target instanceof HTMLElement &&
+        event.target.closest("input, textarea, select, [contenteditable]");
+      const by =
+        (command && event.key === "[") ||
+        (event.altKey && event.key === "ArrowLeft" && !editing)
+          ? -1
+          : (command && event.key === "]") ||
+              (event.altKey && event.key === "ArrowRight" && !editing)
+            ? 1
+            : 0;
+      if (by) {
+        event.preventDefault();
+        travelRef.current(by);
+      }
+    };
+    // The mouse's back and forward buttons.
+    const mouse = (event: MouseEvent) => {
+      if (
+        roomDialog ||
+        settingsOpen ||
+        (event.button !== 3 && event.button !== 4)
+      )
+        return;
+      event.preventDefault();
+      travelRef.current(event.button === 3 ? -1 : 1);
     };
     window.addEventListener("keydown", listener);
-    return () => window.removeEventListener("keydown", listener);
-  }, [roomDialog]);
-  function selectRoom(id: string) {
-    setSelectedRoomId(id);
-    setStored("multiplayer:room", id);
-  }
+    window.addEventListener("mouseup", mouse);
+    return () => {
+      window.removeEventListener("keydown", listener);
+      window.removeEventListener("mouseup", mouse);
+    };
+  }, [roomDialog, settingsOpen]);
   const selectedTab = (roomId: string) =>
     selectedTabs[roomId] ?? getStored(tabKey(roomId));
-  function selectTab(roomId: string, tabId: string) {
-    setSelectedTabs((current) => ({ ...current, [roomId]: tabId }));
-    setStored(tabKey(roomId), tabId);
-    setShared(null);
+  // Back and forward move through the places the main area showed.
+  const [history, setHistory] = useState(emptyHistory);
+  const here = (): Location | null =>
+    room
+      ? {
+          roomId: room.id,
+          tabId: selectedTab(room.id),
+          sharedTabId: shared?.roomId === room.id ? shared.tabId : null,
+        }
+      : null;
+  /** Shows a place without recording it. */
+  function show({ roomId, tabId, sharedTabId }: Location) {
+    setSelectedRoomId(roomId);
+    setStored("multiplayer:room", roomId);
+    if (tabId) {
+      setSelectedTabs((current) => ({ ...current, [roomId]: tabId }));
+      setStored(tabKey(roomId), tabId);
+    }
+    setShared(sharedTabId ? { roomId, tabId: sharedTabId } : null);
   }
-  const selectShared = useCallback(
-    (roomId: string, tabId: string | null) =>
-      setShared(tabId ? { roomId, tabId } : null),
-    [],
-  );
+  /** Shows a place and records the visit; the place before it is kept as the first entry. */
+  function go(location: Location) {
+    const current = here();
+    setHistory((past) =>
+      visit(
+        past.entries.length || !current ? past : visit(past, current),
+        location,
+      ),
+    );
+    show(location);
+  }
+  function travel(by: -1 | 1) {
+    // A room that is gone is skipped; a closed tab falls back to the room's current tab.
+    const moved = step(history, by, ({ roomId }) =>
+      Boolean(snapshot?.rooms.some((item) => item.id === roomId)),
+    );
+    if (!moved) return;
+    setHistory(moved.history);
+    show(moved.location);
+  }
+  const canGo = (by: -1 | 1) => {
+    const index = history.index + by;
+    return index >= 0 && index < history.entries.length;
+  };
+  function selectRoom(id: string) {
+    go({
+      roomId: id,
+      tabId: selectedTab(id),
+      sharedTabId: shared?.roomId === id ? shared.tabId : null,
+    });
+  }
+  function selectTab(roomId: string, tabId: string) {
+    go({ roomId, tabId, sharedTabId: null });
+  }
+  function selectShared(roomId: string, tabId: string | null) {
+    go({ roomId, tabId: selectedTab(roomId), sharedTabId: tabId });
+  }
   async function openChat(roomId: string, tab: Tab, closed: boolean) {
-    selectRoom(roomId);
     if (closed) {
       const result = await perform(() =>
         window.desktop.reopenTab(roomId, tab.id),
@@ -410,9 +561,29 @@ export default function App() {
     selectTab(roomId, tab.id);
   }
   return (
-    <div className="desktop-shell">
+    <div className="desktop-shell" data-health={health.status}>
       <header className="app-bar">
-        <div className="app-brand">
+        <nav className="app-nav" aria-label="History">
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            aria-label="Back"
+            title="Back (Cmd+[)"
+            disabled={!canGo(-1)}
+            onClick={() => travel(-1)}
+          >
+            <ArrowLeft size={16} />
+          </Button>
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            aria-label="Forward"
+            title="Forward (Cmd+])"
+            disabled={!canGo(1)}
+            onClick={() => travel(1)}
+          >
+            <ArrowRight size={16} />
+          </Button>
           <Button
             size="icon-sm"
             variant="ghost"
@@ -420,29 +591,16 @@ export default function App() {
             title="Toggle sidebar (Ctrl+B)"
             onClick={toggleSidebar}
           >
-            <PanelLeft size={17} />
+            <PanelLeft size={16} />
           </Button>
-          <Layers3 size={20} />
-          <strong>
-            Multiplayer<span>.ai</span>
-          </strong>
-          <span className="desktop-label">Desktop</span>
-        </div>
-        <div className={`connection connection-${health.status}`} role="status">
-          <span />
-          {health.status === "live"
-            ? "Local supervisor connected"
-            : health.status === "stale"
-              ? "Progress is stale"
-              : "Connecting"}
-          <span className="local-label">
-            {snapshot?.collaboration?.status === "connected"
-              ? "Shared rooms connected"
-              : "Local execution"}
-          </span>
-        </div>
+        </nav>
+        <ConnectionStatus
+          health={health.status}
+          connection={snapshot?.collaboration}
+          disabled={disabled}
+        />
       </header>
-      {error && !roomDialog && (
+      {error && !roomDialog && !settingsOpen && (
         <div className="error-banner" role="alert">
           <AlertCircle size={16} />
           <p>{error}</p>
@@ -457,7 +615,7 @@ export default function App() {
         </div>
       )}
       {health.status === "stale" && snapshot && (
-        <div className="stale-banner">
+        <div className="stale-banner" role="status">
           <AlertCircle size={14} />
           {health.message}
         </div>
@@ -469,6 +627,12 @@ export default function App() {
         >
           {sidebarOpen ? (
             <>
+              <div className="app-brand">
+                <Layers3 size={18} />
+                <strong>
+                  Multiplayer<span>.ai</span>
+                </strong>
+              </div>
               <div className="sidebar-sections">
                 <SidebarSection
                   id="rooms"
@@ -494,10 +658,11 @@ export default function App() {
                   }
                 >
                   <nav className="room-list" aria-label="Rooms">
-                    {snapshot?.rooms.map((item) => (
+                    {rooms.map((item) => (
                       <Fragment key={item.id}>
                         <button
                           type="button"
+                          {...reorderRoom(item.id)}
                           aria-current={
                             item.id === room?.id ? "page" : undefined
                           }
@@ -538,29 +703,23 @@ export default function App() {
                     ))}
                   </nav>
                 </SidebarSection>
-                <SidebarSection id="account" title="Account">
-                  <SharedConnection
-                    connection={snapshot?.collaboration}
-                    disabled={disabled}
-                  />
-                </SidebarSection>
-                <SidebarSection
-                  id="harnesses"
-                  title="Harnesses"
-                  count={snapshot?.harnesses?.length}
-                >
-                  <HarnessSettings
-                    harnesses={snapshot?.harnesses ?? []}
-                    disabled={disabled}
-                  />
-                </SidebarSection>
               </div>
               <div className="sidebar-footer">
-                <div className="local-avatar">Y</div>
-                <div>
-                  <strong>Your desktop</strong>
-                  <span>Private local workspace</span>
-                </div>
+                <AccountFooter
+                  connection={snapshot?.collaboration}
+                  disabled={disabled}
+                />
+                <Button
+                  ref={settingsRef}
+                  size="icon-sm"
+                  variant="ghost"
+                  className="sidebar-settings"
+                  aria-label="Settings"
+                  title="Settings"
+                  onClick={() => setSettingsOpen(true)}
+                >
+                  <Settings size={15} />
+                </Button>
               </div>
             </>
           ) : (
@@ -623,6 +782,17 @@ export default function App() {
             : "Saved on this desktop · Private local room"}
         </span>
       </footer>
+      {settingsOpen && (
+        <SettingsDialog
+          harnesses={snapshot?.harnesses ?? []}
+          disabled={disabled}
+          triggerRef={settingsRef}
+          onClose={() => {
+            setSettingsOpen(false);
+            dismissError();
+          }}
+        />
+      )}
       {roomDialog && (
         <RoomEntryDialog
           mode={roomDialog}

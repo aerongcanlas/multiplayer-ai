@@ -482,6 +482,19 @@ test("a shared-room import keeps local tabs for the same account and project", (
     });
     assert.equal(room().name, "Renamed");
     assert.equal(room().tabs[0].id, tabId);
+    // A chat with history stays in the room's closed list.
+    await setup.dispatch({
+      type: "workspace.register",
+      roomId: shared.id,
+      workspace: await inspectWorkspace(setup.repo),
+    });
+    await setup.dispatch({
+      type: "tab.send",
+      roomId: shared.id,
+      tabId,
+      text: "Hello there",
+    });
+    await setup.settled(tabId, shared.id);
     await setup.dispatch({ type: "tab.close", roomId: shared.id, tabId });
     assert.equal(room().closedTabs?.[0].id, tabId);
     await setup.dispatch({
@@ -1141,4 +1154,97 @@ test("a tab lists its harness's slash commands for the room's repository, briefl
     fake.signedIn = false;
     await setup.registry.refresh(fake.id);
     assert.deepEqual(await list(), []);
+  }));
+
+test("a hidden model leaves the picker list but the default cannot be hidden", () =>
+  withHost(async (setup, fake) => {
+    fake.models.push({
+      id: "fake-small",
+      name: "Fake small",
+      efforts: [],
+      defaultEffort: null,
+      isDefault: false,
+    });
+    await setup.registry.refresh(fake.id);
+    const hide = (model: string, hidden: boolean) =>
+      setup.dispatch({
+        type: "harness.setModelHidden",
+        harness: fake.id,
+        model,
+        hidden,
+      });
+    const hidden = () =>
+      setup.registry
+        .state(fake.id)
+        .models.filter((model) => model.hidden)
+        .map((model) => model.id);
+    await hide("fake-small", true);
+    assert.deepEqual(hidden(), ["fake-small"]);
+    await assert.rejects(hide("fake-model", true), /default for new tabs/);
+    await assert.rejects(hide("missing", true), /not offered/);
+    // A hidden model that becomes the default shows again, and survives a refresh.
+    await setup.registry.refresh(fake.id);
+    assert.deepEqual(hidden(), ["fake-small"]);
+    await setup.dispatch({
+      type: "harness.setDefault",
+      harness: fake.id,
+      model: "fake-small",
+    });
+    assert.deepEqual(hidden(), []);
+    await hide("fake-small", false);
+    assert.deepEqual(hidden(), []);
+  }));
+
+test("a chosen output style reaches sessions opened after the change", () =>
+  withHost(async (setup, fake) => {
+    const style = (value: string | null) =>
+      setup.dispatch({
+        type: "harness.setOutputStyle",
+        harness: fake.id,
+        style: value,
+      });
+    await assert.rejects(style("Explanatory"), /no output styles/);
+    fake.outputStyles = ["default", "Explanatory"];
+    await setup.registry.refresh(fake.id);
+    await assert.rejects(style("Unknown"), /not an output style/);
+    await style("Explanatory");
+    assert.equal(setup.registry.state(fake.id).outputStyle, "Explanatory");
+    const tab = await setup.open();
+    await setup.send(tab.id, "Hello there");
+    await setup.settled(tab.id);
+    assert.ok(fake.calls.includes("style:Explanatory"));
+    await style(null);
+    assert.equal(setup.registry.state(fake.id).outputStyle, undefined);
+  }));
+
+test("closing a tab that never ran leaves no chat behind", () =>
+  withHost(async (setup) => {
+    const empty = await setup.open();
+    await setup.closeTab(empty.id);
+    const room = () => setup.service.snapshot().rooms[0];
+    assert.equal(
+      room().tabs.some((tab) => tab.id === empty.id),
+      false,
+    );
+    assert.deepEqual(room().closedTabs ?? [], []);
+    const used = await setup.open();
+    await setup.send(used.id, "Hello there");
+    await setup.settled(used.id);
+    await setup.closeTab(used.id);
+    assert.deepEqual(
+      room().closedTabs?.map((tab) => tab.id),
+      [used.id],
+    );
+  }));
+
+test("new tabs open with the host's chosen harness", () =>
+  withHost(async (setup, fake) => {
+    // Claude Code is the default when present; this build only has the fake.
+    assert.equal(setup.service.snapshot().newTabHarness, fake.id);
+    await setup.dispatch({ type: "harness.setNewTab", harness: fake.id });
+    assert.equal(setup.service.snapshot().newTabHarness, fake.id);
+    await assert.rejects(
+      setup.dispatch({ type: "harness.setNewTab", harness: "claude" }),
+      /not available/,
+    );
   }));

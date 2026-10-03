@@ -15,6 +15,8 @@ import type {
 export interface LaunchContext {
   executable: string;
   env: Record<string, string>;
+  /** The host's output style for new sessions, where the harness has output styles. */
+  outputStyle?: string;
 }
 
 export interface SuggestionRequest extends LaunchContext {
@@ -26,6 +28,7 @@ export interface Inspection {
   auth: HarnessState["auth"];
   models: HarnessModel[];
   limits: HarnessState["limits"];
+  outputStyles?: string[];
 }
 
 // `agent` names the sub-agent card an event belongs to; lead events leave it unset.

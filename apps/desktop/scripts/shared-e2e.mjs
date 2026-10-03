@@ -188,12 +188,20 @@ async function launch(name) {
       globalThis.oauthUrl = value;
     };
   });
-  await page
-    .getByRole("status")
-    .filter({ hasText: "Local supervisor connected" })
-    .waitFor();
+  await page.locator('.desktop-shell[data-health="live"]').waitFor();
   return { app, page };
 }
+/** Syncs shared rooms now, as Settings › Account › Sync now does. */
+const syncShared = (page) =>
+  page.evaluate(() => window.desktop.refreshShared());
+/** Waits for the shared-room sync status in the snapshot. */
+const syncStatus = (page, status) =>
+  page.waitForFunction(
+    async (expected) =>
+      (await window.desktop.getSnapshot()).snapshot.collaboration.status ===
+      expected,
+    status,
+  );
 async function signIn(client, id) {
   await client.app.evaluate(() => {
     globalThis.oauthUrl = undefined;
@@ -225,12 +233,17 @@ try {
   assert.deepEqual(calls, [], "Signed-out startup makes no Supabase calls");
   await signIn(first, alice);
   await first.page
+    .getByRole("button", { name: "Settings", exact: true })
+    .click();
+  await first.page.getByRole("tab", { name: "Codex" }).click();
+  await first.page
     .getByRole("button", { name: "Refresh Codex", exact: true })
     .click();
   await first.page
     .getByRole("region", { name: "Harness settings" })
     .getByText(/fixture@example.invalid/)
     .waitFor();
+  await first.page.keyboard.press("Escape");
   checkpoint("Room creator signs in through PKCE against local fake auth");
   await first.page
     .getByRole("button", { name: "Add room", exact: true })
@@ -558,13 +571,8 @@ try {
     exact: true,
   });
   await chatPanel.screenshot({ path: join(output, "failed-message.png") });
-  await second.page
-    .getByRole("button", { name: "Refresh shared rooms" })
-    .click();
-  await second.page
-    .getByRole("status")
-    .filter({ hasText: /^Synced$/ })
-    .waitFor();
+  await syncShared(second.page);
+  await syncStatus(second.page, "connected");
   assert.equal(await chatDraft.inputValue(), "Keep this newer draft");
   await chatDraft.fill("");
   assert.equal(await restoreDraft.isEnabled(), true);
@@ -675,9 +683,7 @@ try {
   const seen = (locator) =>
     until(async () => {
       if (await locator.first().isVisible()) return true;
-      await second.page
-        .getByRole("button", { name: "Refresh shared rooms" })
-        .click();
+      await syncShared(second.page);
       await new Promise((resolve) => setTimeout(resolve, 400));
       return locator.first().isVisible();
     }, "the viewer to show " + locator);
@@ -896,13 +902,12 @@ try {
   );
 
   offline = true;
-  await second.page
-    .getByRole("button", { name: "Refresh shared rooms" })
-    .click();
-  await second.page
+  await syncShared(second.page);
+  // Only a problem shows in the header, with a way to retry.
+  const sharedNotice = second.page
     .getByRole("status")
-    .filter({ hasText: /^Offline$/ })
-    .waitFor();
+    .filter({ hasText: "Shared rooms offline" });
+  await sharedNotice.waitFor();
   assert.equal(
     await second.page
       .getByRole("textbox", { name: "Group chat message" })
@@ -910,23 +915,16 @@ try {
     false,
   );
   offline = false;
-  await second.page
-    .getByRole("button", { name: "Refresh shared rooms" })
-    .click();
-  await second.page
-    .getByRole("status")
-    .filter({ hasText: /^Synced$/ })
-    .waitFor();
+  await sharedNotice.getByRole("button", { name: "Retry" }).click();
+  await syncStatus(second.page, "connected");
+  assert.equal(await sharedNotice.count(), 0);
   checkpoint(
     "Offline state disables shared mutations and refresh restores access",
   );
   await second.app.close();
   apps.splice(apps.indexOf(second.app), 1);
   const restored = await launch("bob");
-  await restored.page
-    .getByRole("status")
-    .filter({ hasText: /^Synced$/ })
-    .waitFor();
+  await syncStatus(restored.page, "connected");
   await restored.page
     .getByRole("heading", { name: "Shared design", exact: true })
     .waitFor();
@@ -943,9 +941,7 @@ try {
   checkpoint(
     "Open member list and count remove departed members automatically",
   );
-  await restored.page
-    .getByRole("button", { name: "Refresh shared rooms" })
-    .click();
+  await syncShared(restored.page);
   await restored.page
     .getByRole("heading", { name: "My workspace", exact: true })
     .waitFor();
@@ -955,8 +951,12 @@ try {
   );
   checkpoint("Revoked membership removes room contents on the next sync");
   await first.page
-    .getByRole("button", { name: "Sign out", exact: true })
+    .getByRole("button", { name: "Settings", exact: true })
     .click();
+  const settings = first.page.getByRole("dialog", { name: "Settings" });
+  await settings.getByRole("button", { name: "Account", exact: true }).click();
+  await settings.getByRole("button", { name: "Sign out", exact: true }).click();
+  await first.page.keyboard.press("Escape");
   await first.page
     .getByRole("button", { name: "Sign in with GitHub" })
     .waitFor();

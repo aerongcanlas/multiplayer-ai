@@ -411,6 +411,16 @@ export class TabHost {
     if ((live?.turn && !live.turn.finished) || this.runningAgents(tabId))
       this.stop(roomId, tabId);
     this.writer.flush();
+    // A tab that never started a session or wrote an entry leaves no chat behind.
+    if (!tab.sessionId && this.writer.peekSeq(tabId) === 1) {
+      this.store.transaction((draft) => {
+        const room = draft.rooms.find((room) => room.id === roomId)!;
+        room.tabs = room.tabs.filter((item) => item.id !== tabId);
+      });
+      this.release(tabId);
+      this.store.deleteTranscript(tabId);
+      return undefined;
+    }
     const evicted: string[] = [];
     // The tab moves to the room's closed list with its transcript and session, so it can reopen.
     this.store.transaction((draft) => {
@@ -611,9 +621,7 @@ export class TabHost {
       );
     const label = HARNESS_LABELS[tab.loadout.harness];
     if (!this.ready(tab))
-      throw new Error(
-        `${label} is not ready. Open Harness settings to finish setup.`,
-      );
+      throw new Error(`${label} is not ready. Open Settings to finish setup.`);
     if (!tab.loadout.model) throw new Error(`Choose a ${label} model first.`);
     validateLoadout(this.registry, tab.loadout);
     if (!room.workspace || !this.store.workspacePath(room.id))
@@ -1116,7 +1124,7 @@ export class TabHost {
         turnId: turn.id,
         kind: "notice",
         notice: "signed_out",
-        summary: `${HARNESS_LABELS[tab.loadout.harness]} is signed out. Sign in again from Harness settings, then send a follow-up.`,
+        summary: `${HARNESS_LABELS[tab.loadout.harness]} is signed out. Sign in again from Settings, then send a follow-up.`,
       });
       status = "unavailable";
     } else if (failure.kind === "resume_failed") {
