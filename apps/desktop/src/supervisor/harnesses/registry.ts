@@ -25,6 +25,9 @@ const noticeKey = (harness: HarnessId) =>
   `harness.${harness}.noticeAcknowledged`;
 const defaultKey = (harness: HarnessId) => `harness.${harness}.default`;
 const releaseKey = (harness: HarnessId) => `harness.${harness}.release`;
+const hiddenKey = (harness: HarnessId) => `harness.${harness}.hiddenModels`;
+const styleKey = (harness: HarnessId) => `harness.${harness}.outputStyle`;
+const NEW_TAB_KEY = "harness.newTab";
 
 /** The host's own default model, and the effort each model starts at. */
 interface DefaultChoice {
@@ -32,17 +35,23 @@ interface DefaultChoice {
   efforts: Record<string, string>;
 }
 
-/** The harness's models with the host's saved defaults laid over the harness's own. */
-function withChoice(models: HarnessModel[], choice?: DefaultChoice) {
-  if (!choice) return models;
-  const chosen = models.some((model) => model.id === choice.model);
+/** The harness's models with the host's saved defaults and hidden models laid over them. */
+function withChoice(
+  models: HarnessModel[],
+  choice?: DefaultChoice,
+  hidden: string[] = [],
+) {
+  const chosen = models.some((model) => model.id === choice?.model);
   return models.map((model) => {
-    const effort = choice.efforts[model.id];
+    const effort = choice?.efforts[model.id];
+    const isDefault = chosen ? model.id === choice?.model : model.isDefault;
     return {
       ...model,
-      isDefault: chosen ? model.id === choice.model : model.isDefault,
+      isDefault,
       defaultEffort:
         effort && model.efforts.includes(effort) ? effort : model.defaultEffort,
+      // The model new tabs start on always stays in the picker.
+      ...(hidden.includes(model.id) && !isDefault ? { hidden: true } : {}),
     };
   });
 }
@@ -125,6 +134,13 @@ export class HarnessRegistry {
           ? { bundledVersion: options.programs.bundled(adapter.id) }
           : {}),
         models: [],
+        ...(options.settings.getSetting<string>(styleKey(adapter.id))
+          ? {
+              outputStyle: options.settings.getSetting<string>(
+                styleKey(adapter.id),
+              ),
+            }
+          : {}),
         modelsRefreshedAt: null,
         limits: [],
         noticePending:
@@ -216,7 +232,14 @@ export class HarnessRegistry {
           }
         });
       const program = await this.options.programs.resolve(harness, custom);
-      const context = { executable: program.path, env };
+      const outputStyle = this.options.settings.getSetting<string>(
+        styleKey(harness),
+      );
+      const context = {
+        executable: program.path,
+        env,
+        ...(outputStyle ? { outputStyle } : {}),
+      };
       if (
         program.source === "custom" &&
         this.handshaken.get(harness) !== program.path
@@ -302,12 +325,9 @@ export class HarnessRegistry {
         update((state) => {
           state.auth = inspection.auth;
           this.reported.set(harness, inspection.models);
-          state.models = withChoice(
-            inspection.models,
-            this.options.settings.getSetting<DefaultChoice>(
-              defaultKey(harness),
-            ),
-          );
+          state.models = this.shown(harness, inspection.models);
+          if (inspection.outputStyles)
+            state.outputStyles = inspection.outputStyles;
           state.limits = inspection.limits;
           state.modelsRefreshedAt = new Date().toISOString();
         });
@@ -354,7 +374,7 @@ export class HarnessRegistry {
     const adapter = this.adapter(harness);
     if (adapter.signIn !== "in_app" || !adapter.startSignIn)
       throw new Error(
-        `${HARNESS_LABELS[harness]} uses the sign-in already on this computer. See Harness settings for guidance.`,
+        `${HARNESS_LABELS[harness]} uses the sign-in already on this computer. See Settings for guidance.`,
       );
     const url = await adapter.startSignIn(await this.context(harness));
     if (!url) return this.refresh(harness);
@@ -454,7 +474,69 @@ export class HarnessRegistry {
     };
     this.options.settings.setSetting(defaultKey(harness), choice);
     this.update(harness, (state) => {
-      state.models = withChoice(reported, choice);
+      state.models = this.shown(harness, reported);
+    });
+  }
+
+  private shown(harness: HarnessId, models: HarnessModel[]) {
+    const { settings } = this.options;
+    return withChoice(
+      models,
+      settings.getSetting<DefaultChoice>(defaultKey(harness)),
+      settings.getSetting<string[]>(hiddenKey(harness)),
+    );
+  }
+
+  /** The harness new tabs open with: the host's choice, else Claude Code, else the first. */
+  newTabHarness(): HarnessId {
+    const saved = this.options.settings.getSetting<HarnessId>(NEW_TAB_KEY);
+    for (const id of [saved, "claude" as const])
+      if (id && this.adapters.has(id)) return id;
+    return [...this.adapters.keys()][0]!;
+  }
+
+  setNewTabHarness(harness: HarnessId) {
+    this.adapter(harness);
+    this.options.settings.setSetting(NEW_TAB_KEY, harness);
+    this.options.changed();
+  }
+
+  /** Shows or hides a model in the tab model picker. */
+  setModelHidden(harness: HarnessId, model: string, hidden: boolean) {
+    const reported = this.reported.get(harness) ?? [];
+    const target = this.state(harness).models.find((item) => item.id === model);
+    if (!target)
+      throw new Error(
+        `${model} is not offered by ${HARNESS_LABELS[harness]} right now.`,
+      );
+    if (hidden && target.isDefault)
+      throw new Error(
+        `${target.name} is the default for new tabs. Choose another default first.`,
+      );
+    const saved = new Set(
+      this.options.settings.getSetting<string[]>(hiddenKey(harness)),
+    );
+    if (hidden) saved.add(model);
+    else saved.delete(model);
+    this.options.settings.setSetting(hiddenKey(harness), [...saved]);
+    this.update(harness, (state) => {
+      state.models = this.shown(harness, reported);
+    });
+  }
+
+  /** Saves the output style new sessions start with; null returns to the harness's own. */
+  setOutputStyle(harness: HarnessId, style: string | null) {
+    const offered = this.state(harness).outputStyles;
+    if (!offered)
+      throw new Error(`${HARNESS_LABELS[harness]} has no output styles.`);
+    if (style && !offered.includes(style))
+      throw new Error(
+        `${style} is not an output style ${HARNESS_LABELS[harness]} offers right now.`,
+      );
+    this.options.settings.setSetting(styleKey(harness), style ?? undefined);
+    this.update(harness, (state) => {
+      if (style) state.outputStyle = style;
+      else delete state.outputStyle;
     });
   }
 

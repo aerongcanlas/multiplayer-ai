@@ -523,6 +523,9 @@ export function claudeFixture(
         email: "fixture@example.invalid",
         subscriptionType: "max",
       }),
+      initializationResult: async () => ({
+        available_output_styles: ["default", "Explanatory", "Learning"],
+      }),
       supportedCommands: async () => [
         {
           name: "review",

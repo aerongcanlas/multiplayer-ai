@@ -80,6 +80,23 @@ function createWindow() {
     minWidth: 1024,
     minHeight: 720,
     backgroundColor: "#171717",
+    // The app bar is the title bar: macOS insets the window buttons into it, Windows overlays
+    // its own at the right. Linux keeps the native frame.
+    ...(process.platform === "darwin"
+      ? {
+          titleBarStyle: "hiddenInset" as const,
+          trafficLightPosition: { x: 16, y: 17 },
+        }
+      : process.platform === "win32"
+        ? {
+            titleBarStyle: "hidden" as const,
+            titleBarOverlay: {
+              color: "#222225",
+              symbolColor: "#c4c4cc",
+              height: 48,
+            },
+          }
+        : {}),
     show: !testing,
     webPreferences: {
       preload: join(__dirname, "../preload/index.cjs"),

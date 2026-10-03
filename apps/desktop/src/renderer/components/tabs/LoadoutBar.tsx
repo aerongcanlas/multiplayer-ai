@@ -33,7 +33,7 @@ const ACCESS_MODES: {
 ];
 
 /** The mark of the harness a model comes from. */
-function HarnessIcon({ id }: { id: HarnessId }) {
+export function HarnessIcon({ id }: { id: HarnessId }) {
   return id === "codex" ? (
     <svg
       className="loadout-harness-icon"
@@ -258,6 +258,7 @@ export function LoadoutBar({
               )}
               {models.map((item) => {
                 const selected = item.id === loadout.model;
+                if (item.hidden && !selected) return null;
                 const effort = selected
                   ? loadout.effort
                   : (item.defaultEffort ?? item.efforts[0]);

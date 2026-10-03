@@ -274,8 +274,7 @@ function Entry({
           <p>
             {entry.summary}
             {entry.notice === "usage_limit" && resetLabel(entry.resetsAt)}
-            {entry.notice === "signed_out" &&
-              " Harness settings are in the sidebar."}
+            {entry.notice === "signed_out" && " Sign in again from Settings."}
           </p>
           {entry.offerFreshSession && (
             <Button

@@ -13,7 +13,7 @@ Verify the migration and OAuth redirect configuration for the project you intend
 
 ## Ownership and synchronization
 
-**Suggest prompts** uses the operator's local Codex/ChatGPT connection to run the context agent. The agent receives canonical selected messages and returns up to three generated drafts. It does not start a repository execution. Sign in with ChatGPT under Harness settings first; generation failures preserve the message selection for retry. Suggestions use only selected room messages; private tab transcripts are never included.
+**Suggest prompts** uses the operator's local Codex/ChatGPT connection to run the context agent. The agent receives canonical selected messages and returns up to three generated drafts. It does not start a repository execution. Sign in with ChatGPT under Settings first; generation failures preserve the message selection for retry. Suggestions use only selected room messages; private tab transcripts are never included.
 
 Keep the ordered migration chain current, including `20260926120000_desktop_tab_read_along.sql` and `20260927120000_desktop_generated_suggestions.sql`. Fastify saves generated drafts atomically, rechecks membership, and reloads source attribution through direct parameterized queries. Existing SQL functions remain for older clients; current desktop room operations use the HTTP API. Local generation needs no Supabase migration.
 

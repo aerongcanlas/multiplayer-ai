@@ -62,6 +62,15 @@ const settings = () =>
   run.page.getByRole("region", { name: "Harness settings" });
 const harnessRow = (label) =>
   settings().locator(".harness-row").filter({ hasText: label });
+/** Opens Settings on one harness's page; Escape closes it again. */
+async function openSettings(label) {
+  await run.page.getByRole("button", { name: "Settings", exact: true }).click();
+  await run.page
+    .getByRole("dialog", { name: "Settings" })
+    .getByRole("tab", { name: label })
+    .click();
+}
+const closeSettings = () => run.page.keyboard.press("Escape");
 const mission = () => run.page.getByRole("region", { name: "Mission Control" });
 const leadContext = () =>
   mission().getByRole("region", { name: "Lead context" });
@@ -249,6 +258,7 @@ await run.execute(
     // Use a missing path: on Windows, the fixture replaces the executable handshake.
     const bad = join(output, "missing-program.exe");
     await stubOpenDialog(run.application, bad);
+    await openSettings("Codex");
     await harnessRow("Codex")
       .locator("summary", { hasText: "Program" })
       .click();
@@ -272,6 +282,7 @@ await run.execute(
       "the managed program to be used again",
     );
     assert.equal(programs.requests("codex"), 1);
+    await closeSettings();
     await checkpoint("A bad custom executable shows guidance with no download");
 
     // A corrupted download names the failure and offers retry; Claude Code then needs a login.
@@ -333,9 +344,11 @@ await run.execute(
       claudeState,
       JSON.stringify({ signedIn: true, sessions: {} }),
     );
+    await openSettings("Claude Code");
     await harnessRow("Claude Code")
       .getByRole("button", { name: "Refresh Claude Code", exact: true })
       .click();
+    await closeSettings();
     await until(
       async () => (await tabNamed("Claude Code 1"))?.status === "idle",
       "the Claude Code tab to become ready",
@@ -583,6 +596,32 @@ await run.execute(
     await until(async () => !(await tabNamed("Codex 2")), "Codex 2 to close");
     await checkpoint(
       "Closing a running tab asks for confirmation, then stops and closes it",
+    );
+
+    // Cmd/Ctrl+T opens a tab on the active harness and Cmd/Ctrl+W closes it.
+    const openCount = async () => (await room()).tabs.length;
+    const before = await openCount();
+    await run.page.keyboard.press("Control+t");
+    await until(async () => (await openCount()) === before + 1, "a new tab");
+    const created = (await room()).tabs.at(-1);
+    await until(
+      async () => (await tabNamed(created.title))?.status === "idle",
+      "the new tab",
+    );
+    await run.page.keyboard.press("Control+w");
+    await until(async () => (await openCount()) === before, "the tab to close");
+    // Right-click offers actions on an open chat, not only a closed one.
+    const chats = run.page.getByRole("list", { name: /^Chats in / });
+    await chats
+      .getByRole("button", { name: /Codex 1/ })
+      .click({ button: "right" });
+    const chatMenu = run.page.getByRole("menu", { name: "Codex 1 actions" });
+    await chatMenu.getByRole("menuitem", { name: "Close chat" }).waitFor();
+    await chatMenu.getByRole("menuitem", { name: "Delete chat…" }).waitFor();
+    await run.page.keyboard.press("Escape");
+    await chatMenu.waitFor({ state: "hidden" });
+    await checkpoint(
+      "Tab shortcuts open and close tabs, and open chats have a context menu",
     );
 
     // A room suggestion fills the active tab, and the sent turn shows its source.

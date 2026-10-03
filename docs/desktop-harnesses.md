@@ -17,14 +17,20 @@ Maintainers regenerate `apps/desktop/src/supervisor/programs/manifest.ts` with `
 
 ## Custom executables
 
-**Harness settings › Program › Choose executable…** points a harness at a program of your own. The path is chosen in a native file dialog. Before use, the app checks it: Codex must answer `initialize`, and Claude Code's `--version` must parse. A version other than the pin shows a warning but is allowed. A missing or failing executable shows guidance and never falls back to a download; **Use managed program** switches back.
+**Settings › a harness › Program › Choose executable…** points a harness at a program of your own. The path is chosen in a native file dialog. Before use, the app checks it: Codex must answer `initialize`, and Claude Code's `--version` must parse. A version other than the pin shows a warning but is allowed. A missing or failing executable shows guidance and never falls back to a download; **Use managed program** switches back.
 
 ## Sign-in
 
 - **Codex:** sign in from the app with **Sign in with ChatGPT**. The official login page opens in your browser; only `auth.openai.com` and `chatgpt.com` URLs are opened. Codex uses your ChatGPT subscription.
 - **Claude Code:** tabs reuse the Claude Code login already on this computer (`claude auth status`). If there is none, the app shows guidance to sign in once with the Claude Code CLI. It never offers claude.ai sign-in, because Anthropic's Agent SDK terms do not allow third-party products to offer it without approval, and it shows a one-time notice explaining this.
 
-Harness settings show each harness's program, account, model count, and Codex usage limits. The refresh button re-reads sign-in state and models.
+**Settings** (the gear at the bottom of the sidebar) has a page per harness with its program, account, and Codex usage limits. The refresh button re-reads sign-in state and models.
+
+## Models and output style
+
+Each harness's Settings page lists its models. The switch on a row shows or hides that model in a tab's model picker; a tab already on a hidden model keeps it, and the default model always shows. **Set as default** chooses the model new tabs start on.
+
+Claude Code's page also has **Output style**, listing the styles Claude Code offers. The choice applies to tabs opened or reopened after the change; "Claude Code's own setting" leaves the style to your Claude Code configuration.
 
 ## Access modes and plan mode
 

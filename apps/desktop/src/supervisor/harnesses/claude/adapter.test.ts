@@ -759,3 +759,28 @@ test("the CLI's commands for a repository list as slash commands", () =>
       { name: "compact", description: "Compact the conversation" },
     ]);
   }));
+
+test("inspection reports output styles, and a session starts with the host's choice", () =>
+  withAdapter(async (adapter, { fixture, context, open }) => {
+    assert.deepEqual((await adapter.inspect(context)).outputStyles, [
+      "default",
+      "Explanatory",
+      "Learning",
+    ]);
+    const plain = await open(adapter);
+    await run(plain, "Hello");
+    assert.equal(fixture.record.options.at(-1)!.settings, undefined);
+    plain.close();
+    const styled = await adapter.open({
+      ...context,
+      outputStyle: "Explanatory",
+      tabId: randomUUID(),
+      cwd: fixture.record.options.at(-1)!.cwd!,
+      loadout,
+    });
+    await run(styled, "Hello");
+    assert.deepEqual(fixture.record.options.at(-1)!.settings, {
+      outputStyle: "Explanatory",
+    });
+    styled.close();
+  }));

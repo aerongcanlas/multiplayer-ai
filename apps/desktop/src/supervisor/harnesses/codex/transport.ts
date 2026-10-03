@@ -66,7 +66,7 @@ export class JsonRpcTransport extends EventEmitter {
     });
     child.on("error", () =>
       this.fail(
-        `${this.options.name} could not start. Check its program in Harness settings.`,
+        `${this.options.name} could not start. Check its program in Settings.`,
       ),
     );
     // "close" waits for stdout to drain, so the last responses are handled before failing.

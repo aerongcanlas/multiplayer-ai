@@ -261,6 +261,8 @@ export interface HarnessModel {
   efforts: string[];
   defaultEffort: string | null;
   isDefault: boolean;
+  // Left out of the model picker by the host; a tab already on it keeps it.
+  hidden?: boolean;
 }
 export interface HarnessState {
   id: HarnessId;
@@ -294,6 +296,9 @@ export interface HarnessState {
   // The version this app ships with, when the managed program was updated past it.
   bundledVersion?: string;
   models: HarnessModel[];
+  // Claude Code's output styles, and the one the host chose for new sessions.
+  outputStyles?: string[];
+  outputStyle?: string;
   modelsRefreshedAt: string | null;
   limits: { name: string; usedPercent: number; resetsAt: number | null }[];
   // Whether the harness reports its sub-agents.
@@ -431,6 +436,30 @@ export const tabCommandSchemas = [
       harness: harnessIdSchema,
       model: z.string().min(1).max(120),
       effort,
+    })
+    .strict(),
+  // The harness new tabs open with from the keyboard.
+  z
+    .object({
+      type: z.literal("harness.setNewTab"),
+      harness: harnessIdSchema,
+    })
+    .strict(),
+  // Shows or hides a model in the tab model picker.
+  z
+    .object({
+      type: z.literal("harness.setModelHidden"),
+      harness: harnessIdSchema,
+      model: z.string().min(1).max(120),
+      hidden: z.boolean(),
+    })
+    .strict(),
+  // The output style new sessions start with; null returns to the harness's own.
+  z
+    .object({
+      type: z.literal("harness.setOutputStyle"),
+      harness: harnessIdSchema,
+      style: z.string().min(1).max(120).nullable(),
     })
     .strict(),
 ] as const;

@@ -92,7 +92,12 @@ export class SupervisorService {
     return {
       ...structuredClone(this.state),
       protocolVersion: PROTOCOL_VERSION,
-      ...(this.registry ? { harnesses: this.registry.snapshot() } : {}),
+      ...(this.registry
+        ? {
+            harnesses: this.registry.snapshot(),
+            newTabHarness: this.registry.newTabHarness(),
+          }
+        : {}),
     };
   }
 
@@ -194,6 +199,12 @@ export class SupervisorService {
         registry.revertUpdate(command.harness);
       else if (command.type === "harness.setDefault")
         registry.setDefault(command.harness, command.model, command.effort);
+      else if (command.type === "harness.setNewTab")
+        registry.setNewTabHarness(command.harness);
+      else if (command.type === "harness.setModelHidden")
+        registry.setModelHidden(command.harness, command.model, command.hidden);
+      else if (command.type === "harness.setOutputStyle")
+        registry.setOutputStyle(command.harness, command.style);
       else
         throw new Error(
           "Choosing an executable requires the desktop file dialog.",
@@ -289,9 +300,7 @@ export class SupervisorService {
     if (!registry) throw new Error("Codex is unavailable in this build.");
     await registry.refresh("codex");
     if (!registry.ready("codex"))
-      throw new Error(
-        "Sign in with ChatGPT in Harness settings to generate prompts.",
-      );
+      throw new Error("Sign in with ChatGPT in Settings to generate prompts.");
     const adapter = registry.adapter("codex");
     const models = registry.state("codex").models;
     const model = models.find((item) => item.isDefault) ?? models[0];
