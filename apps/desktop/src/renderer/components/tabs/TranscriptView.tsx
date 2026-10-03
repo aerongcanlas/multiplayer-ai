@@ -5,6 +5,7 @@ import {
   ChevronsUp,
   ClipboardList,
   Info,
+  Layers,
   RotateCcw,
   Terminal,
 } from "lucide-react";
@@ -25,6 +26,7 @@ import {
 } from "../../lib/transcript-store";
 import { Button } from "../ui/Button";
 import { timeLabel } from "../../lib/time";
+import { groupToolRuns } from "../../lib/tool-runs";
 import { plural } from "../../lib/utils";
 import { ApprovalCard } from "./ApprovalCard";
 import { QuestionCard } from "./QuestionCard";
@@ -299,6 +301,27 @@ function Entry({
   }
 }
 
+/** Back-to-back tool runs under one closed disclosure that names the latest. */
+function ToolRuns({
+  entries,
+  children,
+}: {
+  entries: TranscriptEntry[];
+  children: ReactNode;
+}) {
+  return (
+    <details className="turn-tools">
+      <summary>
+        <Layers size={12} />
+        <span>
+          {plural(entries.length, "tool run")} · {entries.at(-1)?.summary}
+        </span>
+      </summary>
+      <div className="turn-tools-list">{children}</div>
+    </details>
+  );
+}
+
 /** The scrolling transcript frame: sticks to the bottom as text streams, pages back on request. */
 function TranscriptScroll({
   resetKey,
@@ -389,15 +412,27 @@ export function ReadOnlyTranscript({
     >
       {entries.length === 0
         ? empty
-        : entries.map((entry) => (
-            <ReadOnlyEntry
-              key={entry.seq}
-              entry={entry}
-              streaming={
-                live && entry.seq === last?.seq && entry.kind === "assistant"
-              }
-            />
-          ))}
+        : groupToolRuns(entries).map((row) =>
+            Array.isArray(row) ? (
+              <ToolRuns key={row[0]!.seq} entries={row}>
+                {row.map((entry) => (
+                  <ReadOnlyEntry
+                    key={entry.seq}
+                    entry={entry}
+                    streaming={false}
+                  />
+                ))}
+              </ToolRuns>
+            ) : (
+              <ReadOnlyEntry
+                key={row.seq}
+                entry={row}
+                streaming={
+                  live && row.seq === last?.seq && row.kind === "assistant"
+                }
+              />
+            ),
+          )}
     </TranscriptScroll>
   );
 }
@@ -429,6 +464,23 @@ export function TranscriptView({
   const busy = agentKey
     ? agent?.agent.status === "running"
     : tabBusy(tab.status);
+  const renderEntry = (entry: TranscriptEntry) => (
+    <Entry
+      key={entry.id}
+      entry={entry}
+      tab={tab}
+      agent={
+        entry.agentKey && !agentKey
+          ? (cards.find((card) => card.agent.key === entry.agentKey)?.summary ??
+            "a sub-agent")
+          : undefined
+      }
+      latestPlan={entry.id === latestPlan?.id}
+      disabled={disabled}
+      streaming={busy && entry.id === last?.id && entry.kind === "assistant"}
+      actions={actions}
+    />
+  );
   return (
     <TranscriptScroll
       resetKey={`${tab.id}:${agentKey ?? ""}`}
@@ -447,25 +499,15 @@ export function TranscriptView({
           description={`Send a message to start a ${HARNESS_LABELS[tab.loadout.harness]} session in this room's repository.`}
         />
       ) : (
-        entries.map((entry) => (
-          <Entry
-            key={entry.id}
-            entry={entry}
-            tab={tab}
-            agent={
-              entry.agentKey && !agentKey
-                ? (cards.find((card) => card.agent.key === entry.agentKey)
-                    ?.summary ?? "a sub-agent")
-                : undefined
-            }
-            latestPlan={entry.id === latestPlan?.id}
-            disabled={disabled}
-            streaming={
-              busy && entry.id === last?.id && entry.kind === "assistant"
-            }
-            actions={actions}
-          />
-        ))
+        groupToolRuns(entries).map((row) =>
+          Array.isArray(row) ? (
+            <ToolRuns key={row[0]!.id} entries={row}>
+              {row.map(renderEntry)}
+            </ToolRuns>
+          ) : (
+            renderEntry(row)
+          ),
+        )
       )}
     </TranscriptScroll>
   );
