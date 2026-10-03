@@ -21,6 +21,7 @@ import type { PermissionsRequestApprovalResponse } from "./generated/v2/Permissi
 import type { ToolRequestUserInputResponse } from "./generated/v2/ToolRequestUserInputResponse";
 import type { TurnStartParams } from "./generated/v2/TurnStartParams";
 import type { CodexProcess } from "./process";
+import { listSkills } from "./skills";
 import type { RpcNotification, RpcRequest } from "./transport";
 
 interface PendingRequest {
@@ -176,9 +177,31 @@ export class CodexSession implements HarnessSession {
     await this.adapter.resume(this.process, this.sessionId!, this.request);
   }
 
+  /** A prompt that starts with a skill's `/name` mentions the skill and attaches it. */
+  private async input(prompt: string): Promise<TurnStartParams["input"]> {
+    const text = (value: string) => ({
+      type: "text" as const,
+      text: value,
+      text_elements: [],
+    });
+    const [, name, rest = ""] = /^\/(\S+)([\s\S]*)$/.exec(prompt) ?? [];
+    if (!name) return [text(prompt)];
+    const skill = await listSkills(this.process.transport, this.request.cwd)
+      .then((skills) => skills.find((item) => item.name === name))
+      // Without the list, the prompt goes through as typed.
+      .catch(() => undefined);
+    return skill
+      ? [
+          text(`$${skill.name}${rest}`),
+          { type: "skill", name: skill.name, path: skill.path },
+        ]
+      : [text(prompt)];
+  }
+
   async *send(prompt: string, loadout: Loadout): AsyncIterable<HarnessEvent> {
     this.stopRequested = false;
     await this.ensureProcess();
+    const input = await this.input(prompt);
     if (this.stopRequested) return;
     const queue = new EventQueue<HarnessEvent>();
     this.queue = queue;
@@ -192,7 +215,7 @@ export class CodexSession implements HarnessSession {
     const access = accessSettings(loadout, this.request.cwd);
     const params: TurnStartParams = {
       threadId: this.sessionId!,
-      input: [{ type: "text", text: prompt, text_elements: [] }],
+      input,
       approvalPolicy: access.approvalPolicy,
       ...("approvalsReviewer" in access
         ? { approvalsReviewer: access.approvalsReviewer }

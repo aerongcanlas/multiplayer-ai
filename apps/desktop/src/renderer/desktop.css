@@ -1240,6 +1240,7 @@ summary:focus-visible {
   margin: 3px 4px 0 0;
 }
 .panel-composer .composer {
+  position: relative;
   border-radius: 18px;
   padding: 12px 12px 10px 14px;
 }
@@ -1308,6 +1309,55 @@ summary:focus-visible {
   border: 1px solid #45454d;
   border-radius: 12px;
   box-shadow: 0 8px 24px rgb(0 0 0 / 0.4);
+}
+.slash-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 20;
+  max-height: 260px;
+  margin: 0;
+  overflow-y: auto;
+  padding: 5px;
+  list-style: none;
+  background: #2c2c32;
+  border: 1px solid #45454d;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.4);
+}
+.slash-menu li {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 9px;
+  border-radius: 8px;
+  cursor: default;
+}
+.slash-menu li[aria-selected="true"] {
+  background: #3a3a42;
+}
+.slash-name {
+  flex-shrink: 0;
+  color: #ececf1;
+  font-family: var(--font-geist-mono);
+  font-size: 12px;
+}
+.slash-name i {
+  color: #8f8f9b;
+  font-style: normal;
+}
+.slash-menu small {
+  overflow: hidden;
+  color: #9a9aa5;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.slash-menu-status {
+  padding: 9px 12px;
+  color: #9a9aa5;
+  font-size: 11px;
 }
 .loadout-popover hr {
   width: 100%;

@@ -302,6 +302,13 @@ export interface HarnessState {
   noticePending: boolean;
 }
 
+/** A slash command or skill the harness runs when a prompt starts with `/name`. */
+export interface SlashCommand {
+  name: string;
+  description: string;
+  argumentHint?: string;
+}
+
 const tabRef = { roomId: id, tabId: id };
 const answerValues = z.array(z.string().max(4_000)).max(20);
 
@@ -374,6 +381,8 @@ export const tabCommandSchemas = [
     .strict(),
   // Every sub-agent card of the tab, in the transcript result.
   z.object({ type: z.literal("tab.agents"), ...tabRef }).strict(),
+  // The slash commands and skills the tab's harness offers, in the result's `commands`.
+  z.object({ type: z.literal("tab.commands"), ...tabRef }).strict(),
   z.object({ type: z.literal("tab.resetSession"), ...tabRef }).strict(),
   z
     .object({

@@ -137,6 +137,7 @@ await run.execute(
                 "onSharedTranscript",
                 "loadTranscript",
                 "loadAgents",
+                "loadCommands",
                 "resetTabSession",
                 "respondToTabApproval",
                 "answerQuestion",
@@ -424,6 +425,24 @@ await run.execute(
             if ((await snapshot()).rooms[1].tabs[0].status === "idle") break;
             await page.waitForTimeout(100);
         }
+        // A leading slash lists the harness's commands; Enter completes the picked one.
+        const prompt = page.getByRole("textbox", {
+            name: "Message",
+            exact: true,
+        });
+        await prompt.fill("/rev");
+        const commands = page.getByRole("listbox", { name: "Commands" });
+        await commands.getByRole("option", { name: /\/review/ }).waitFor();
+        await page.screenshot({ path: join(output, "02-slash-commands.png") });
+        await prompt.press("Enter");
+        assert.equal(await prompt.inputValue(), "/review ");
+        assert.equal(await commands.count(), 0);
+        assert.equal(
+            (await snapshot()).rooms[1].tabs[0].status,
+            "idle",
+            "Completing a command must not send it",
+        );
+        await prompt.fill("");
         await page
             .getByRole("button", { name: "Use prompt", exact: true })
             .click();

@@ -521,6 +521,37 @@ createInterface({ input: process.stdin })
             });
         else if (method === "model/list")
             result({ data: models, nextCursor: null });
+        else if (method === "skills/list")
+            result({
+                data: [
+                    {
+                        cwd: params.cwds?.[0] ?? "",
+                        skills: [
+                            {
+                                name: "review",
+                                description:
+                                    "Review the current changes in depth.",
+                                interface: {
+                                    shortDescription: "Review changes",
+                                },
+                                path: "/fixture/skills/review/SKILL.md",
+                                scope: "user",
+                                enabled: true,
+                                pluginId: null,
+                            },
+                            {
+                                name: "off",
+                                description: "A disabled skill.",
+                                path: "/fixture/skills/off/SKILL.md",
+                                scope: "user",
+                                enabled: false,
+                                pluginId: null,
+                            },
+                        ],
+                        errors: [],
+                    },
+                ],
+            });
         else if (method === "account/rateLimits/read")
             result({
                 rateLimitsByLimitId: {

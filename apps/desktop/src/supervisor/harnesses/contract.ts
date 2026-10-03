@@ -8,6 +8,7 @@ import type {
   HarnessState,
   Loadout,
   PlanStep,
+  SlashCommand,
 } from "../../shared/tabs";
 
 /** The resolved program and launch environment an adapter runs with. */
@@ -160,6 +161,8 @@ export interface HarnessAdapter {
   /** Starts an in-app sign-in and returns the URL to open, or null when already signed in. */
   startSignIn?(context: LaunchContext): Promise<string | null>;
   open(request: OpenRequest): Promise<HarnessSession>;
+  /** The slash commands and skills a session in `cwd` would offer. */
+  commands?(request: LaunchContext & { cwd: string }): Promise<SlashCommand[]>;
   /** Generates drafts without opening a user-visible chat or running repository tools. */
   suggest?(request: SuggestionRequest): Promise<ContextSuggestionDraft>;
   /** Harness-level changes such as a completed sign-in. */

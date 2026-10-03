@@ -10,6 +10,7 @@ import {
 } from "../shared/contracts";
 import {
   tabBusy,
+  type SlashCommand,
   type TranscriptBatch,
   type TranscriptPage,
 } from "../shared/tabs";
@@ -120,9 +121,11 @@ export class SupervisorService {
   }
 
   /** Dispatches a command and returns the snapshot plus a transcript page when one was asked for. */
-  async dispatchResult(
-    input: SupervisorRequest["command"],
-  ): Promise<{ snapshot: Snapshot; transcript?: TranscriptPage }> {
+  async dispatchResult(input: SupervisorRequest["command"]): Promise<{
+    snapshot: Snapshot;
+    transcript?: TranscriptPage;
+    commands?: SlashCommand[];
+  }> {
     if (this.closed) throw new Error("The supervisor is shutting down.");
     // Main-only messages from the private transport.
     if (input.type === "host.environment") {
@@ -155,9 +158,13 @@ export class SupervisorService {
     if (isTabCommand(input)) {
       if (!this.host)
         throw new Error("Chat tabs are unavailable in this build.");
-      const transcript = await this.host.handle(
-        commandSchema.parse(input) as TabCommand,
-      );
+      const command = commandSchema.parse(input) as TabCommand;
+      if (command.type === "tab.commands")
+        return {
+          snapshot: this.snapshot(),
+          commands: await this.host.commands(command.roomId, command.tabId),
+        };
+      const transcript = await this.host.handle(command);
       return {
         snapshot: this.snapshot(),
         ...(transcript ? { transcript } : {}),

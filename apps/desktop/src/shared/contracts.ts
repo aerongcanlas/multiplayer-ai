@@ -11,6 +11,7 @@ import {
   type HarnessId,
   type HarnessState,
   type Loadout,
+  type SlashCommand,
   type Tab,
   type TranscriptBatch,
   type TranscriptPage,
@@ -172,6 +173,7 @@ export type Result =
       snapshot: Snapshot;
       notice?: RoomNotice;
       transcript?: TranscriptPage;
+      commands?: SlashCommand[];
     }
   | { ok: false; error: string };
 export interface Health {
@@ -222,6 +224,8 @@ export interface DesktopBridge {
   ): Promise<Result>;
   // The tab's sub-agent cards arrive in the Result's `transcript` field.
   loadAgents(roomId: string, tabId: string): Promise<Result>;
+  // The harness's slash commands arrive in the Result's `commands` field.
+  loadCommands(roomId: string, tabId: string): Promise<Result>;
   resetTabSession(roomId: string, tabId: string): Promise<Result>;
   respondToTabApproval(
     roomId: string,
