@@ -34,6 +34,7 @@ import { clip, object, string } from "../json";
 import { EventQueue } from "../queue";
 import { SessionRelay } from "../relay";
 import { readAuthStatus, type AuthStatus } from "./auth";
+import { assertHome, type AccountSpec } from "../accounts";
 
 const IDLE_MS = 10 * 60_000;
 
@@ -95,6 +96,7 @@ export const permissionMode = (loadout: Loadout): PermissionMode =>
 
 /** The host's environment plus the flags every Claude Code launch needs. */
 function claudeEnvironment(context: LaunchContext): Record<string, string> {
+  assertHome(context, "CLAUDE_CONFIG_DIR");
   return {
     ...context.env,
     CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1",
@@ -911,6 +913,7 @@ export class ClaudeAdapter implements HarnessAdapter {
   readonly id = "claude" as const;
   // Anthropic's terms do not allow third-party products to offer claude.ai sign-in.
   readonly signIn = "guidance" as const;
+  readonly account: AccountSpec = { variable: "CLAUDE_CONFIG_DIR" };
   readonly reportsAgents = true;
   closed = false;
   readonly idleMs: number;

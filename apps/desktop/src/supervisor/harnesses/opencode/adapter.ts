@@ -26,6 +26,7 @@ import {
   type ProcessOwner,
 } from "./process";
 import { choose, OpenCodeSession } from "./session";
+import type { AccountSpec } from "../accounts";
 
 const IDLE_MS = 10 * 60_000;
 const EFFORT = /^[a-z][a-z0-9_-]{0,23}$/;
@@ -87,6 +88,7 @@ export interface OpenCodeOptions {
 export class OpenCodeAdapter implements HarnessAdapter, ProcessOwner {
   readonly id = "opencode" as const;
   readonly signIn = "guidance" as const;
+  readonly account: AccountSpec = { variable: "XDG_DATA_HOME" };
   // OpenCode's ACP does not report sub-agents, and app sessions deny its task tool.
   readonly reportsAgents = false;
   readonly idleMs: number;

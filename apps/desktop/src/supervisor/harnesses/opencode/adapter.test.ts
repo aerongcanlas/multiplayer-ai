@@ -14,6 +14,7 @@ import {
   type SessionEvent,
 } from "../contract";
 import { launchEnvironment } from "../environment";
+import { Accounts } from "../accounts";
 import { HarnessRegistry } from "../registry";
 import { ProgramManager } from "../../programs/manager";
 import { HARNESS_MANIFEST } from "../../programs/manifest";
@@ -82,6 +83,8 @@ async function setup(
       XDG_DATA_HOME: join(dir, "data"),
       OPENAI_API_KEY: "sk-should-not-leak",
     }),
+    home: join(dir, "data"),
+    hostPaths: {},
   };
   const log = async () =>
     (await readFile(logFile, "utf8").catch(() => ""))
@@ -593,6 +596,7 @@ test("the registry snapshot carries OpenCode's local servers", async () => {
       root: fixture.dir,
       manifest: HARNESS_MANIFEST,
     }),
+    accounts: new Accounts(join(fixture.dir, "accounts")),
     settings: {
       getSetting: <T>(key: string) => settings.get(key) as T | undefined,
       setSetting: (key, value) => settings.set(key, value),

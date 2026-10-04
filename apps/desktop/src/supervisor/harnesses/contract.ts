@@ -11,11 +11,16 @@ import type {
   PlanStep,
   SlashCommand,
 } from "../../shared/tabs";
+import type { AccountSpec, HostPaths } from "./accounts";
 
 /** The resolved program and launch environment an adapter runs with. */
 export interface LaunchContext {
   executable: string;
   env: Record<string, string>;
+  /** The app-owned home folder `env` names for this harness (its login and session history). */
+  home: string;
+  /** The host's own home and harness folder variables, for finding host setup. Never launched with. */
+  hostPaths: HostPaths;
   /** The host's output style for new sessions, where the harness has output styles. */
   outputStyle?: string;
   /** The host's saved default model, for harnesses that need a model before a tab picks one. */
@@ -161,6 +166,8 @@ export interface OpenRequest extends LaunchContext {
 export interface HarnessAdapter {
   readonly id: HarnessId;
   readonly signIn: "in_app" | "guidance";
+  /** The app-owned home this harness launches with, and the host setup carried into it. */
+  readonly account: AccountSpec;
   /** Whether sessions report sub-agents on the session listener. */
   readonly reportsAgents: boolean;
   /** Checks that a custom executable speaks the harness protocol. Returns its version. */

@@ -13,6 +13,13 @@ import {
   type LaunchContext,
 } from "./contract";
 import { launchEnvironment } from "./environment";
+import {
+  assertHome,
+  hostPaths,
+  withHome,
+  type Accounts,
+  type HostPaths,
+} from "./accounts";
 import type { LatestRelease } from "../programs/latest";
 import type { ProgramRelease } from "../programs/release";
 import type { PlatformKey } from "../programs/types";
@@ -73,8 +80,15 @@ export class HarnessRegistry {
   private generations = new Map<HarnessId, number>();
   // Custom executables that passed the handshake, so turns do not repeat it.
   private handshaken = new Map<HarnessId, string>();
-  private environment: Promise<Record<string, string>>;
-  private provideEnvironment!: (env: Record<string, string>) => void;
+  // The launch environment without host credentials, and where the host keeps its own setup.
+  private environment: Promise<{
+    env: Record<string, string>;
+    host: HostPaths;
+  }>;
+  private provideEnvironment!: (value: {
+    env: Record<string, string>;
+    host: HostPaths;
+  }) => void;
   private fallback?: ReturnType<typeof setTimeout>;
   private closed = false;
 
@@ -82,6 +96,8 @@ export class HarnessRegistry {
     private options: {
       adapters: HarnessAdapter[];
       programs: ProgramManager;
+      // App-owned harness homes; every launch, check, and sign-in runs in one (R15).
+      accounts: Accounts;
       settings: Settings;
       changed: () => void;
       openLogin?: (harness: HarnessId, url: string) => void;
@@ -102,7 +118,7 @@ export class HarnessRegistry {
       this.provideEnvironment = resolve;
     });
     this.fallback = setTimeout(
-      () => this.provideEnvironment(launchEnvironment(process.env)),
+      () => this.provideEnvironment(this.split(process.env)),
       options.environmentTimeoutMs ?? 15_000,
     );
     this.fallback.unref?.();
@@ -171,7 +187,11 @@ export class HarnessRegistry {
 
   setEnvironment(env: Record<string, string>) {
     clearTimeout(this.fallback);
-    this.provideEnvironment(launchEnvironment(env));
+    this.provideEnvironment(this.split(env));
+  }
+
+  private split(env: Record<string, string | undefined>) {
+    return { env: launchEnvironment(env), host: hostPaths(env) };
   }
 
   snapshot(): HarnessState[] {
@@ -223,7 +243,27 @@ export class HarnessRegistry {
     const adapter = this.adapter(harness);
     const custom = this.customPath(harness);
     const update = this.updater(harness);
-    const env = await this.environment;
+    const { env: hostEnv, host } = await this.environment;
+    // No launch ever falls back to the host's own harness folders (R15).
+    let home: string;
+    try {
+      home = await this.options.accounts.prepare(
+        harness,
+        adapter.account,
+        host,
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "The app could not prepare its harness folder.";
+      update((state) => {
+        state.auth = { state: "unknown", message };
+      });
+      throw new HarnessError("unavailable", message);
+    }
+    const env = withHome(hostEnv, adapter.account.variable, home);
+    assertHome({ env, home }, adapter.account.variable, this.options.accounts);
     try {
       if (!custom)
         update((state) => {
@@ -240,9 +280,11 @@ export class HarnessRegistry {
       const defaultModel = this.options.settings.getSetting<DefaultChoice>(
         defaultKey(harness),
       )?.model;
-      const context = {
+      const context: LaunchContext = {
         executable: program.path,
         env,
+        home,
+        hostPaths: host,
         ...(outputStyle ? { outputStyle } : {}),
         ...(defaultModel ? { defaultModel } : {}),
       };

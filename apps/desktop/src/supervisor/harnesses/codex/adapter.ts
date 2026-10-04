@@ -31,6 +31,7 @@ import {
   type RpcNotification,
   type RpcRequest,
 } from "./transport";
+import { assertHome, type AccountSpec } from "../accounts";
 
 const IDLE_MS = 10 * 60_000;
 const LOGIN_HOSTS = ["auth.openai.com", "chatgpt.com"];
@@ -53,6 +54,7 @@ const loginUrlAllowed = (value: string) => {
 export class CodexAdapter implements HarnessAdapter {
   readonly id = "codex" as const;
   readonly signIn = "in_app" as const;
+  readonly account: AccountSpec = { variable: "CODEX_HOME" };
   readonly reportsAgents = true;
   closed = false;
   readonly idleMs: number;
@@ -197,6 +199,7 @@ export class CodexAdapter implements HarnessAdapter {
   }
 
   async handshake(context: LaunchContext) {
+    assertHome(context, "CODEX_HOME");
     const launch = this.launcher(context.executable, ARGS, context.env);
     const transport = new JsonRpcTransport({
       ...launch,

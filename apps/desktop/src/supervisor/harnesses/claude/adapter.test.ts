@@ -14,6 +14,7 @@ import {
   type SessionEvent,
 } from "../contract";
 import { launchEnvironment } from "../environment";
+import { Accounts } from "../accounts";
 import { HarnessRegistry } from "../registry";
 import { ProgramManager } from "../../programs/manager";
 import { HARNESS_MANIFEST } from "../../programs/manifest";
@@ -31,13 +32,19 @@ async function setup(options: { idleMs?: number } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "multiplayer-claude-"));
   const fixture = claudeFixture(join(dir, "state.json"));
   const make = () => new ClaudeAdapter({ ...fixture.options, ...options });
+  const home = join(dir, "accounts", "claude");
   const context = {
     executable: "/managed/claude",
-    env: launchEnvironment({
-      PATH: process.env.PATH,
-      HOME: "/home/host",
-      ANTHROPIC_API_KEY: "sk-ant-should-not-leak",
-    }),
+    env: {
+      ...launchEnvironment({
+        PATH: process.env.PATH,
+        HOME: "/home/host",
+        ANTHROPIC_API_KEY: "sk-ant-should-not-leak",
+      }),
+      CLAUDE_CONFIG_DIR: home,
+    },
+    home,
+    hostPaths: { HOME: "/home/host" },
   };
   const open = (
     adapter: ClaudeAdapter,
@@ -349,6 +356,7 @@ test("a missing custom binary is reported as program state without a download", 
         throw new Error("no network");
       }) as typeof fetch,
     }),
+    accounts: new Accounts(join(dir, "accounts")),
     settings: {
       getSetting: <T>(key: string) => settings.get(key) as T,
       setSetting: (key, value) => settings.set(key, value),

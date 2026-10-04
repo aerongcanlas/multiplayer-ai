@@ -16,6 +16,7 @@ import {
   type OpenRequest,
   type SessionEvent,
 } from "./contract";
+import { HOME_VARIABLES, type AccountSpec } from "./accounts";
 
 // A scripted adapter for tests. Prompt markers select the behavior: FAKE_APPROVAL, FAKE_QUESTION,
 // FAKE_EXIT_PLAN, FAKE_SLOW, FAKE_THROW, FAKE_SIGNOUT, FAKE_USAGE, and FAKE_AGENTS. Options make
@@ -323,6 +324,7 @@ export class FakeHarness implements HarnessAdapter {
     };
   }
   readonly signIn: "in_app" | "guidance";
+  readonly account: AccountSpec;
   readonly reportsAgents = true;
   calls: string[] = [];
   loadouts: Loadout[] = [];
@@ -346,6 +348,7 @@ export class FakeHarness implements HarnessAdapter {
       signIn?: "in_app" | "guidance";
       resumable?: boolean;
       failFirstResumedTurn?: boolean;
+      account?: AccountSpec;
     } = {},
   ) {
     this.resumable = options.resumable ?? true;
@@ -353,6 +356,7 @@ export class FakeHarness implements HarnessAdapter {
     this.signedIn = true;
     this.inspectDelayMs = options.inspectDelayMs ?? 0;
     this.signIn = options.signIn ?? "in_app";
+    this.account = options.account ?? { variable: HOME_VARIABLES[id] };
     this.models = [
       {
         id: "fake-model",

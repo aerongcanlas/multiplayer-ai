@@ -1,4 +1,5 @@
 import { homedir } from "node:os";
+import { assertHome } from "../accounts";
 import type { LaunchContext } from "../contract";
 import { object, string } from "../json";
 import type { CodexAdapter } from "./adapter";
@@ -33,6 +34,7 @@ export class CodexProcess {
     launcher: Launcher,
     private adapter: CodexAdapter,
   ) {
+    assertHome(context, "CODEX_HOME");
     const launch = launcher(context.executable, ARGS, context.env);
     const transport = new JsonRpcTransport({
       executable: launch.executable,

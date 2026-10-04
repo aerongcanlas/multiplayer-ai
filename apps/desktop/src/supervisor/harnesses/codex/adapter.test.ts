@@ -67,7 +67,9 @@ test("context generation preserves drafts and errors even when its temporary dir
       await assert.rejects(
         adapter.suggest({
           ...request,
-          messages: [{ ...messages[0], text: `${text} FIXTURE_SUGGESTION_LOCK` }],
+          messages: [
+            { ...messages[0], text: `${text} FIXTURE_SUGGESTION_LOCK` },
+          ],
         }),
         error,
       );
@@ -97,15 +99,21 @@ async function setup(
         },
       }),
     });
+  const home = join(dir, "accounts", "codex");
   const context = {
     executable: "/managed/codex",
     // The registry strips provider credentials before any adapter sees the environment.
-    env: launchEnvironment({
-      PATH: process.env.PATH,
-      SSH_AUTH_SOCK: "/tmp/agent.sock",
-      OPENAI_API_KEY: "sk-should-not-leak",
-      CODEX_API_KEY: "should-not-leak",
-    }),
+    env: {
+      ...launchEnvironment({
+        PATH: process.env.PATH,
+        SSH_AUTH_SOCK: "/tmp/agent.sock",
+        OPENAI_API_KEY: "sk-should-not-leak",
+        CODEX_API_KEY: "should-not-leak",
+      }),
+      CODEX_HOME: home,
+    },
+    home,
+    hostPaths: {},
   };
   const log = async () =>
     (await readFile(logFile, "utf8").catch(() => ""))
@@ -645,8 +653,7 @@ test("native spawn activities register children before routing their approvals a
       decision: "accept",
     });
     assert.ok(
-      "error" in
-        ((await setup_.answers("stray approval"))[0].result as object),
+      "error" in ((await setup_.answers("stray approval"))[0].result as object),
     );
   }));
 

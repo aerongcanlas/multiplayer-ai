@@ -10,6 +10,7 @@ import {
   type RequestPermissionResponse,
   type SessionNotification,
 } from "@agentclientprotocol/sdk";
+import { assertHome } from "../accounts";
 import type { LaunchContext } from "../contract";
 import { launchEnvironment } from "../environment";
 
@@ -62,6 +63,11 @@ export function runCommand(
   args: string[],
   options: { cwd: string; config: Record<string, string>; timeoutMs?: number },
 ): Promise<string> {
+  try {
+    assertHome(context, "XDG_DATA_HOME");
+  } catch (error) {
+    return Promise.reject(error as Error);
+  }
   const launch = launcher(
     context.executable,
     args,
@@ -119,6 +125,7 @@ export class OpenCodeProcess {
     launcher: Launcher,
     private owner: ProcessOwner,
   ) {
+    assertHome(context, "XDG_DATA_HOME");
     const launch = launcher(
       context.executable,
       ARGS,

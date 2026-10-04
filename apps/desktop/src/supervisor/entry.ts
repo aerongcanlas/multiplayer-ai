@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync } from "node:fs";
 import { Journal } from "./journal";
 import { SupervisorService } from "./service";
 import { HarnessRegistry } from "./harnesses/registry";
+import { Accounts } from "./harnesses/accounts";
 import { harnessAdapters } from "./adapters";
 import { ProgramManager } from "./programs/manager";
 import { HARNESS_MANIFEST } from "./programs/manifest";
@@ -30,6 +31,8 @@ const parent = (
 const directory = process.argv[2];
 // Fixtures and a local manifest, set only by an unpackaged E2E launch.
 const testing = JSON.parse(process.argv[3] || "{}") as SupervisorTesting;
+// App-owned harness homes; empty leaves every harness unavailable rather than using the host's.
+const accountsRoot = process.argv[4] || undefined;
 // An E2E run may point managed downloads at a local server.
 const manifest = testing.harnessManifest
   ? (JSON.parse(
@@ -47,6 +50,7 @@ const started = (async () => {
   const registry = new HarnessRegistry({
     adapters: await harnessAdapters(testing),
     programs: new ProgramManager({ root: directory, manifest }),
+    accounts: new Accounts(accountsRoot),
     settings: journal,
     changed: () => harnessesChanged(),
     // An E2E run stays offline.
