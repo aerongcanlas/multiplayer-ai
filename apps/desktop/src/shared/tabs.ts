@@ -272,6 +272,24 @@ export interface HarnessModel {
   // Left out of the model picker by the host; a tab already on it keeps it.
   hidden?: boolean;
 }
+/** A model server on this computer that OpenCode tabs can use. */
+export interface LocalServer {
+  id: "ollama" | "lmstudio";
+  label: string;
+  running: boolean;
+  // Why the server is not checked, such as OLLAMA_HOST pointing at another machine.
+  note?: string;
+  models: {
+    id: string;
+    name: string;
+    // The context the server actually serves, when known.
+    context?: number;
+    // Set when the served context is too small or unknown for agentic use.
+    warning?: string;
+    // The server did not say whether the model supports tools.
+    unverified?: boolean;
+  }[];
+}
 export interface HarnessState {
   id: HarnessId;
   label: string;
