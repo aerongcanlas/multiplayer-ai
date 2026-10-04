@@ -16,7 +16,7 @@ import { dirname, join } from "node:path";
 import { Readable, Transform, type Writable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { ReadableStream as WebReadableStream } from "node:stream/web";
-import { createZstdDecompress } from "node:zlib";
+import { createGunzip, createZstdDecompress } from "node:zlib";
 import { extractTar } from "./tar";
 import type { HarnessId } from "../../shared/tabs";
 import type {
@@ -107,6 +107,20 @@ async function fileDigest(path: string): Promise<Digest> {
   }
   return { sha256: digest.digest("hex"), size };
 }
+
+// The most an update download without a published size may write.
+const UNSIZED_LIMIT = 1024 ** 3;
+
+/** The executable's pinned digest, unknown for an update until its package is unpacked. */
+const pinnedDigest = (asset: ProgramAsset): Digest | null =>
+  asset.binary ?? (asset.download.sha256 ? asset.download : null);
+
+const decompressor = (asset: ProgramAsset) =>
+  asset.compression === "zstd"
+    ? createZstdDecompress()
+    : asset.compression === "gzip"
+      ? createGunzip()
+      : null;
 
 const classify = (error: unknown, fallback: string): ProgramError => {
   if (error instanceof ProgramError) return error;
@@ -253,7 +267,8 @@ export class ProgramManager extends EventEmitter {
   }
 
   private async verified(path: string, asset: ProgramAsset): Promise<boolean> {
-    const expected = asset.binary ?? asset.download;
+    const expected = pinnedDigest(asset);
+    if (!expected) return false;
     let meta: Meta | undefined;
     try {
       meta = JSON.parse(await readFile(`${path}.meta`, "utf8")) as Meta;
@@ -289,14 +304,20 @@ export class ProgramManager extends EventEmitter {
     const unpacked = `${target}.unpacked`;
     try {
       await this.download(harness, asset, partial);
-      const binary = asset.binary ?? asset.download;
-      if (asset.compression === "zstd") {
+      const binary = pinnedDigest(asset);
+      const decompress = decompressor(asset);
+      if (!binary)
+        throw new ProgramError(
+          "checksum_mismatch",
+          "The harness program has no pinned checksum.",
+        );
+      if (decompress) {
         const digest = createHash("sha256");
         let size = 0;
         try {
           await pipeline(
             createReadStream(partial),
-            createZstdDecompress(),
+            decompress,
             hashing(digest, (count) => {
               size += count;
               // Stop a runaway stream instead of filling the disk.
@@ -349,10 +370,11 @@ export class ProgramManager extends EventEmitter {
       await this.download(harness, asset, partial);
       await mkdir(staging, { recursive: true });
       try {
-        if (asset.compression === "zstd")
+        const decompress = decompressor(asset);
+        if (decompress)
           await pipeline(
             createReadStream(partial),
-            createZstdDecompress(),
+            decompress,
             extractTar(staging),
           );
         else await pipeline(createReadStream(partial), extractTar(staging));
@@ -363,18 +385,22 @@ export class ProgramManager extends EventEmitter {
           `The downloaded harness package could not be unpacked. ${error instanceof Error ? error.message : ""}`.trim(),
         );
       }
-      const actual = await fileDigest(
-        join(staging, ...asset.file.split("/")),
-      ).catch(() => ({ sha256: "", size: -1 }));
+      const executable = join(staging, ...asset.file.split("/"));
+      const actual = await fileDigest(executable).catch(() => ({
+        sha256: "",
+        size: -1,
+      }));
       // An update lists only its package's digest, which was just checked; the executable's
       // digest is recorded from this unpack so later launches can verify it.
       if (!asset.binary && actual.size > 0) asset.binary = actual;
-      const binary = asset.binary ?? asset.download;
-      if (actual.sha256 !== binary.sha256 || actual.size !== binary.size)
+      const binary = pinnedDigest(asset);
+      if (actual.sha256 !== binary?.sha256 || actual.size !== binary.size)
         throw new ProgramError(
           "checksum_mismatch",
           "The unpacked harness program does not match its pinned checksum.",
         );
+      // Package entries do not always carry an executable mode.
+      if (process.platform !== "win32") await chmod(executable, 0o755);
       await rm(partial, { force: true });
       await rm(folder, { recursive: true, force: true });
       await rename(staging, folder);
@@ -429,22 +455,29 @@ export class ProgramManager extends EventEmitter {
         "network",
         `The harness download failed (HTTP ${response.status}). Retry in a moment.`,
       );
+    const expected = asset.download;
     const digest = createHash("sha256");
+    // An npm package is checked against its sha512 integrity as it streams.
+    const integrity = expected.sha256 ? null : createHash("sha512");
     let received = 0;
-    const total = asset.download.size;
+    const length = Number(response.headers.get("content-length"));
+    const total = expected.size ?? (length > 0 ? length : 0);
     let reported = 0;
     await pipeline(
       Readable.fromWeb(response.body as WebReadableStream<Uint8Array>),
       hashing(digest, (count) => {
         progress();
         received += count;
-        if (received > total)
+        if (received > (expected.size ?? UNSIZED_LIMIT))
           throw new ProgramError(
             "checksum_mismatch",
             "The harness download is larger than its pinned size. It was deleted.",
           );
         // Report about every 1% so a large download does not flood snapshots.
-        if (received - reported >= total / 100 || received === total) {
+        if (
+          total &&
+          (received - reported >= total / 100 || received === total)
+        ) {
           reported = received;
           this.emit("progress", {
             harness,
@@ -453,12 +486,15 @@ export class ProgramManager extends EventEmitter {
           } satisfies ProgramProgress);
         }
       }),
+      ...(integrity ? [hashing(integrity, () => {})] : []),
       this.writer(partial),
     );
-    if (
-      digest.digest("hex") !== asset.download.sha256 ||
-      received !== asset.download.size
-    )
+    const matches = expected.sha256
+      ? digest.digest("hex") === expected.sha256 && received === expected.size
+      : "integrity" in expected &&
+        `sha512-${integrity!.digest("base64")}` === expected.integrity &&
+        (expected.size === undefined || received === expected.size);
+    if (!matches)
       throw new ProgramError(
         "checksum_mismatch",
         "The downloaded harness program does not match its pinned checksum. It was deleted.",
@@ -471,7 +507,8 @@ export class ProgramManager extends EventEmitter {
     platform: PlatformKey,
     asset: ProgramAsset,
   ) {
-    const digest = asset.binary ?? asset.download;
+    const digest = pinnedDigest(asset);
+    if (!digest) return;
     const meta: Meta = {
       harness,
       version: this.pinned(harness),

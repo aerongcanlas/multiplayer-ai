@@ -1,4 +1,5 @@
 import type { HarnessId } from "../../shared/tabs";
+import { HARNESS_MANIFEST } from "./manifest";
 import type { PlatformKey, ProgramAsset } from "./types";
 
 /** One published version of a harness program for this platform, with its publisher's digest. */
@@ -19,7 +20,24 @@ const CODEX_TARGETS: Record<PlatformKey, string> = {
   "win32-x64": "x86_64-pc-windows-msvc",
 };
 
+// OpenCode publishes each platform's binary as its own npm package.
+export const OPENCODE_PACKAGES: Record<PlatformKey, string> = {
+  "darwin-arm64": "opencode-darwin-arm64",
+  "darwin-x64": "opencode-darwin-x64",
+  "linux-arm64": "opencode-linux-arm64",
+  "linux-x64": "opencode-linux-x64",
+  "linux-arm64-musl": "opencode-linux-arm64-musl",
+  "linux-x64-musl": "opencode-linux-x64-musl",
+  "win32-arm64": "opencode-windows-arm64",
+  "win32-x64": "opencode-windows-x64",
+};
+
+/** The `major.minor.` prefix in-app OpenCode updates stay within, where its lockdown was verified. */
+export const opencodeLine = (pinned = HARNESS_MANIFEST.opencode.version) =>
+  `${pinned.split(".").slice(0, 2).join(".")}.`;
+
 const SHA256 = /^[0-9a-f]{64}$/;
+const SHA512 = /^sha512-[A-Za-z0-9+/]{86}==$/;
 
 async function json(request: typeof fetch, url: string, accept: string) {
   const response = await request(url, {
@@ -97,6 +115,43 @@ async function claude(
   };
 }
 
+async function opencode(
+  version: string,
+  platform: PlatformKey,
+  request: typeof fetch,
+): Promise<ProgramAsset> {
+  if (!version.startsWith(opencodeLine()))
+    throw new Error(
+      `OpenCode ${version} is available after an app update; this app updates within ${opencodeLine()}x.`,
+    );
+  const name = OPENCODE_PACKAGES[platform];
+  const published = await json(
+    request,
+    `https://registry.npmjs.org/${name}/${version}`,
+    "application/json",
+  );
+  const integrity = (published.dist as { integrity?: unknown } | undefined)
+    ?.integrity;
+  if (
+    published.version !== version ||
+    typeof integrity !== "string" ||
+    !SHA512.test(integrity)
+  )
+    throw new Error(
+      `OpenCode ${version} publishes no verified build for this platform.`,
+    );
+  return {
+    // Built here rather than taken from `dist.tarball`, so the download host is fixed.
+    url: `https://registry.npmjs.org/${name}/-/${name}-${version}.tgz`,
+    file: platform.startsWith("win32")
+      ? "package/bin/opencode.exe"
+      : "package/bin/opencode",
+    download: { integrity },
+    compression: "gzip",
+    archive: "tar",
+  };
+}
+
 type Lookup = (
   version: string,
   platform: PlatformKey,
@@ -106,9 +161,7 @@ type Lookup = (
 const LOOKUPS: Record<HarnessId, Lookup> = {
   codex,
   claude,
-  opencode: async (version) => {
-    throw new Error(`OpenCode ${version} cannot be installed from this build.`);
-  },
+  opencode,
 };
 
 /**

@@ -301,6 +301,8 @@ export interface HarnessState {
   signIn: "in_app" | "guidance";
   // The newest published version of the program, when the check has answered.
   latestVersion?: string;
+  // A newer version outside the line this app updates within, installable after an app update.
+  laterVersion?: string;
   // The version this app ships with, when the managed program was updated past it.
   bundledVersion?: string;
   models: HarnessModel[];

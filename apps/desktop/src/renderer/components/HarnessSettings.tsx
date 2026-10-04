@@ -124,10 +124,21 @@ function UpdateNotice({
   disabled: boolean;
 }) {
   const update = updateAvailable(harness);
-  if (!update && (!harness.bundledVersion || harness.program.customPath))
+  const later = !harness.program.customPath && harness.laterVersion;
+  if (
+    !update &&
+    !later &&
+    (!harness.bundledVersion || harness.program.customPath)
+  )
     return null;
   return (
     <>
+      {later && (
+        <span className="harness-line harness-update">
+          <ArrowUpCircle size={11} aria-hidden="true" />
+          {later} available after an app update
+        </span>
+      )}
       {update && (
         <span className="harness-line harness-update">
           <ArrowUpCircle size={11} aria-hidden="true" />

@@ -13,6 +13,7 @@ import {
   type LaunchContext,
 } from "./contract";
 import { launchEnvironment } from "./environment";
+import type { LatestRelease } from "../programs/latest";
 import type { ProgramRelease } from "../programs/release";
 import type { PlatformKey } from "../programs/types";
 
@@ -85,7 +86,7 @@ export class HarnessRegistry {
       changed: () => void;
       openLogin?: (harness: HarnessId, url: string) => void;
       // Reads the newest published program version; left out, no update check runs.
-      latest?: (harness: HarnessId) => Promise<string | null>;
+      latest?: (harness: HarnessId) => Promise<LatestRelease | null>;
       // Finds a published version's download and digest; left out, updates are unavailable.
       release?: (
         harness: HarnessId,
@@ -363,10 +364,12 @@ export class HarnessRegistry {
     this.latestCheckedAt.set(harness, Date.now());
     void latest(harness)
       .catch(() => null)
-      .then((version) => {
-        if (!version) return this.latestCheckedAt.delete(harness);
+      .then((latest) => {
+        if (!latest) return this.latestCheckedAt.delete(harness);
         this.update(harness, (state) => {
-          state.latestVersion = version;
+          state.latestVersion = latest.version;
+          if (latest.later) state.laterVersion = latest.later;
+          else delete state.laterVersion;
         });
       });
   }
