@@ -12,8 +12,10 @@ const SYNC_LABELS: Record<CollaborationState["status"], string> = {
   disconnected: "Disconnected",
 };
 
-const signIn = () => void perform(() => window.desktop.signIn());
-const cancelSignIn = () => void perform(() => window.desktop.cancelSignIn());
+const signIn = () =>
+  void perform(() => window.desktop.signIn(), { key: "auth.signIn" });
+const cancelSignIn = () =>
+  void perform(() => window.desktop.cancelSignIn(), { key: "auth.cancel" });
 
 /** The sidebar footer: who is signed in on this desktop, or the way to sign in. */
 export function AccountFooter({
@@ -100,7 +102,11 @@ export function AccountSettings({
                 variant="outline"
                 disabled={disabled}
                 title="Sign out on this desktop"
-                onClick={() => void perform(() => window.desktop.signOut())}
+                onClick={() =>
+                  void perform(() => window.desktop.signOut(), {
+                    key: "auth.signOut",
+                  })
+                }
               >
                 <LogOut size={13} />
                 Sign out
@@ -142,7 +148,9 @@ export function AccountSettings({
                 variant="outline"
                 disabled={disabled}
                 onClick={() =>
-                  void perform(() => window.desktop.refreshShared())
+                  void perform(() => window.desktop.refreshShared(), {
+                    key: "shared.refresh",
+                  })
                 }
               >
                 <RefreshCw size={13} />

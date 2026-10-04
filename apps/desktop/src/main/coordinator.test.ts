@@ -121,7 +121,9 @@ function sharedSetup(
     const shared = {
         rooms: [{ ...room, tabs: [] as Tab[] }],
         state: { ...signedOutState(), status: "connected" as const },
-        command: async () => undefined,
+        command: (async () => undefined) as (command: {
+            type: string;
+        }) => Promise<undefined>,
         refresh,
         signIn: async () => {},
         signOut: async () => {},
@@ -411,4 +413,48 @@ test("own-device rows are hidden and this account's other desktops are labelled"
             [spoofed.tabId, false],
         ],
     );
+});
+
+test("leaving a shared room asks the server first, then removes this desktop's copy", async () => {
+    const room = tabRoom(randomUUID());
+    const { coordinator, requests, shared } = sharedSetup(room);
+    const sent: string[] = [];
+    shared.command = async (command: { type: string }) => {
+        sent.push(command.type);
+        shared.rooms = [];
+        return undefined;
+    };
+    const left = await coordinator.dispatch({
+        type: "room.leave",
+        roomId: room.id,
+    });
+    assert.equal(left.ok, true);
+    assert.deepEqual(sent, ["room.leave"]);
+    assert.deepEqual(requests, [{ type: "room.delete", roomId: room.id }]);
+});
+
+test("a room with a running chat is never deleted or left, and local rooms cannot be left", async () => {
+    const running = tabRoom(randomUUID(), "running");
+    const { coordinator, requests, shared } = sharedSetup(running);
+    const sent: string[] = [];
+    shared.command = async (command: { type: string }) => {
+        sent.push(command.type);
+        return undefined;
+    };
+    for (const type of ["room.delete", "room.leave"] as const) {
+        const result = await coordinator.dispatch({ type, roomId: running.id });
+        assert.equal(result.ok, false);
+        assert.match(result.ok ? "" : result.error, /running chats/);
+    }
+    assert.deepEqual(sent, []);
+    assert.deepEqual(requests, []);
+
+    const local = { ...tabRoom(randomUUID()), shared: undefined, tabs: [] };
+    const setup = sharedSetup(local);
+    const refused = await setup.coordinator.dispatch({
+        type: "room.leave",
+        roomId: local.id,
+    });
+    assert.equal(refused.ok, false);
+    assert.deepEqual(setup.requests, []);
 });

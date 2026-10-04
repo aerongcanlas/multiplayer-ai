@@ -13,7 +13,12 @@ import {
   type Tab,
   type TranscriptEntry,
 } from "../../../shared/tabs";
-import { perform, useDesktop } from "../../lib/desktop-store";
+import {
+  perform,
+  useDesktop,
+  withRoom,
+  withTab,
+} from "../../lib/desktop-store";
 import { programLabel } from "../../lib/harness-status";
 import {
   ageLabel,
@@ -30,7 +35,7 @@ import { Button } from "../ui/Button";
 import { LoadoutBar } from "./LoadoutBar";
 import { SharedTabView } from "./SharedTabView";
 import { TranscriptView, type Actions } from "./TranscriptView";
-import { AGENT_STATUS_LABELS, STATUS_LABELS } from "./labels";
+import { AGENT_STATUS_LABELS, responseKey, STATUS_LABELS } from "./labels";
 
 /** The host's read-along switch for a tab in a shared room, with what it shares. */
 function ReadAlongSwitch({
@@ -55,11 +60,20 @@ function ReadAlongSwitch({
           aria-description={shares}
           checked={tab.readAlong}
           disabled={disabled}
-          onChange={() =>
-            void perform(() =>
-              window.desktop.setReadAlong(roomId, tab.id, !tab.readAlong),
-            )
-          }
+          onChange={() => {
+            const on = !tab.readAlong;
+            void perform(
+              () => window.desktop.setReadAlong(roomId, tab.id, on),
+              {
+                lane: `tab.readAlong:${tab.id}`,
+                optimistic: (snapshot) =>
+                  withTab(snapshot, roomId, tab.id, (tab) => ({
+                    ...tab,
+                    readAlong: on,
+                  })),
+              },
+            );
+          }}
         />
         <Eye size={12} aria-hidden />
         Read-along
@@ -164,7 +178,8 @@ export function TabsPanel({
   connected: boolean;
   clockOffsetMs: number | undefined;
 }) {
-  const newTabSetting = useDesktop().snapshot?.newTabHarness;
+  const desktop = useDesktop();
+  const newTabSetting = desktop.snapshot?.newTabHarness;
   const sharedTabs = room.shared?.sharedTabs ?? [];
   const [closing, setClosing] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -174,6 +189,7 @@ export function TabsPanel({
   const busy = tab ? tabBusy(tab.status) : false;
   // Stop also covers sub-agents still running after the turn.
   const stoppable = busy || Boolean(tab?.runningAgents);
+  const stopping = Boolean(tab && desktop.busy.has(`tab.stop:${tab.id}`));
   const models = harness?.models ?? [];
   const modelMissing = Boolean(
     tab &&
@@ -195,7 +211,14 @@ export function TabsPanel({
       return;
     }
     setClosing(null);
-    await perform(() => window.desktop.closeTab(room.id, target.id, confirm));
+    await perform(() => window.desktop.closeTab(room.id, target.id, confirm), {
+      key: `tab.close:${target.id}`,
+      optimistic: (snapshot) =>
+        withRoom(snapshot, room.id, (room) => ({
+          ...room,
+          tabs: room.tabs.filter((item) => item.id !== target.id),
+        })),
+    });
   }
   // Cmd/Ctrl+T opens a tab on the host's new-tab harness; Cmd/Ctrl+W closes the active tab,
   // asking first when it is running.
@@ -208,6 +231,8 @@ export function TabsPanel({
       const key = event.key.toLowerCase();
       if (key !== "t" && key !== "w") return;
       event.preventDefault();
+      // Holding the shortcut opens or closes one tab, not one per key repeat.
+      if (event.repeat) return;
       // Dialogs own the keyboard while open.
       if (disabled || document.querySelector('[role="dialog"]')) return;
       if (key === "t") void open(newTabHarness);
@@ -218,15 +243,17 @@ export function TabsPanel({
   });
   async function send(text: string) {
     if (!tab) return false;
-    const result = await perform(() =>
-      window.desktop.sendToTab({
-        roomId: room.id,
-        tabId: tab.id,
-        text,
-        ...(source
-          ? { suggestionId: source.id, suggestionRevision: source.revision }
-          : {}),
-      }),
+    const result = await perform(
+      () =>
+        window.desktop.sendToTab({
+          roomId: room.id,
+          tabId: tab.id,
+          text,
+          ...(source
+            ? { suggestionId: source.id, suggestionRevision: source.revision }
+            : {}),
+        }),
+      { key: `tab.send:${tab.id}` },
     );
     if (!result) return false;
     onSourceClear();
@@ -236,32 +263,39 @@ export function TabsPanel({
   const actions: Actions = {
     onRespond: (entry: TranscriptEntry, decision: ApprovalDecision) =>
       tab &&
-      void perform(() =>
-        window.desktop.respondToTabApproval(
-          room.id,
-          tab.id,
-          entry.id,
-          decision,
-        ),
+      void perform(
+        () =>
+          window.desktop.respondToTabApproval(
+            room.id,
+            tab.id,
+            entry.id,
+            decision,
+          ),
+        { key: responseKey(entry.id) },
       ),
     onAnswer: (entry: TranscriptEntry, answers: QuestionAnswers) =>
       tab &&
-      void perform(() =>
-        window.desktop.answerQuestion(room.id, tab.id, entry.id, answers),
+      void perform(
+        () => window.desktop.answerQuestion(room.id, tab.id, entry.id, answers),
+        { key: responseKey(entry.id) },
       ),
     onContinuePlan: () =>
       tab &&
-      void perform(() =>
-        window.desktop.sendToTab({
-          roomId: room.id,
-          tabId: tab.id,
-          text: "Implement the plan.",
-          continuePlan: true,
-        }),
+      void perform(
+        () =>
+          window.desktop.sendToTab({
+            roomId: room.id,
+            tabId: tab.id,
+            text: "Implement the plan.",
+            continuePlan: true,
+          }),
+        { key: `tab.send:${tab.id}` },
       ),
     onFreshSession: () =>
       tab &&
-      void perform(() => window.desktop.resetTabSession(room.id, tab.id)),
+      void perform(() => window.desktop.resetTabSession(room.id, tab.id), {
+        key: `tab.reset:${tab.id}`,
+      }),
   };
 
   return (
@@ -276,9 +310,17 @@ export function TabsPanel({
                 onSubmit={(event) => {
                   event.preventDefault();
                   setRenaming(null);
-                  if (title.trim() && title.trim() !== item.title)
-                    void perform(() =>
-                      window.desktop.renameTab(room.id, item.id, title.trim()),
+                  const next = title.trim();
+                  if (next && next !== item.title)
+                    void perform(
+                      () => window.desktop.renameTab(room.id, item.id, next),
+                      {
+                        optimistic: (snapshot) =>
+                          withTab(snapshot, room.id, item.id, (tab) => ({
+                            ...tab,
+                            title: next,
+                          })),
+                      },
                     );
                 }}
               >
@@ -385,9 +427,11 @@ export function TabsPanel({
             size="xs"
             variant="outline"
             className="tab-stop"
-            disabled={stale}
+            disabled={stale || stopping}
             onClick={() =>
-              void perform(() => window.desktop.stopTab(room.id, tab.id))
+              void perform(() => window.desktop.stopTab(room.id, tab.id), {
+                key: `tab.stop:${tab.id}`,
+              })
             }
           >
             <CircleStop size={13} />
@@ -507,62 +551,93 @@ export function TabsPanel({
                 </Button>
               </div>
             )}
-            <PromptInput
-              targetKey={tab.id}
-              label="Message"
-              placeholder={
-                !room.workspace
-                  ? "Select a repository to get started…"
-                  : busy
-                    ? "Draft your next message while the agent works…"
-                    : `Message ${tab.title}`
-              }
-              submitLabel="Send"
-              value={draft}
-              onChange={onDraftChange}
-              busy={disabled || busy}
-              disabled={
-                stale ||
-                Boolean(room.shared && !connected) ||
-                !room.workspace ||
-                tab.status === "unavailable" ||
-                tab.status === "resume_failed" ||
-                modelMissing
-              }
-              onSubmit={send}
-              commands={{
-                key: `${room.id}:${tab.loadout.harness}`,
-                load: async () => {
-                  const result = await window.desktop.loadCommands(
-                    room.id,
-                    tab.id,
-                  );
-                  if (!result.ok) throw new Error(result.error);
-                  return result.commands ?? [];
-                },
-              }}
-              footer={
-                <LoadoutBar
-                  loadout={tab.loadout}
-                  harness={harness}
-                  disabled={disabled || busy}
-                  onChange={(loadout) =>
-                    void perform(() =>
-                      window.desktop.setLoadout(room.id, tab.id, loadout),
-                    )
-                  }
-                  onSetDefault={(model, effort) =>
-                    void perform(() =>
-                      window.desktop.setHarnessDefault(
-                        tab.loadout.harness,
-                        model,
-                        effort,
-                      ),
+            <div className="composer-lock">
+              <PromptInput
+                targetKey={tab.id}
+                label="Message"
+                placeholder={
+                  !room.workspace
+                    ? "Select a repository to get started…"
+                    : busy
+                      ? "Draft your next message while the agent works…"
+                      : `Message ${tab.title}`
+                }
+                submitLabel="Send"
+                value={draft}
+                onChange={onDraftChange}
+                busy={disabled || busy}
+                disabled={
+                  stale ||
+                  Boolean(room.shared && !connected) ||
+                  !room.workspace ||
+                  tab.status === "unavailable" ||
+                  tab.status === "resume_failed" ||
+                  modelMissing
+                }
+                onSubmit={send}
+                commands={{
+                  key: `${room.id}:${tab.loadout.harness}`,
+                  load: async () => {
+                    const result = await window.desktop.loadCommands(
+                      room.id,
+                      tab.id,
+                    );
+                    if (!result.ok) throw new Error(result.error);
+                    return result.commands ?? [];
+                  },
+                }}
+                footer={
+                  <LoadoutBar
+                    loadout={tab.loadout}
+                    harness={harness}
+                    disabled={disabled || busy}
+                    onChange={(loadout) =>
+                      void perform(
+                        () =>
+                          window.desktop.setLoadout(room.id, tab.id, loadout),
+                        {
+                          lane: `tab.loadout:${tab.id}`,
+                          optimistic: (snapshot) =>
+                            withTab(snapshot, room.id, tab.id, (tab) => ({
+                              ...tab,
+                              loadout,
+                            })),
+                        },
+                      )
+                    }
+                    onSetDefault={(model, effort) =>
+                      void perform(
+                        () =>
+                          window.desktop.setHarnessDefault(
+                            tab.loadout.harness,
+                            model,
+                            effort,
+                          ),
+                        { key: `harness.default:${tab.loadout.harness}` },
+                      )
+                    }
+                  />
+                }
+              />
+              {!room.workspace && (
+                // The prompt stays locked until a repository is chosen; clicking it chooses one.
+                <button
+                  type="button"
+                  className="composer-repo-picker"
+                  aria-label="Select a repository to get started"
+                  title="Choose a Git repository"
+                  disabled={disabled}
+                  onClick={() =>
+                    void perform(
+                      () => window.desktop.selectWorkspace(room.id),
+                      {
+                        key: `workspace:${room.id}`,
+                      },
                     )
                   }
                 />
-              }
-            />
+              )}
+            </div>
             <p className="composer-hint">
               {HARNESS_LABELS[tab.loadout.harness]} · runs on this desktop with
               your own account

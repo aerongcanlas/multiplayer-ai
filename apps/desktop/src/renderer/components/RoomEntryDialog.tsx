@@ -26,7 +26,7 @@ export function RoomEntryDialog({
   onRoom: (id: string) => void;
   triggerRef: RefObject<HTMLButtonElement | null>;
 }) {
-  const { snapshot, health, pending, error } = useDesktop();
+  const { snapshot, health, error } = useDesktop();
   const connection = snapshot?.collaboration;
   const signedIn = connection?.auth === "signed_in";
   const [name, setName] = useState("");
@@ -37,7 +37,7 @@ export function RoomEntryDialog({
   const [submitting, setSubmitting] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const shared = mode === "join" || scope === "shared";
-  const disabled = pending > 0 || health.status !== "live";
+  const disabled = health.status !== "live";
   const valid =
     mode === "create"
       ? Boolean(name.trim())
@@ -56,11 +56,14 @@ export function RoomEntryDialog({
         mode === "create"
           ? window.desktop.createRoom(name.trim(), scope)
           : window.desktop.joinRoom(token.trim()),
-      (notice) => {
-        if (notice.kind === "room") {
-          onRoom(notice.roomId);
-          onClose();
-        }
+      {
+        key: "room.enter",
+        onNotice: (notice) => {
+          if (notice.kind === "room") {
+            onRoom(notice.roomId);
+            onClose();
+          }
+        },
       },
     );
     setSubmitting(false);
@@ -179,7 +182,9 @@ export function RoomEntryDialog({
                 <Button
                   variant="outline"
                   onClick={() =>
-                    void perform(() => window.desktop.cancelSignIn())
+                    void perform(() => window.desktop.cancelSignIn(), {
+                      key: "auth.cancel",
+                    })
                   }
                 >
                   Cancel sign-in
@@ -188,7 +193,11 @@ export function RoomEntryDialog({
                 <Button
                   variant="outline"
                   disabled={disabled}
-                  onClick={() => void perform(() => window.desktop.signIn())}
+                  onClick={() =>
+                    void perform(() => window.desktop.signIn(), {
+                      key: "auth.signIn",
+                    })
+                  }
                 >
                   <UserRound size={15} /> Sign in with GitHub
                 </Button>
@@ -204,7 +213,11 @@ export function RoomEntryDialog({
             <Button
               variant="outline"
               disabled={disabled}
-              onClick={() => void perform(() => window.desktop.refreshShared())}
+              onClick={() =>
+                void perform(() => window.desktop.refreshShared(), {
+                  key: "shared.refresh",
+                })
+              }
             >
               Refresh shared rooms
             </Button>

@@ -111,6 +111,8 @@ await run.execute(
                 "cancelSignIn",
                 "refreshShared",
                 "joinRoom",
+                "deleteRoom",
+                "leaveRoom",
                 "createInvite",
                 "createSuggestion",
                 "editSuggestion",
@@ -255,11 +257,14 @@ await run.execute(
             .getByRole("button", { name: "Close", exact: true })
             .focus();
         await page.keyboard.press("Tab");
-        assert.equal(
-            await dialog.evaluate((element) =>
-                element.contains(document.activeElement),
-            ),
-            true,
+        // Tab first lands on the dialog's focus guard, which hands focus back to the first
+        // control a moment later.
+        await run.until(
+            () =>
+                dialog
+                    .getByRole("button", { name: "Create", exact: true })
+                    .evaluate((button) => button === document.activeElement),
+            "Tab wraps to the dialog's first control",
         );
         await page.keyboard.press("Control+b");
         await page.keyboard.press("Escape");

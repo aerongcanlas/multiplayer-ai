@@ -332,6 +332,83 @@ test("shared-room HTTP authorization, transactions, snapshots and generated prom
       (await get(eve)).rooms.some((r) => r.id === other.roomId),
       true,
     );
+    // Only admins delete a room for everyone; any member can leave.
+    const doomed = await create(alice, "Doomed");
+    const team = await create(alice, "Team");
+    const join = async (roomId, actor) =>
+      accept(actor, (await invite(roomId)).token);
+    await join(doomed.roomId, bob);
+    await join(team.roomId, bob);
+    await join(team.roomId, eve);
+    await request(
+      alice,
+      "POST",
+      `/v1/rooms/${doomed.roomId}/messages`,
+      { text: "Goodbye" },
+      201,
+    );
+    await request(bob, "DELETE", `/v1/rooms/${doomed.roomId}`, undefined, 403);
+    const deleted = await request(
+      alice,
+      "DELETE",
+      `/v1/rooms/${doomed.roomId}`,
+    );
+    assert.equal(
+      deleted.snapshot.rooms.some((r) => r.id === doomed.roomId),
+      false,
+    );
+    assert.equal(
+      (await get(bob)).rooms.some((r) => r.id === doomed.roomId),
+      false,
+    );
+    assert.equal(
+      (
+        await db.query(
+          "select count(*)::int as n from public.message where room_id = $1",
+          [doomed.roomId],
+        )
+      ).rows[0].n,
+      0,
+    );
+    await request(
+      alice,
+      "DELETE",
+      `/v1/rooms/${doomed.roomId}`,
+      undefined,
+      403,
+    );
+    const left = await request(alice, "POST", `/v1/rooms/${team.roomId}/leave`);
+    assert.equal(
+      left.snapshot.rooms.some((r) => r.id === team.roomId),
+      false,
+    );
+    const teamFor = async (actor) =>
+      (await get(actor)).rooms.find((r) => r.id === team.roomId);
+    // The last admin left, so the earliest remaining member becomes admin.
+    assert.equal((await teamFor(bob)).isAdmin, true);
+    assert.equal((await teamFor(eve)).isAdmin, false);
+    assert.deepEqual(
+      (await teamFor(eve)).members.map((m) => m.id).sort(),
+      [bob, eve].sort(),
+    );
+    await request(
+      alice,
+      "POST",
+      `/v1/rooms/${team.roomId}/leave`,
+      undefined,
+      403,
+    );
+    await request(eve, "POST", `/v1/rooms/${team.roomId}/leave`);
+    await request(bob, "POST", `/v1/rooms/${team.roomId}/leave`);
+    assert.equal(
+      (
+        await db.query(
+          "select count(*)::int as n from public.room where id = $1",
+          [team.roomId],
+        )
+      ).rows[0].n,
+      0,
+    );
     await request(
       alice,
       "POST",

@@ -61,6 +61,9 @@ export const commandSchema = z.discriminatedUnion("type", [
       scope: z.enum(["local", "shared"]).optional(),
     })
     .strict(),
+  // Deletes a local room, or a shared room for every member (admins only).
+  z.object({ type: z.literal("room.delete"), roomId: id }).strict(),
+  z.object({ type: z.literal("room.leave"), roomId: id }).strict(),
   z.object({ type: z.literal("workspace.select"), roomId: id }).strict(),
   z.object({ type: z.literal("message.send"), roomId: id, text }).strict(),
   z
@@ -193,6 +196,8 @@ export interface DesktopBridge {
   signOut(): Promise<Result>;
   refreshShared(): Promise<Result>;
   joinRoom(token: string): Promise<Result>;
+  deleteRoom(roomId: string): Promise<Result>;
+  leaveRoom(roomId: string): Promise<Result>;
   createInvite(roomId: string): Promise<Result>;
   selectWorkspace(roomId: string): Promise<Result>;
   sendMessage(roomId: string, text: string): Promise<Result>;

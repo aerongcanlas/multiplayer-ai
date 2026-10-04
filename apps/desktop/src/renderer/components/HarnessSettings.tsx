@@ -43,10 +43,12 @@ export function HarnessStatus({
           variant="outline"
           disabled={disabled}
           onClick={() =>
-            void perform(() =>
-              program.state === "custom_invalid"
-                ? window.desktop.useManagedHarness(harness.id)
-                : window.desktop.refreshHarness(harness.id),
+            void perform(
+              () =>
+                program.state === "custom_invalid"
+                  ? window.desktop.useManagedHarness(harness.id)
+                  : window.desktop.refreshHarness(harness.id),
+              { key: `harness.program:${harness.id}` },
             )
           }
         >
@@ -62,7 +64,9 @@ export function HarnessStatus({
             size="xs"
             disabled={disabled}
             onClick={() =>
-              void perform(() => window.desktop.signInHarness(harness.id))
+              void perform(() => window.desktop.signInHarness(harness.id), {
+                key: `harness.signIn:${harness.id}`,
+              })
             }
           >
             <LogIn size={12} />
@@ -90,8 +94,9 @@ export function HarnessStatus({
             variant="outline"
             disabled={disabled}
             onClick={() =>
-              void perform(() =>
-                window.desktop.acknowledgeHarnessNotice(harness.id),
+              void perform(
+                () => window.desktop.acknowledgeHarnessNotice(harness.id),
+                { key: `harness.notice:${harness.id}` },
               )
             }
           >
@@ -127,7 +132,9 @@ function UpdateNotice({
               disabled={disabled}
               title={`Downloads ${harness.label} ${update.version}, newer than the version this app was tested with.`}
               onClick={() =>
-                void perform(() => window.desktop.updateHarness(harness.id))
+                void perform(() => window.desktop.updateHarness(harness.id), {
+                  key: `harness.update:${harness.id}`,
+                })
               }
             >
               Update
@@ -145,7 +152,10 @@ function UpdateNotice({
             variant="ghost"
             disabled={disabled}
             onClick={() =>
-              void perform(() => window.desktop.revertHarnessUpdate(harness.id))
+              void perform(
+                () => window.desktop.revertHarnessUpdate(harness.id),
+                { key: `harness.update:${harness.id}` },
+              )
             }
           >
             Revert
@@ -174,7 +184,9 @@ export function HarnessConnection({
           aria-label={`Refresh ${harness.label}`}
           disabled={disabled}
           onClick={() =>
-            void perform(() => window.desktop.refreshHarness(harness.id))
+            void perform(() => window.desktop.refreshHarness(harness.id), {
+              key: `harness.refresh:${harness.id}`,
+            })
           }
         >
           <RefreshCw size={12} />
@@ -204,8 +216,9 @@ export function HarnessConnection({
           variant="outline"
           disabled={disabled}
           onClick={() =>
-            void perform(() =>
-              window.desktop.chooseHarnessExecutable(harness.id),
+            void perform(
+              () => window.desktop.chooseHarnessExecutable(harness.id),
+              { key: `harness.program:${harness.id}` },
             )
           }
         >
@@ -218,7 +231,9 @@ export function HarnessConnection({
             variant="ghost"
             disabled={disabled}
             onClick={() =>
-              void perform(() => window.desktop.useManagedHarness(harness.id))
+              void perform(() => window.desktop.useManagedHarness(harness.id), {
+                key: `harness.program:${harness.id}`,
+              })
             }
           >
             Use managed program

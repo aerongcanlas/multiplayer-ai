@@ -1,7 +1,9 @@
 import { MessageCircleQuestion } from "lucide-react";
 import { useState } from "react";
 import type { QuestionAnswers, TranscriptEntry } from "../../../shared/tabs";
+import { useDesktop } from "../../lib/desktop-store";
 import { Button } from "../ui/Button";
+import { responseKey } from "./labels";
 import { SubAgentBadge } from "./SubAgentBadge";
 
 /** A harness question (a skill's multiple choice or a plan-mode clarification). */
@@ -21,6 +23,7 @@ export function QuestionCard({
   const [chosen, setChosen] = useState<QuestionAnswers>({});
   const [other, setOther] = useState<Record<string, string>>({});
   const pending = entry.state === "pending";
+  const sending = useDesktop().busy.has(responseKey(entry.id));
   const answers = Object.fromEntries(
     questions.map((question) => [
       question.id,
@@ -102,7 +105,11 @@ export function QuestionCard({
         </fieldset>
       ))}
       {pending ? (
-        <Button size="xs" type="submit" disabled={disabled || !complete}>
+        <Button
+          size="xs"
+          type="submit"
+          disabled={disabled || sending || !complete}
+        >
           Send answer
         </Button>
       ) : (

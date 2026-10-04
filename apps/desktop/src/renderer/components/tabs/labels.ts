@@ -17,3 +17,6 @@ export const AGENT_STATUS_LABELS: Record<AgentStatus, string> = {
   stopped: "Stopped",
   interrupted: "Interrupted",
 };
+
+/** The in-flight key for answering one approval or question, so a double click sends once. */
+export const responseKey = (entryId: string) => `tab.respond:${entryId}`;

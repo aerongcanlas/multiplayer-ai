@@ -20,6 +20,8 @@ const DIRECT = new Set([
     "tab.stop",
     "tab.close",
     "tab.rename",
+    // Model, effort, plan mode, and access only shape the next turn, which still checks membership.
+    "tab.setLoadout",
     "tab.transcript",
     "tab.agents",
     "tab.commands",
@@ -208,6 +210,32 @@ export class DesktopCoordinator {
             } else if (command.type === "room.create") {
                 await this.localCommand(command);
                 notice = { kind: "room", roomId: this.local!.rooms.at(-1)!.id };
+            } else if (
+                command.type === "room.delete" ||
+                command.type === "room.leave"
+            ) {
+                const room = this.view!.rooms.find(
+                    (room) => room.id === command.roomId,
+                );
+                if (!room)
+                    throw new Error(
+                        "Room unavailable. Refresh your shared rooms.",
+                    );
+                if (
+                    room.tabs.some(
+                        (tab) => tabBusy(tab.status) || tab.runningAgents,
+                    )
+                )
+                    throw new Error("Stop this room's running chats first.");
+                if (room.shared) await this.shared.command(command);
+                else if (command.type === "room.leave")
+                    throw new Error("Only shared rooms can be left.");
+                // This desktop's chats, transcripts, and repository choice for the room go with it.
+                if (this.local!.rooms.some((item) => item.id === room.id))
+                    await this.localCommand({
+                        type: "room.delete",
+                        roomId: room.id,
+                    });
             } else {
                 let room = this.view!.rooms.find(
                     (room) => room.id === command.roomId,
