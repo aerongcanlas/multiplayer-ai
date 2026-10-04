@@ -251,14 +251,34 @@ test("shared-room HTTP authorization, transactions, snapshots and generated prom
     );
 
     const tabId = randomUUID();
+    const opencodeTabId = randomUUID();
     await db.query(
       `insert into public.desktop_tab_share(tab_id, room_id, host_id, device_id, title, harness, model, status, switch_on)
       values($1,$2,$3,'test-device','Shared tab','codex','test-model','idle',false)`,
       [tabId, roomId, bob],
     );
+    await db.query(
+      `insert into public.desktop_tab_share(tab_id, room_id, host_id, device_id, title, harness, model, status, switch_on)
+      values($1,$2,$3,'test-device','OpenCode tab','opencode','ollama/qwen3','idle',false)`,
+      [opencodeTabId, roomId, bob],
+    );
+    await assert.rejects(
+      db.query(
+        `insert into public.desktop_tab_share(tab_id, room_id, host_id, device_id, title, harness, model, status, switch_on)
+        values($1,$2,$3,'test-device','Unknown tab','cursor','test-model','idle',false)`,
+        [randomUUID(), roomId, bob],
+      ),
+      /desktop_tab_share_harness_check/,
+    );
     const current = await get(alice);
     assert.ok(Number.isFinite(Date.parse(current.now)));
-    assert.equal(current.rooms[0].sharedTabs[0].tabId, tabId);
+    assert.deepEqual(
+      current.rooms[0].sharedTabs.map((tab) => [tab.tabId, tab.harness]),
+      [
+        [tabId, "codex"],
+        [opencodeTabId, "opencode"],
+      ],
+    );
     await db.query("select set_config('request.jwt.claim.sub', $1, false)", [
       alice,
     ]);
@@ -271,13 +291,13 @@ test("shared-room HTTP authorization, transactions, snapshots and generated prom
       "HTTP snapshot preserves the existing desktop contract",
     );
     await db.query(
-      "update public.desktop_tab_share set status = 'closed' where tab_id = $1",
-      [tabId],
+      "update public.desktop_tab_share set status = 'closed' where tab_id = any($1::uuid[])",
+      [[tabId, opencodeTabId]],
     );
     assert.deepEqual((await get(alice)).rooms[0].sharedTabs, []);
     await db.query(
-      "update public.desktop_tab_share set status = 'idle' where tab_id = $1",
-      [tabId],
+      "update public.desktop_tab_share set status = 'idle' where tab_id = any($1::uuid[])",
+      [[tabId, opencodeTabId]],
     );
     await db.query(
       "delete from public.room_member where room_id = $1 and member_id = $2",
