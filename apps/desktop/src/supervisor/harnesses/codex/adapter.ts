@@ -32,7 +32,8 @@ import {
   type RpcNotification,
   type RpcRequest,
 } from "./transport";
-import { assertHome, type AccountSpec } from "../accounts";
+import { assertHome } from "../accounts";
+import { CODEX_ACCOUNT } from "./account";
 
 const IDLE_MS = 10 * 60_000;
 const LOGIN_HOSTS = ["auth.openai.com", "chatgpt.com"];
@@ -55,7 +56,7 @@ const loginUrlAllowed = (value: string) => {
 export class CodexAdapter implements HarnessAdapter {
   readonly id = "codex" as const;
   readonly signIn = "in_app" as const;
-  readonly account: AccountSpec = { variable: "CODEX_HOME" };
+  readonly account = CODEX_ACCOUNT;
   readonly reportsAgents = true;
   closed = false;
   readonly idleMs: number;
@@ -77,14 +78,19 @@ export class CodexAdapter implements HarnessAdapter {
     return this.options.launcher ?? direct;
   }
 
-  /** The shared process for an executable, started on first use. */
+  /**
+   * The shared process for an executable and home, started on first use. A process started for
+   * another home is never reused (KTD7).
+   */
   async process(context: LaunchContext): Promise<CodexProcess> {
     if (this.closed)
       throw new HarnessError("failed", "The app is shutting down.");
-    let process = this.processes.get(context.executable);
+    assertHome(context, "CODEX_HOME");
+    const key = `${context.executable}\n${context.home}`;
+    let process = this.processes.get(key);
     if (!process || !process.alive) {
       process = new CodexProcess(context, this.launcher, this);
-      this.processes.set(context.executable, process);
+      this.processes.set(key, process);
       const current = process;
       process.transport.on("request", (rpc: RpcRequest) => {
         const threadId = string(rpc.params.threadId);
@@ -370,6 +376,29 @@ export class CodexAdapter implements HarnessAdapter {
       return { state: "pending", url, done };
     } finally {
       if (!held) process.release();
+    }
+  }
+
+  async cancelSignIn() {
+    const login = this.login;
+    if (!login) return;
+    login.settle(new Error("Sign-in cancelled."));
+    await login.process.transport
+      .request("account/login/cancel", { loginId: login.loginId })
+      .catch(() => {
+        /* The login already ended. */
+      });
+  }
+
+  /** Signs the app's Codex home out, then closes its process so no session keeps the login. */
+  async signOut(context: LaunchContext) {
+    await this.cancelSignIn();
+    const process = await this.process(context);
+    try {
+      await process.transport.request("account/logout");
+    } finally {
+      process.release();
+      process.close();
     }
   }
 

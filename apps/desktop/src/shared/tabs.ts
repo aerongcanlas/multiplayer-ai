@@ -10,7 +10,8 @@ export const HARNESS_LABELS: Record<HarnessId, string> = {
 };
 // A one-time notice the host acknowledges before the harness's first tab; null for none.
 export const HARNESS_NOTICES: Record<HarnessId, string | null> = {
-  codex: null,
+  codex:
+    "Codex tabs have their own ChatGPT sign-in, separate from Codex in your terminal, so signing in or out there never signs a tab out. Sign in once from Settings.",
   claude:
     "Claude Code tabs have their own sign-in, separate from Claude Code in your terminal, so signing in or out there never signs a tab out. Sign in from Settings: Claude Code opens Anthropic's page in your browser, and this app never sees your password or token.",
   opencode: null,

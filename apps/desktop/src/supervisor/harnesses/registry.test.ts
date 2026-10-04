@@ -250,7 +250,10 @@ test("without a usable accounts folder sign-out runs nothing (AE9)", async () =>
   });
   harnesses.setEnvironment({ PATH: "/usr/bin", HOME: "/home/host" });
   try {
-    await assert.rejects(harnesses.signOut("codex"), /no folder for harness/);
+    await assert.rejects(
+      harnesses.prepareSignOut("codex"),
+      /no folder for harness/,
+    );
     assert.ok(!fake.calls.some((call) => call.startsWith("signOut")));
   } finally {
     harnesses.close();

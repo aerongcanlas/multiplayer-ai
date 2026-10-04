@@ -8,6 +8,7 @@
 // work for that sub-agent), and FIXTURE_EXIT_LATER (the process exits after the turn).
 // MP_FIXTURE_STATE persists threads so a restarted fixture can resume them; MP_FIXTURE_LOG records
 // every request, the launch arguments, and the environment for tests to inspect.
+// MP_FIXTURE_LOGIN_HANG=1 keeps a ChatGPT sign-in pending until it is cancelled.
 import { randomUUID } from "node:crypto";
 import {
     appendFileSync,
@@ -573,14 +574,16 @@ createInterface({ input: process.stdin })
                     process.env.MP_FIXTURE_LOGIN_URL ??
                     "https://auth.openai.com/authorize?state=fixture",
             });
-            setTimeout(() => {
-                signedIn = true;
-                notify("account/login/completed", {
-                    loginId: "fixture-login",
-                    success: true,
-                    error: null,
-                });
-            }, 100);
+            // MP_FIXTURE_LOGIN_HANG leaves the login waiting on the browser.
+            if (process.env.MP_FIXTURE_LOGIN_HANG !== "1")
+                setTimeout(() => {
+                    signedIn = true;
+                    notify("account/login/completed", {
+                        loginId: "fixture-login",
+                        success: true,
+                        error: null,
+                    });
+                }, 100);
         } else if (method === "account/login/cancel") result({});
         else if (method === "account/logout") {
             signedIn = false;

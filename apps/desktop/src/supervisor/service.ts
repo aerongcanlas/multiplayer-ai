@@ -191,10 +191,16 @@ export class SupervisorService {
       else if (command.type === "harness.cancelSignIn")
         await registry.cancelSignIn(command.harness);
       else if (command.type === "harness.signOut") {
-        // The harness's own sign-out first, then its tabs, then a fresh read (KTD11).
-        await registry.signOut(command.harness);
+        // The app home is checked before anything stops (R15). Tabs then stop and close their
+        // sessions, so a harness that ends its process on sign-out shows no crash, and the
+        // harness's own sign-out runs before a fresh read (KTD11).
+        const signOut = await registry.prepareSignOut(command.harness);
         this.host?.closeHarness(command.harness);
-        await registry.refresh(command.harness);
+        try {
+          await signOut();
+        } finally {
+          await registry.refresh(command.harness);
+        }
       }
       else if (command.type === "harness.useManaged") {
         registry.setExecutable(command.harness, null);

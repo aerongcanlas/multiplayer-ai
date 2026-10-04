@@ -537,16 +537,16 @@ export class HarnessRegistry {
   }
 
   /**
-   * Signs the app's own login out with the harness's own command. The home is prepared first, so
-   * a missing folder runs nothing against the host (R15).
+   * Prepares a sign-out and returns the step that runs the harness's own command against the app
+   * home. The home is prepared first, so a missing folder runs nothing against the host (R15).
    */
-  async signOut(harness: HarnessId) {
+  async prepareSignOut(harness: HarnessId) {
     const adapter = this.adapter(harness);
     if (!adapter.signOut)
       throw new Error(`${HARNESS_LABELS[harness]} has no app sign-in to end.`);
     await this.cancelSignIn(harness);
     const context = await this.context(harness);
-    await adapter.signOut(context);
+    return () => adapter.signOut!(context);
   }
 
   setExecutable(harness: HarnessId, path: string | null) {
