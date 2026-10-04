@@ -122,3 +122,137 @@ test("without a usable accounts folder no harness program runs (AE9)", async () 
     harnesses.close();
   }
 });
+
+async function signingIn(options: { timeoutMs?: number } = {}) {
+  const fake = new FakeHarness("codex");
+  fake.signInMode = "manual";
+  const opened: string[] = [];
+  const settings = new Map<string, unknown>([
+    ["harness.codex.executable", process.execPath],
+  ]);
+  const root = await mkdtemp(join(tmpdir(), "multiplayer-registry-"));
+  const harnesses = new HarnessRegistry({
+    adapters: [fake],
+    programs: new ProgramManager({ root, manifest: HARNESS_MANIFEST }),
+    accounts: new Accounts(join(root, "accounts")),
+    settings: {
+      getSetting: <T>(key: string) => settings.get(key) as T | undefined,
+      setSetting: (key, value) => settings.set(key, value),
+    },
+    changed: () => {},
+    openLogin: (_harness, url) => opened.push(url),
+    environmentTimeoutMs: 0,
+    signInTimeoutMs: options.timeoutMs,
+  });
+  harnesses.setEnvironment({ PATH: "/usr/bin", HOME: "/home/host" });
+  fake.signedIn = false;
+  await harnesses.refresh("codex");
+  return { fake, harnesses, opened };
+}
+
+const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+
+test("a pending sign-in opens its URL once and signs in when the harness reports success", async () => {
+  const { fake, harnesses, opened } = await signingIn();
+  try {
+    await harnesses.signIn("codex");
+    assert.equal(harnesses.state("codex").auth.state, "signing_in");
+    assert.deepEqual(opened, ["https://auth.openai.com/fake"]);
+    // A second request while one is pending starts nothing.
+    await harnesses.signIn("codex");
+    assert.equal(fake.calls.filter((call) => call === "startSignIn").length, 1);
+    fake.finishSignIn();
+    await settle();
+    assert.equal(harnesses.state("codex").auth.state, "signed_in");
+  } finally {
+    harnesses.close();
+  }
+});
+
+test("a pending sign-in without a URL opens nothing", async () => {
+  const { fake, harnesses, opened } = await signingIn();
+  try {
+    fake.signInUrl = undefined;
+    await harnesses.signIn("codex");
+    assert.equal(harnesses.state("codex").auth.state, "signing_in");
+    assert.deepEqual(opened, []);
+  } finally {
+    harnesses.close();
+  }
+});
+
+test("cancel and timeout end the sign-in and return to signed out (AE4)", async () => {
+  const cancelled = await signingIn();
+  try {
+    await cancelled.harnesses.signIn("codex");
+    await cancelled.harnesses.cancelSignIn("codex");
+    assert.ok(cancelled.fake.calls.includes("cancelSignIn"));
+    assert.equal(cancelled.harnesses.state("codex").auth.state, "signed_out");
+    // The cancelled program finishing later changes nothing.
+    cancelled.fake.finishSignIn();
+    await settle();
+    assert.equal(cancelled.harnesses.state("codex").auth.state, "signed_out");
+  } finally {
+    cancelled.harnesses.close();
+  }
+  const timed = await signingIn({ timeoutMs: 30 });
+  try {
+    await timed.harnesses.signIn("codex");
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    assert.deepEqual(timed.harnesses.state("codex").auth, {
+      state: "signed_out",
+      message: "Sign-in timed out.",
+    });
+    assert.ok(timed.fake.calls.includes("cancelSignIn"));
+  } finally {
+    timed.harnesses.close();
+  }
+});
+
+test("a failed sign-in keeps a redacted, capped reason", async () => {
+  const { fake, harnesses } = await signingIn();
+  try {
+    fake.signInError = `Login failed\nError at https://auth.example/callback?code=abc: token sk-ant-oat01-${"x".repeat(40)}9 rejected ${"y".repeat(300)}`;
+    await harnesses.signIn("codex");
+    const message = harnesses.state("codex").auth.message ?? "";
+    assert.equal(harnesses.state("codex").auth.state, "signed_out");
+    assert.ok(message.length <= 200);
+    assert.doesNotMatch(message, /https:|sk-ant|Login failed/);
+    assert.match(message, /\[link\]/);
+    assert.match(message, /\[redacted\]/);
+    // A program that fails after starting is recorded the same way.
+    fake.signInError = undefined;
+    await harnesses.signIn("codex");
+    fake.finishSignIn("The browser sign-in was declined.");
+    await settle();
+    assert.deepEqual(harnesses.state("codex").auth, {
+      state: "signed_out",
+      message: "The browser sign-in was declined.",
+    });
+  } finally {
+    harnesses.close();
+  }
+});
+
+test("closing the registry ends a pending sign-in", async () => {
+  const { fake, harnesses } = await signingIn();
+  await harnesses.signIn("codex");
+  harnesses.close();
+  await settle();
+  assert.ok(fake.calls.includes("cancelSignIn"));
+});
+
+test("without a usable accounts folder sign-out runs nothing (AE9)", async () => {
+  const fake = new FakeHarness("codex");
+  const harnesses = await registry([fake], {
+    custom: true,
+    accounts: () => new Accounts(undefined),
+  });
+  harnesses.setEnvironment({ PATH: "/usr/bin", HOME: "/home/host" });
+  try {
+    await assert.rejects(harnesses.signOut("codex"), /no folder for harness/);
+    assert.ok(!fake.calls.some((call) => call.startsWith("signOut")));
+  } finally {
+    harnesses.close();
+  }
+});

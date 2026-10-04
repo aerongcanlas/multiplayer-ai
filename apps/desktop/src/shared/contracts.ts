@@ -249,6 +249,8 @@ export interface DesktopBridge {
   ): Promise<Result>;
   refreshHarness(harness: HarnessId): Promise<Result>;
   signInHarness(harness: HarnessId): Promise<Result>;
+  cancelHarnessSignIn(harness: HarnessId): Promise<Result>;
+  signOutHarness(harness: HarnessId): Promise<Result>;
   chooseHarnessExecutable(harness: HarnessId): Promise<Result>;
   useManagedHarness(harness: HarnessId): Promise<Result>;
   acknowledgeHarnessNotice(harness: HarnessId): Promise<Result>;

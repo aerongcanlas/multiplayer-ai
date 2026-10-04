@@ -188,6 +188,14 @@ export class SupervisorService {
         void registry.signIn(command.harness).catch(() => {
           /* The failure is recorded in the harness state. */
         });
+      else if (command.type === "harness.cancelSignIn")
+        await registry.cancelSignIn(command.harness);
+      else if (command.type === "harness.signOut") {
+        // The harness's own sign-out first, then its tabs, then a fresh read (KTD11).
+        await registry.signOut(command.harness);
+        this.host?.closeHarness(command.harness);
+        await registry.refresh(command.harness);
+      }
       else if (command.type === "harness.useManaged") {
         registry.setExecutable(command.harness, null);
         void registry.refresh(command.harness);

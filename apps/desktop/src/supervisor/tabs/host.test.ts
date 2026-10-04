@@ -1248,3 +1248,52 @@ test("new tabs open with the host's chosen harness", () =>
       /not available/,
     );
   }));
+
+test("signing out stops running turns, closes every session, and names only the harness (AE5)", () =>
+  withHost(async (setup, fake) => {
+    const running = await setup.open();
+    const idle = await setup.open();
+    await setup.send(idle.id, "Hello");
+    await setup.settled(idle.id);
+    await setup.send(running.id, "FAKE_APPROVAL please");
+    await setup.pending(running.id, "approval");
+    const opened = fake.calls.filter((call) => call.startsWith("open:")).length;
+
+    await setup.dispatch({ type: "harness.signOut", harness: "codex" });
+    assert.ok(
+      fake.calls.some(
+        (call) => call.startsWith("signOut:") && call.includes("accounts"),
+      ),
+    );
+    assert.equal(fake.calls.filter((call) => call === "close").length, 2);
+    assert.equal(setup.registry.state("codex").auth.state, "signed_out");
+    for (const tab of [running, idle]) {
+      assert.equal(setup.tab(tab.id).status, "unavailable");
+      const entries = await setup.transcript(tab.id);
+      const notice = entries.findLast((entry) => entry.notice === "signed_out");
+      assert.match(notice?.summary ?? "", /Signed out of Codex/);
+      assert.ok(
+        entries.every(
+          (entry) => !JSON.stringify(entry).includes("fake@example.invalid"),
+        ),
+      );
+    }
+    assert.ok(
+      (await setup.transcript(running.id)).some(
+        (entry) => entry.kind === "turn" && entry.outcome === "stopped",
+      ),
+    );
+
+    await setup.dispatch({ type: "harness.signIn", harness: "codex" });
+    await setup.until(
+      () => setup.registry.state("codex").auth.state === "signed_in",
+      "sign-in",
+    );
+    await setup.until(() => setup.tab(idle.id).status === "idle", "ready tab");
+    await setup.send(idle.id, "Again");
+    await setup.settled(idle.id);
+    assert.equal(
+      fake.calls.filter((call) => call.startsWith("open:")).length,
+      opened + 1,
+    );
+  }));

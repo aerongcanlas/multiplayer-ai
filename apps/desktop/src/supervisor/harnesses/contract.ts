@@ -163,9 +163,16 @@ export interface OpenRequest extends LaunchContext {
   listener?: (event: SessionEvent) => void;
 }
 
+/** A started sign-in: already signed in, or waiting on the host to finish it in the browser. */
+export type SignInStart =
+  | { state: "signed_in" }
+  // `done` settles when the harness reports the sign-in finished, or rejects with why it failed.
+  | { state: "pending"; url?: string; done: Promise<void> };
+
 export interface HarnessAdapter {
   readonly id: HarnessId;
-  readonly signIn: "in_app" | "guidance";
+  // In the app, by guidance only, or through a copy-ready terminal command.
+  readonly signIn: "in_app" | "guidance" | "command";
   /** The app-owned home this harness launches with, and the host setup carried into it. */
   readonly account: AccountSpec;
   /** Whether sessions report sub-agents on the session listener. */
@@ -173,8 +180,12 @@ export interface HarnessAdapter {
   /** Checks that a custom executable speaks the harness protocol. Returns its version. */
   handshake(context: LaunchContext): Promise<{ version: string | null }>;
   inspect(context: LaunchContext): Promise<Inspection>;
-  /** Starts an in-app sign-in and returns the URL to open, or null when already signed in. */
-  startSignIn?(context: LaunchContext): Promise<string | null>;
+  /** Starts an in-app sign-in. Only one is pending per harness at a time. */
+  startSignIn?(context: LaunchContext): Promise<SignInStart>;
+  /** Ends a pending sign-in, ending any program it started. */
+  cancelSignIn?(): Promise<void>;
+  /** Signs the app's own login out with the harness's own command; never the host's. */
+  signOut?(context: LaunchContext): Promise<void>;
   open(request: OpenRequest): Promise<HarnessSession>;
   /** The slash commands and skills a session in `cwd` would offer. */
   commands?(request: LaunchContext & { cwd: string }): Promise<SlashCommand[]>;

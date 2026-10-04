@@ -315,8 +315,14 @@ export interface HarnessState {
     account?: string;
     plan?: string;
     message?: string;
+    // A copy-ready terminal command that signs this harness in (OpenCode hosted providers).
+    command?: string;
+    // Linked host config that overrides the app's login, naming the setting, never its value.
+    warning?: string;
+    // Whether the app holds a login it can sign out of.
+    signOut?: boolean;
   };
-  signIn: "in_app" | "guidance";
+  signIn: "in_app" | "guidance" | "command";
   // The newest published version of the program, when the check has answered.
   latestVersion?: string;
   // A newer version outside the line this app updates within, installable after an app update.
@@ -432,6 +438,15 @@ export const tabCommandSchemas = [
     .strict(),
   z
     .object({ type: z.literal("harness.signIn"), harness: harnessIdSchema })
+    .strict(),
+  z
+    .object({
+      type: z.literal("harness.cancelSignIn"),
+      harness: harnessIdSchema,
+    })
+    .strict(),
+  z
+    .object({ type: z.literal("harness.signOut"), harness: harnessIdSchema })
     .strict(),
   // Main opens a native file dialog; the renderer never supplies a path.
   z

@@ -486,11 +486,15 @@ test("in-app sign-in returns only allowlisted URLs and reports completion", asyn
       (await adapter.inspect(setup_.context)).auth.state,
       "signed_out",
     );
+    const started = await adapter.startSignIn(setup_.context);
+    assert.equal(started.state, "pending");
+    assert.ok(started.state === "pending");
     assert.equal(
-      await adapter.startSignIn(setup_.context),
+      started.url,
       "https://auth.openai.com/authorize?state=fixture",
     );
-    await wait(300);
+    // The fixture reports the login as completed shortly after it starts.
+    await started.done;
     assert.ok(changes >= 1);
     assert.equal(
       (await adapter.inspect(setup_.context)).auth.state,

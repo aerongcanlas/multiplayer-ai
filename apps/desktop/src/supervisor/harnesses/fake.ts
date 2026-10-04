@@ -14,6 +14,7 @@ import {
   type Inspection,
   type LaunchContext,
   type OpenRequest,
+  type SignInStart,
   type SessionEvent,
 } from "./contract";
 import { HOME_VARIABLES, type AccountSpec } from "./accounts";
@@ -327,6 +328,15 @@ export class FakeHarness implements HarnessAdapter {
   readonly account: AccountSpec;
   readonly reportsAgents = true;
   calls: string[] = [];
+  // How sign-in behaves: "auto" finishes shortly; "manual" waits for finishSignIn.
+  signInMode: "auto" | "manual" = "auto";
+  signInUrl: string | undefined = "https://auth.openai.com/fake";
+  // Set, startSignIn throws it.
+  signInError?: string;
+  private pendingSignIn?: {
+    resolve: () => void;
+    reject: (error: Error) => void;
+  };
   loadouts: Loadout[] = [];
   sessions: FakeSession[] = [];
   signedIn: boolean;
@@ -379,7 +389,11 @@ export class FakeHarness implements HarnessAdapter {
       await new Promise((resolve) => setTimeout(resolve, this.inspectDelayMs));
     return this.signedIn
       ? {
-          auth: { state: "signed_in", account: "fake@example.invalid" },
+          auth: {
+            state: "signed_in",
+            account: "fake@example.invalid",
+            signOut: true,
+          },
           models: structuredClone(this.models),
           limits: [],
           ...(this.outputStyles ? { outputStyles: this.outputStyles } : {}),
@@ -399,10 +413,39 @@ export class FakeHarness implements HarnessAdapter {
     return structuredClone(this.slashCommands);
   }
 
-  async startSignIn() {
+  async startSignIn(): Promise<SignInStart> {
+    this.calls.push("startSignIn");
+    if (this.signInError) throw new Error(this.signInError);
+    const done = new Promise<void>((resolve, reject) => {
+      this.pendingSignIn = { resolve, reject };
+    });
+    if (this.signInMode === "auto") setTimeout(() => this.finishSignIn(), 10);
+    return {
+      state: "pending",
+      ...(this.signInUrl ? { url: this.signInUrl } : {}),
+      done,
+    };
+  }
+
+  /** Completes the pending sign-in, or fails it with `error`. */
+  finishSignIn(error?: string) {
+    const pending = this.pendingSignIn;
+    this.pendingSignIn = undefined;
+    if (!pending) return;
+    if (error) return pending.reject(new Error(error));
     this.signedIn = true;
-    setTimeout(() => this.listeners.forEach((listener) => listener()), 10);
-    return "https://auth.openai.com/fake";
+    pending.resolve();
+    this.listeners.forEach((listener) => listener());
+  }
+
+  async cancelSignIn() {
+    this.calls.push("cancelSignIn");
+    this.pendingSignIn = undefined;
+  }
+
+  async signOut(context: LaunchContext) {
+    this.calls.push(`signOut:${context.env[this.account.variable]}`);
+    this.signedIn = false;
   }
 
   async open(request: OpenRequest): Promise<HarnessSession> {

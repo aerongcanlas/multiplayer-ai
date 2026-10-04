@@ -13,6 +13,7 @@ import {
   type Inspection,
   type LaunchContext,
   type OpenRequest,
+  type SignInStart,
   type SuggestionRequest,
 } from "../contract";
 import { slashCommands } from "../commands";
@@ -61,6 +62,12 @@ export class CodexAdapter implements HarnessAdapter {
   private processes = new Map<string, CodexProcess>();
   private listeners: (() => void)[] = [];
   private resetsAt: number | null = null;
+  // The pending ChatGPT sign-in, which holds its process open until it settles.
+  private login?: {
+    loginId: string;
+    process: CodexProcess;
+    settle: (error?: Error) => void;
+  };
 
   constructor(private options: { launcher?: Launcher; idleMs?: number } = {}) {
     this.idleMs = options.idleMs ?? IDLE_MS;
@@ -122,6 +129,19 @@ export class CodexAdapter implements HarnessAdapter {
       message.method === "account/login/completed" ||
       message.method === "account/updated"
     ) {
+      const login = this.login;
+      if (
+        message.method === "account/login/completed" &&
+        login &&
+        string(message.params.loginId) === login.loginId
+      )
+        login.settle(
+          message.params.success === true
+            ? undefined
+            : new Error(
+                string(message.params.error) || "Codex sign-in did not finish.",
+              ),
+        );
       for (const listener of this.listeners) listener();
       return;
     }
@@ -310,8 +330,9 @@ export class CodexAdapter implements HarnessAdapter {
     }
   }
 
-  async startSignIn(context: LaunchContext): Promise<string | null> {
+  async startSignIn(context: LaunchContext): Promise<SignInStart> {
     const process = await this.process(context);
+    let held = false;
     try {
       const account = object(
         object(
@@ -320,7 +341,7 @@ export class CodexAdapter implements HarnessAdapter {
           }),
         ).account,
       );
-      if (account.type === "chatgpt") return null;
+      if (account.type === "chatgpt") return { state: "signed_in" };
       const result = object(
         await process.transport.request("account/login/start", {
           type: "chatgpt",
@@ -329,9 +350,26 @@ export class CodexAdapter implements HarnessAdapter {
       const url = string(result.authUrl);
       if (!loginUrlAllowed(url))
         throw new Error("Codex returned an unsupported sign-in URL.");
-      return url;
+      const loginId = string(result.loginId);
+      const done = new Promise<void>((resolve, reject) => {
+        const login = {
+          loginId,
+          process,
+          settle: (error?: Error) => {
+            if (this.login !== login) return;
+            this.login = undefined;
+            process.release();
+            if (error) reject(error);
+            else resolve();
+          },
+        };
+        this.login?.settle(new Error("A newer sign-in started."));
+        this.login = login;
+      });
+      held = true;
+      return { state: "pending", url, done };
     } finally {
-      process.release();
+      if (!held) process.release();
     }
   }
 
