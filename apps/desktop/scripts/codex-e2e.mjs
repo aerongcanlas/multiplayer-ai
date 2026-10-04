@@ -1,7 +1,9 @@
 // Codex tab end to end. By default it uses the Codex fixture and a loopback download server to
-// cover in-app ChatGPT sign-in. With `--live --repository <path>` it downloads the pinned Codex,
-// uses the machine's real Codex sign-in, and runs one read-only plan-mode turn for the release check.
+// cover in-app ChatGPT sign-in into the app's own CODEX_HOME. With `--live --repository <path>` it
+// downloads the pinned Codex, prints the real ChatGPT sign-in page for you to finish in a browser,
+// runs one read-only plan-mode turn for the release check, and signs the app's Codex home out.
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { setTimeout as wait } from "node:timers/promises";
 import {
@@ -47,6 +49,7 @@ const run = createRun({
                       ),
                       MP_TEST_HARNESS_MANIFEST: join(output, "manifest.json"),
                       MP_FIXTURE_STATE: join(output, "codex-threads.json"),
+                      MP_FIXTURE_LOG: join(output, "codex-fixture.jsonl"),
                   }),
         },
         ["MP_FIXTURE_SIGNED_IN"],
@@ -85,6 +88,47 @@ await run.execute(
         await checkpoint(
             `Managed Codex ${(await codex()).program.version} downloaded and verified`,
         );
+
+        if (live) {
+            // The app's own Codex home starts signed out; the host's login is never used.
+            await until(
+                async () =>
+                    ["signed_out", "signed_in"].includes(
+                        (await codex()).auth.state,
+                    ),
+                "the Codex sign-in state",
+            );
+            if ((await codex()).auth.state === "signed_out") {
+                await run.page
+                    .getByRole("region", { name: "AI tabs" })
+                    .getByRole("button", {
+                        name: "Sign in with ChatGPT",
+                        exact: true,
+                    })
+                    .click();
+                await until(
+                    async () =>
+                        (
+                            await run.application.evaluate(
+                                () => globalThis.opened,
+                            )
+                        ).length > 0,
+                    "the ChatGPT sign-in page",
+                );
+                const [url] = await run.application.evaluate(
+                    () => globalThis.opened,
+                );
+                console.log(`ACTION: open this page and sign in: ${url}`);
+                await until(
+                    async () => (await codex()).auth.state === "signed_in",
+                    "the ChatGPT sign-in",
+                    10 * 60_000,
+                );
+            }
+            await checkpoint(
+                `Codex is signed in to the app's own home as ${(await codex()).auth.account}`,
+            );
+        }
 
         if (!live) {
             await until(
@@ -281,6 +325,42 @@ await run.execute(
                 .waitFor();
             await checkpoint("Stop interrupts a real running turn");
         }
+
+        if (!live) {
+            const launches = (
+                await readFile(join(output, "codex-fixture.jsonl"), "utf8")
+            )
+                .split("\n")
+                .filter(Boolean)
+                .map((line) => JSON.parse(line))
+                .filter((entry) => entry.type === "launch");
+            assert.ok(launches.length);
+            for (const launch of launches)
+                assert.equal(
+                    launch.env.CODEX_HOME,
+                    join(output, "user-data", "accounts", "codex"),
+                );
+            await checkpoint("Every Codex launch used the app's CODEX_HOME");
+        }
+
+        // Sign out ends the app's Codex login only.
+        await run.page
+            .getByRole("button", { name: "Settings", exact: true })
+            .click();
+        await run.page
+            .getByRole("dialog", { name: "Settings" })
+            .getByRole("tab", { name: "Codex" })
+            .click();
+        await run.page
+            .getByRole("region", { name: "Harness settings" })
+            .getByRole("button", { name: "Sign out", exact: true })
+            .click();
+        await until(
+            async () => (await codex()).auth.state === "signed_out",
+            "Codex to sign out",
+        );
+        await run.page.keyboard.press("Escape");
+        await checkpoint("Sign out returns the app's Codex home to signed out");
 
         assert.deepEqual(
             await fingerprint(repository),

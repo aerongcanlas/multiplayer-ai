@@ -152,6 +152,8 @@ await run.execute(
                 "answerQuestion",
                 "refreshHarness",
                 "signInHarness",
+                "cancelHarnessSignIn",
+                "signOutHarness",
                 "chooseHarnessExecutable",
                 "useManagedHarness",
                 "acknowledgeHarnessNotice",

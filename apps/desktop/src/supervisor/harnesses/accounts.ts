@@ -24,23 +24,13 @@ export type HomeVariable = "CLAUDE_CONFIG_DIR" | "CODEX_HOME";
 
 /** Where the host keeps its own setup: the home folder and each harness's folder variable. */
 export type HostPaths = Partial<
-  Record<
-    | "HOME"
-    | "USERPROFILE"
-    | "CLAUDE_CONFIG_DIR"
-    | "CODEX_HOME"
-    | "XDG_DATA_HOME"
-    | "XDG_CONFIG_HOME",
-    string
-  >
+  Record<"HOME" | "USERPROFILE" | "CLAUDE_CONFIG_DIR" | "CODEX_HOME", string>
 >;
 const HOST_PATHS = [
   "HOME",
   "USERPROFILE",
   "CLAUDE_CONFIG_DIR",
   "CODEX_HOME",
-  "XDG_DATA_HOME",
-  "XDG_CONFIG_HOME",
 ] as const;
 
 /** The location variables of a raw host environment, and nothing else from it. */

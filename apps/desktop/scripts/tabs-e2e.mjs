@@ -1,9 +1,18 @@
 // Chat tabs end to end with harness fixtures: managed downloads from a loopback server, Codex,
 // Claude Code, and OpenCode tabs, approvals, questions, plan mode, Stop, close, suggestions, restart resume,
-// crash recovery, and Mission Control's lead context, sub-agent cards, and drill-in. Nothing leaves
-// the machine.
+// crash recovery, Mission Control's lead context, sub-agent cards, and drill-in, and app-owned
+// harness logins over a fake host setup. Nothing leaves the machine.
 import { join } from "node:path";
-import { readFile, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import {
+  lstat,
+  mkdir,
+  readFile,
+  readdir,
+  readlink,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import assert from "node:assert/strict";
 import { startProgramServer } from "./programs-fixture.mjs";
 import {
@@ -20,6 +29,16 @@ const output = await outputDirectory("tabs-");
 const repository = join(output, "repository");
 const claudeState = join(output, "claude-fixture.json");
 const codexLog = join(output, "codex-fixture.jsonl");
+const codexState = join(output, "codex-threads.json");
+// A fake host setup: Claude Code and Codex folders the app links from, never writes to.
+const hostClaude = join(output, "host-claude");
+const hostCodex = join(output, "host-codex");
+const SECRETS = [
+  "sk-ant-oat01-e2e-host-token",
+  "e2e-mcp-secret-env",
+  "e2e-mcp-secret-header",
+  "e2e-marker-credential",
+];
 const opencodeLog = join(output, "opencode-fixture.jsonl");
 // OpenCode sees one local Ollama model in place of probing the real servers.
 const opencodeDiscovery = {
@@ -53,6 +72,64 @@ const opencodeDiscovery = {
   ],
 };
 const git = await fixtureRepository(repository, { readme: "Tabs fixture\n" });
+await mkdir(join(hostClaude, "skills", "host-skill"), { recursive: true });
+await writeFile(
+  join(hostClaude, "skills", "host-skill", "SKILL.md"),
+  "---\nname: host-skill\ndescription: A host skill\n---\nBody\n",
+);
+await writeFile(join(hostClaude, "settings.json"), '{"model":"sonnet"}\n');
+await mkdir(join(hostClaude, "projects", "-host-repo", "memory"), {
+  recursive: true,
+});
+await writeFile(
+  join(hostClaude, "projects", "-host-repo", "memory", "MEMORY.md"),
+  "- host memory\n",
+);
+await writeFile(join(hostClaude, ".credentials.json"), "e2e-marker-credential");
+await writeFile(
+  join(hostClaude, ".claude.json"),
+  JSON.stringify({
+    mcpServers: {
+      "e2e-server": {
+        type: "stdio",
+        command: "e2e-mcp",
+        env: { API_TOKEN: "e2e-mcp-secret-env" },
+      },
+    },
+    projects: {
+      [repository]: {
+        mcpServers: {
+          "e2e-remote": {
+            type: "http",
+            url: "https://mcp.example.invalid",
+            headers: { Authorization: "Bearer e2e-mcp-secret-header" },
+          },
+        },
+      },
+    },
+  }),
+);
+await mkdir(join(hostCodex, "skills"), { recursive: true });
+await writeFile(join(hostCodex, "config.toml"), 'model = "fixture-codex"\n');
+await writeFile(join(hostCodex, "AGENTS.md"), "Host instructions\n");
+/** Every host file with its content hash, without following links. */
+async function tree(root, base = root) {
+  const files = {};
+  for (const name of await readdir(root)) {
+    const path = join(root, name);
+    const info = await lstat(path);
+    if (info.isDirectory()) Object.assign(files, await tree(path, base));
+    else
+      files[path.slice(base.length)] = createHash("sha256")
+        .update(await readFile(path))
+        .digest("hex");
+  }
+  return files;
+}
+const hostBefore = {
+  claude: await tree(hostClaude),
+  codex: await tree(hostCodex),
+};
 // Claude Code starts signed out; the test signs it in from the tab later.
 await writeFile(claudeState, JSON.stringify({ signedIn: false, sessions: {} }));
 const programs = await startProgramServer(join(output, "manifest.json"));
@@ -66,7 +143,7 @@ const run = createRun({
     MP_TEST_CLAUDE_FIXTURE: claudeState,
     MP_TEST_HARNESS_MANIFEST: join(output, "manifest.json"),
     MP_FIXTURE_SIGNED_IN: "1",
-    MP_FIXTURE_STATE: join(output, "codex-threads.json"),
+    MP_FIXTURE_STATE: codexState,
     MP_FIXTURE_LOG: codexLog,
     MP_TEST_OPENCODE_FIXTURE: join(
       appDirectory,
@@ -74,8 +151,13 @@ const run = createRun({
     ),
     MP_TEST_OPENCODE_DISCOVERY: JSON.stringify(opencodeDiscovery),
     MP_OPENCODE_FIXTURE_LOG: opencodeLog,
-    // OpenCode's own login is read from its data folder; keep the host's out of the run.
+    // Stand-ins for the host's own harness folders: Claude Code and Codex tabs run in app homes
+    // and link setup from these, while OpenCode uses its data folder directly.
     XDG_DATA_HOME: join(output, "xdg-data"),
+    CLAUDE_CONFIG_DIR: hostClaude,
+    CODEX_HOME: hostCodex,
+    // A host shell's Claude Code token never reaches a harness launch (R2).
+    CLAUDE_CODE_OAUTH_TOKEN: SECRETS[0],
   }),
   // Record, rather than perform, anything that would leave the app window.
   prepare: (application) =>
@@ -920,9 +1002,196 @@ await run.execute(
       "A restart marks the OpenCode turn interrupted and the next send resumes its session",
     );
 
-    // Nothing left the app: no browser, no terminal, no remote requests.
+    // App-owned homes: host setup is linked in; credentials and transcripts are not.
+    const accounts = join(output, "user-data", "accounts");
+    assert.equal(
+      await readlink(join(accounts, "claude", "skills")),
+      join(hostClaude, "skills"),
+    );
+    assert.equal(
+      await readlink(
+        join(accounts, "claude", "projects", "-host-repo", "memory"),
+      ),
+      join(hostClaude, "projects", "-host-repo", "memory"),
+    );
+    assert.ok(
+      (await lstat(join(accounts, "claude", "settings.json"))).isFile(),
+    );
+    for (const name of [".credentials.json", ".claude.json"])
+      await assert.rejects(
+        readlink(join(accounts, "claude", name)),
+        undefined,
+        `${name} is never linked`,
+      );
+    assert.equal(
+      await readlink(join(accounts, "codex", "config.toml")),
+      join(hostCodex, "config.toml"),
+    );
+    // A host skill shows in the Claude Code tab's command list (AE3).
+    await selectTab("Claude Code 1");
+    const claudeTab = await tabNamed("Claude Code 1");
+    const listed = await run.page.evaluate(
+      ([roomId, tabId]) => window.desktop.loadCommands(roomId, tabId),
+      [(await room()).id, claudeTab.id],
+    );
+    assert.ok(
+      listed.commands?.some((command) => command.name === "host-skill"),
+      "The host skill is listed",
+    );
+    await checkpoint(
+      "Harness homes link the host's setup, and a host skill is listed in the Claude Code tab",
+    );
+
+    // Sign out during a running turn stops it and names only the harness (AE5).
+    await send("FIXTURE_SLOW keep running");
+    await until(
+      async () => (await tabNamed("Claude Code 1")).status === "running",
+      "the slow Claude Code turn",
+    );
+    await openSettings("Claude Code");
+    await harnessRow("Claude Code")
+      .getByRole("button", { name: "Sign out", exact: true })
+      .click();
+    await harnessRow("Claude Code")
+      .getByRole("group", { name: "Sign out of Claude Code" })
+      .getByRole("button", { name: "Sign out", exact: true })
+      .click();
+    await until(
+      async () => (await harness("claude")).auth.state === "signed_out",
+      "Claude Code to sign out",
+    );
+    await closeSettings();
+    await until(
+      async () => (await tabNamed("Claude Code 1")).status === "unavailable",
+      "the Claude Code tab to show signed out",
+    );
+    await tabsPanel()
+      .getByText(/Signed out of Claude Code\./)
+      .waitFor();
+    assert.doesNotMatch(
+      await tabsPanel().innerText(),
+      /fixture@example\.invalid/,
+    );
+    await tabsPanel()
+      .getByRole("button", { name: "Sign in", exact: true })
+      .click();
+    await until(
+      async () => (await tabNamed("Claude Code 1")).status === "idle",
+      "Claude Code to sign in again",
+    );
+    await send("Hello after signing in again");
+    await settled("Claude Code 1");
+    await checkpoint(
+      "Sign out stops a running Claude Code turn, and signing in again resumes sending",
+    );
+
+    // A pending Codex sign-in can be cancelled (AE4).
+    await writeFile(`${codexState}.login-hang`, "");
+    await openSettings("Codex");
+    await harnessRow("Codex")
+      .getByRole("button", { name: "Sign out", exact: true })
+      .click();
+    await until(
+      async () => (await harness("codex")).auth.state === "signed_out",
+      "Codex to sign out",
+    );
+    await harnessRow("Codex")
+      .getByRole("button", { name: "Sign in with ChatGPT", exact: true })
+      .click();
+    await until(
+      async () => (await harness("codex")).auth.state === "signing_in",
+      "the Codex sign-in to start",
+    );
+    await harnessRow("Codex")
+      .getByRole("button", { name: "Cancel sign-in", exact: true })
+      .click();
+    await until(
+      async () => (await harness("codex")).auth.state === "signed_out",
+      "the Codex sign-in to cancel",
+    );
+    assert.equal((await harness("codex")).auth.message, "Sign-in cancelled.");
+    assert.deepEqual(
+      (await codexRequests("account/login/cancel")).map(
+        (entry) => entry.params.loginId,
+      ),
+      ["fixture-login"],
+    );
+    await rm(`${codexState}.login-hang`);
+    await harnessRow("Codex")
+      .getByRole("button", { name: "Sign in with ChatGPT", exact: true })
+      .click();
+    await until(
+      async () => (await harness("codex")).auth.state === "signed_in",
+      "Codex to sign in again",
+    );
+    await closeSettings();
+    await checkpoint(
+      "Cancel ends a pending Codex sign-in, and signing in again works",
+    );
+
+    // Launches carry the app's homes and no host credential (R2); nothing leaks (R12).
+    const claudeLaunches = (await readFile(`${claudeState}.log`, "utf8"))
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+    assert.ok(claudeLaunches.length);
+    for (const launch of claudeLaunches) {
+      assert.equal(launch.configDir, join(accounts, "claude"));
+      assert.ok(!launch.envKeys.includes("CLAUDE_CODE_OAUTH_TOKEN"));
+    }
+    const codexLaunches = (await readFile(codexLog, "utf8"))
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line))
+      .filter((entry) => entry.type === "launch");
+    for (const launch of codexLaunches)
+      assert.equal(launch.env.CODEX_HOME, join(accounts, "codex"));
+    const captured = [JSON.stringify(await snapshot())];
+    /** Every app file, read without following links into the host's folders. */
+    async function appFiles(root) {
+      const found = [];
+      for (const name of await readdir(root)) {
+        const path = join(root, name);
+        const info = await lstat(path);
+        if (info.isDirectory()) found.push(...(await appFiles(path)));
+        else if (info.isFile()) found.push(path);
+      }
+      return found;
+    }
+    for (const file of [
+      ...(await appFiles(join(output, "user-data"))),
+      `${claudeState}.log`,
+      codexLog,
+      opencodeLog,
+      join(output, "latest-snapshot.yml"),
+    ])
+      captured.push((await readFile(file)).toString("latin1"));
+    for (const secret of SECRETS)
+      assert.ok(
+        captured.every((text) => !text.includes(secret)),
+        `${secret} must not appear in app state, logs, or snapshots`,
+      );
+    assert.deepEqual(
+      { claude: await tree(hostClaude), codex: await tree(hostCodex) },
+      hostBefore,
+      "The host's Claude Code and Codex folders are unchanged",
+    );
+    await checkpoint(
+      "Launches use app homes without host credentials, nothing leaks, and host folders are unchanged",
+    );
+
+    // Nothing left the app beyond the Codex sign-in page: no terminal, no remote requests.
     const external = await run.application.evaluate(() => globalThis.external);
-    assert.deepEqual(external, []);
+    assert.deepEqual(
+      external.filter(
+        ([kind, url]) =>
+          !(
+            kind === "openExternal" &&
+            url === "https://auth.openai.com/authorize?state=fixture"
+          ),
+      ),
+      [],
+    );
     assert.deepEqual(
       run.network.filter(
         (url) =>
