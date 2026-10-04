@@ -1,5 +1,5 @@
-// Chat tabs end to end with harness fixtures: managed downloads from a loopback server, Codex and
-// Claude Code tabs, approvals, questions, plan mode, Stop, close, suggestions, restart resume,
+// Chat tabs end to end with harness fixtures: managed downloads from a loopback server, Codex,
+// Claude Code, and OpenCode tabs, approvals, questions, plan mode, Stop, close, suggestions, restart resume,
 // crash recovery, and Mission Control's lead context, sub-agent cards, and drill-in. Nothing leaves
 // the machine.
 import { join } from "node:path";
@@ -20,6 +20,38 @@ const output = await outputDirectory("tabs-");
 const repository = join(output, "repository");
 const claudeState = join(output, "claude-fixture.json");
 const codexLog = join(output, "codex-fixture.jsonl");
+const opencodeLog = join(output, "opencode-fixture.jsonl");
+// OpenCode sees one local Ollama model in place of probing the real servers.
+const opencodeDiscovery = {
+  servers: [
+    {
+      id: "ollama",
+      label: "Ollama",
+      running: true,
+      models: [
+        { id: "qwen3-coder:30b", name: "qwen3-coder:30b", context: 65536 },
+        {
+          id: "gemma3:12b",
+          name: "gemma3:12b",
+          warning:
+            "Served context is unknown; agentic use needs at least 32k. Start Ollama with a larger OLLAMA_CONTEXT_LENGTH (https://docs.ollama.com/context-length).",
+        },
+      ],
+    },
+    { id: "lmstudio", label: "LM Studio", running: false, models: [] },
+  ],
+  providers: [
+    {
+      id: "ollama",
+      name: "Ollama",
+      baseURL: "http://127.0.0.1:11434/v1",
+      models: [
+        { id: "qwen3-coder:30b", name: "qwen3-coder:30b", context: 65536 },
+        { id: "gemma3:12b", name: "gemma3:12b" },
+      ],
+    },
+  ],
+};
 const git = await fixtureRepository(repository, { readme: "Tabs fixture\n" });
 // Claude Code starts signed out to show guidance; the test signs it in later.
 await writeFile(claudeState, JSON.stringify({ signedIn: false, sessions: {} }));
@@ -36,6 +68,14 @@ const run = createRun({
     MP_FIXTURE_SIGNED_IN: "1",
     MP_FIXTURE_STATE: join(output, "codex-threads.json"),
     MP_FIXTURE_LOG: codexLog,
+    MP_TEST_OPENCODE_FIXTURE: join(
+      appDirectory,
+      "scripts/opencode-fixture.mjs",
+    ),
+    MP_TEST_OPENCODE_DISCOVERY: JSON.stringify(opencodeDiscovery),
+    MP_OPENCODE_FIXTURE_LOG: opencodeLog,
+    // OpenCode's own login is read from its data folder; keep the host's out of the run.
+    XDG_DATA_HOME: join(output, "xdg-data"),
   }),
   // Record, rather than perform, anything that would leave the app window.
   prepare: (application) =>
@@ -87,6 +127,15 @@ async function selectTab(title) {
 }
 const settled = (title) =>
   run.settled(() => tabNamed(title), `${title} to finish its turn`);
+async function opencodeRequests(method) {
+  return (await readFile(opencodeLog, "utf8"))
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line))
+    .filter((entry) => entry.method === method);
+}
+const opencodeTab = async () =>
+  (await room()).tabs.find((tab) => tab.loadout.harness === "opencode");
 async function codexRequests(method) {
   return (await readFile(codexLog, "utf8"))
     .split("\n")
@@ -756,6 +805,122 @@ await run.execute(
     );
     await checkpoint(
       "A sub-agent running at a crash reads interrupted after relaunch",
+    );
+
+    // An OpenCode tab downloads its managed program and runs on the local model it found.
+    await tabsPanel()
+      .getByRole("button", { name: "New tab", exact: true })
+      .click();
+    await run.page
+      .getByRole("menuitem", { name: "OpenCode", exact: true })
+      .click();
+    await until(
+      async () => (await opencodeTab())?.status === "idle",
+      "the OpenCode tab to become ready",
+    );
+    const opencodeTitle = (await opencodeTab()).title;
+    assert.equal(programs.requests("opencode"), 1);
+    assert.equal((await harness("opencode")).auth.account, "Local models");
+    assert.equal((await opencodeTab()).loadout.model, "ollama/qwen3-coder:30b");
+    await selectTab(opencodeTitle);
+    await send("Say hello");
+    await settled(opencodeTitle);
+    await tabsPanel().getByText("Hello world.").last().waitFor();
+    await checkpoint("An OpenCode tab completes a streamed turn");
+
+    // Ask mode turns OpenCode's permission request into an approval card.
+    await send("FIXTURE_PERMISSION accept");
+    await tabsPanel()
+      .getByRole("button", { name: "Approve once", exact: true })
+      .click();
+    await settled(opencodeTitle);
+    await tabsPanel().getByText("Approved.").last().waitFor();
+    await send("FIXTURE_PERMISSION decline");
+    await tabsPanel()
+      .getByRole("button", { name: "Decline", exact: true })
+      .click();
+    await settled(opencodeTitle);
+    await tabsPanel().getByText("Declined.").last().waitFor();
+    await tabsPanel()
+      .getByText("Run command: touch made.txt")
+      .first()
+      .waitFor();
+    await checkpoint("An OpenCode approval card accepts and declines");
+
+    // Stop ends a slow turn.
+    await send("FIXTURE_SLOW");
+    await until(
+      async () => (await opencodeTab()).status === "running",
+      "the slow OpenCode turn",
+    );
+    await tabsPanel()
+      .getByRole("button", { name: "Stop", exact: true })
+      .click();
+    await settled(opencodeTitle);
+    await tabsPanel()
+      .getByText(/^Turn stopped by the host\./)
+      .last()
+      .waitFor();
+    assert.ok((await opencodeRequests("session/cancel")).length >= 1);
+    await checkpoint("Stop ends a slow OpenCode turn");
+
+    // Settings lists the local servers and keeps context warnings out of the picker.
+    await run.page.setViewportSize({ width: 1024, height: 720 });
+    await openSettings("OpenCode");
+    await harnessRow("OpenCode").getByText("Ollama · 2 models").waitFor();
+    await harnessRow("OpenCode").getByText("LM Studio · not running").waitFor();
+    await harnessRow("OpenCode")
+      .getByText(/gemma3:12b: Served context is unknown/)
+      .waitFor();
+    await run.page.screenshot({
+      path: join(output, "07-opencode-settings.png"),
+    });
+    await closeSettings();
+    await tabsPanel()
+      .getByRole("button", { name: "Model", exact: true })
+      .click();
+    const modelMenu = tabsPanel().getByRole("menu", { name: "Model" });
+    await modelMenu
+      .getByRole("menuitemradio", { name: /gemma3:12b/ })
+      .waitFor();
+    assert.equal(await modelMenu.getByText(/Served context/).count(), 0);
+    await run.page.screenshot({ path: join(output, "08-opencode-models.png") });
+    await run.page.keyboard.press("Escape");
+    await checkpoint(
+      "OpenCode Settings shows local servers and warnings that stay out of the picker",
+    );
+
+    // A turn running when the app dies reads interrupted, and the next send resumes the session.
+    const opencodeSession = (await opencodeTab()).sessionId;
+    assert.ok(opencodeSession);
+    await send("FIXTURE_PERMISSION before the crash");
+    await tabsPanel()
+      .getByRole("button", { name: "Approve once", exact: true })
+      .waitFor();
+    await crashApplication(run.application);
+    await launch();
+    await selectTab(opencodeTitle);
+    await until(
+      async () => (await opencodeTab())?.status === "interrupted",
+      "the interrupted OpenCode tab",
+    );
+    await tabsPanel()
+      .getByText(/The app restarted during this turn/)
+      .last()
+      .waitFor();
+    await until(
+      async () => (await harness("opencode")).auth.state === "signed_in",
+      "OpenCode to be ready after the restart",
+    );
+    await send("Say hello after the restart");
+    await settled(opencodeTitle);
+    assert.equal(
+      (await opencodeRequests("session/resume")).at(-1).params.sessionId,
+      opencodeSession,
+    );
+    assert.equal((await opencodeTab()).sessionId, opencodeSession);
+    await checkpoint(
+      "A restart marks the OpenCode turn interrupted and the next send resumes its session",
     );
 
     // Nothing left the app: no browser, no terminal, no remote requests.

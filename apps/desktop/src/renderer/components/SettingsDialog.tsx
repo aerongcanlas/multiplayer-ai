@@ -107,7 +107,9 @@ function Models({
         </ul>
       ) : (
         <p className="settings-note">
-          Models appear once {harness.label} is ready and signed in.
+          {harness.id === "opencode"
+            ? "Models appear once a local server or an OpenCode provider offers one."
+            : `Models appear once ${harness.label} is ready and signed in.`}
         </p>
       )}
     </section>

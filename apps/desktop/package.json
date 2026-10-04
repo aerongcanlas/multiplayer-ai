@@ -26,7 +26,8 @@
         "test:packaged": "node scripts/e2e.mjs --packaged",
         "package": "pnpm run build && electron-builder --dir --publish never",
         "dist": "pnpm run build && electron-builder --win nsis --publish never",
-        "test:tabs": "node scripts/tabs-e2e.mjs"
+        "test:tabs": "node scripts/tabs-e2e.mjs",
+        "test:opencode": "node scripts/opencode-e2e.mjs"
     },
     "dependencies": {
         "@agentclientprotocol/sdk": "1.7.0",
