@@ -272,8 +272,11 @@ test("shared-room HTTP authorization, transactions, snapshots and generated prom
     );
     const current = await get(alice);
     assert.ok(Number.isFinite(Date.parse(current.now)));
+    // Shared tabs list in no fixed order, so both sides sort by harness.
     assert.deepEqual(
-      current.rooms[0].sharedTabs.map((tab) => [tab.tabId, tab.harness]),
+      current.rooms[0].sharedTabs
+        .map((tab) => [tab.tabId, tab.harness])
+        .sort((a, b) => a[1].localeCompare(b[1])),
       [
         [tabId, "codex"],
         [opencodeTabId, "opencode"],
