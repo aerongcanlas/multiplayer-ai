@@ -17,7 +17,10 @@ import type { AccountSpec, HostPaths } from "./accounts";
 export interface LaunchContext {
   executable: string;
   env: Record<string, string>;
-  /** The app-owned home folder `env` names for this harness (its login and session history). */
+  /**
+   * The app-owned home folder `env` names for this harness (its login and session history);
+   * empty for a harness that runs in the host's own folders (OpenCode).
+   */
   home: string;
   /** The host's own home and harness folder variables, for finding host setup. Never launched with. */
   hostPaths: HostPaths;
@@ -173,8 +176,11 @@ export interface HarnessAdapter {
   readonly id: HarnessId;
   // In the app, by guidance only, or through a copy-ready terminal command.
   readonly signIn: "in_app" | "guidance" | "command";
-  /** The app-owned home this harness launches with, and the host setup carried into it. */
-  readonly account: AccountSpec;
+  /**
+   * The app-owned home this harness launches with, and the host setup carried into it. Left out,
+   * the harness uses the host's own folders.
+   */
+  readonly account?: AccountSpec;
   /** Whether sessions report sub-agents on the session listener. */
   readonly reportsAgents: boolean;
   /** Checks that a custom executable speaks the harness protocol. Returns its version. */

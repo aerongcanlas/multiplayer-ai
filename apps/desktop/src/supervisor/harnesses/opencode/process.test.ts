@@ -49,7 +49,7 @@ async function setup(idleMs = 60_000) {
       ANTHROPIC_API_KEY: "sk-ant",
       XDG_DATA_HOME: join(dir, "data"),
     },
-    home: join(dir, "data"),
+    home: "",
     hostPaths: {},
   };
   const spawn = (key = "a") =>

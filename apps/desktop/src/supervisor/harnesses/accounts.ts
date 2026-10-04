@@ -20,7 +20,7 @@ import { dirname, join, resolve, sep } from "node:path";
 import type { HarnessId } from "../../shared/tabs";
 
 /** The variable each harness reads its home folder from (KTD1). */
-export type HomeVariable = "CLAUDE_CONFIG_DIR" | "CODEX_HOME" | "XDG_DATA_HOME";
+export type HomeVariable = "CLAUDE_CONFIG_DIR" | "CODEX_HOME";
 
 /** Where the host keeps its own setup: the home folder and each harness's folder variable. */
 export type HostPaths = Partial<
@@ -54,11 +54,10 @@ export function hostPaths(env: Record<string, string | undefined>): HostPaths {
 export const hostHome = (host: HostPaths) =>
   host.HOME || host.USERPROFILE || homedir();
 
-/** The variable each harness's home is named by. */
-export const HOME_VARIABLES: Record<HarnessId, HomeVariable> = {
+/** The variable each harness's app home is named by; OpenCode uses the host's own folders. */
+export const HOME_VARIABLES: Partial<Record<HarnessId, HomeVariable>> = {
   claude: "CLAUDE_CONFIG_DIR",
   codex: "CODEX_HOME",
-  opencode: "XDG_DATA_HOME",
 };
 
 /** How a harness's app home is laid out and which host setup carries over into it (KTD4). */

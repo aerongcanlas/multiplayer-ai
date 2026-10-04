@@ -277,26 +277,33 @@ export class HarnessRegistry {
     const custom = this.customPath(harness);
     const update = this.updater(harness);
     const { env: hostEnv, host } = await this.environment;
-    // No launch ever falls back to the host's own harness folders (R15).
-    let home: string;
-    try {
-      home = await this.options.accounts.prepare(
-        harness,
-        adapter.account,
-        host,
+    // A harness with an app home never falls back to the host's own folders (R15).
+    let home = "";
+    let env = hostEnv;
+    if (adapter.account) {
+      try {
+        home = await this.options.accounts.prepare(
+          harness,
+          adapter.account,
+          host,
+        );
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "The app could not prepare its harness folder.";
+        update((state) => {
+          state.auth = { state: "unknown", message };
+        });
+        throw new HarnessError("unavailable", message);
+      }
+      env = withHome(hostEnv, adapter.account.variable, home);
+      assertHome(
+        { env, home },
+        adapter.account.variable,
+        this.options.accounts,
       );
-    } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "The app could not prepare its harness folder.";
-      update((state) => {
-        state.auth = { state: "unknown", message };
-      });
-      throw new HarnessError("unavailable", message);
     }
-    const env = withHome(hostEnv, adapter.account.variable, home);
-    assertHome({ env, home }, adapter.account.variable, this.options.accounts);
     try {
       if (!custom)
         update((state) => {

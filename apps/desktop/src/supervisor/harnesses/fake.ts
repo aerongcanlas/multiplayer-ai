@@ -325,7 +325,7 @@ export class FakeHarness implements HarnessAdapter {
     };
   }
   readonly signIn: "in_app" | "guidance";
-  readonly account: AccountSpec;
+  readonly account?: AccountSpec;
   readonly reportsAgents = true;
   calls: string[] = [];
   // How sign-in behaves: "auto" finishes shortly; "manual" waits for finishSignIn.
@@ -366,7 +366,8 @@ export class FakeHarness implements HarnessAdapter {
     this.signedIn = true;
     this.inspectDelayMs = options.inspectDelayMs ?? 0;
     this.signIn = options.signIn ?? "in_app";
-    this.account = options.account ?? { variable: HOME_VARIABLES[id] };
+    const variable = HOME_VARIABLES[id];
+    this.account = options.account ?? (variable ? { variable } : undefined);
     this.models = [
       {
         id: "fake-model",
@@ -444,7 +445,9 @@ export class FakeHarness implements HarnessAdapter {
   }
 
   async signOut(context: LaunchContext) {
-    this.calls.push(`signOut:${context.env[this.account.variable]}`);
+    this.calls.push(
+      `signOut:${this.account ? context.env[this.account.variable] : ""}`,
+    );
     this.signedIn = false;
   }
 
