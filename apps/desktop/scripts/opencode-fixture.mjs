@@ -292,7 +292,7 @@ new AgentSideConnection((connection) => {
       });
       const answer = async (toolCall) => {
         const response = await permission(id, toolCall);
-        log({ permission: toolCall.toolCallId, response });
+        log({ answered: toolCall.toolCallId, response });
         return response.outcome.outcome === "selected"
           ? response.outcome.optionId
           : "cancelled";
@@ -393,7 +393,7 @@ new AgentSideConnection((connection) => {
           },
           options: OPTIONS,
         });
-        log({ permission: "call_foreign", response });
+        log({ answered: "call_foreign", response });
         await text(
           id,
           `Foreign ${response.outcome.outcome === "selected" ? response.outcome.optionId : "cancelled"}.`,

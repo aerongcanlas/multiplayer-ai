@@ -211,6 +211,15 @@ export class OpenCodeProcess {
     return Promise.race(racers).finally(() => clearTimeout(timer));
   }
 
+  /** Whether the process ends within a short wait, as when a request failed because it exited. */
+  ending(ms: number): Promise<boolean> {
+    if (this.ended) return Promise.resolve(true);
+    return Promise.race([
+      this.exit.catch(() => true),
+      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), ms)),
+    ]);
+  }
+
   /** Takes a hold that keeps the process open; `release` ends it. */
   hold() {
     this.busy++;

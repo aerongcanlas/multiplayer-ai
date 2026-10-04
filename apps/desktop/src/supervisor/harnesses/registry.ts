@@ -334,6 +334,8 @@ export class HarnessRegistry {
           state.models = this.shown(harness, inspection.models);
           if (inspection.outputStyles)
             state.outputStyles = inspection.outputStyles;
+          if (inspection.localServers)
+            state.localServers = inspection.localServers;
           state.limits = inspection.limits;
           state.modelsRefreshedAt = new Date().toISOString();
         });

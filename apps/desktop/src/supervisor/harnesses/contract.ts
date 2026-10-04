@@ -7,6 +7,7 @@ import type {
   HarnessQuestion,
   HarnessState,
   Loadout,
+  LocalServer,
   PlanStep,
   SlashCommand,
 } from "../../shared/tabs";
@@ -31,6 +32,8 @@ export interface Inspection {
   models: HarnessModel[];
   limits: HarnessState["limits"];
   outputStyles?: string[];
+  // Model servers on this computer the harness found.
+  localServers?: LocalServer[];
 }
 
 // `agent` names the sub-agent card an event belongs to; lead events leave it unset.

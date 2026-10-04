@@ -331,6 +331,8 @@ export interface HarnessState {
   limits: { name: string; usedPercent: number; resetsAt: number | null }[];
   // Whether the harness reports its sub-agents.
   reportsAgents: boolean;
+  // OpenCode's view of Ollama and LM Studio on this computer.
+  localServers?: LocalServer[];
   // A harness with a notice (Claude Code's login policy) shows it once until acknowledged.
   noticePending: boolean;
 }
