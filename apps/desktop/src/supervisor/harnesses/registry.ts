@@ -1,5 +1,6 @@
 import {
   HARNESS_LABELS,
+  HARNESS_NOTICE_VERSIONS,
   HARNESS_NOTICES,
   newerVersion,
   type HarnessId,
@@ -31,7 +32,9 @@ interface Settings {
 
 const executableKey = (harness: HarnessId) => `harness.${harness}.executable`;
 const noticeKey = (harness: HarnessId) =>
-  `harness.${harness}.noticeAcknowledged`;
+  HARNESS_NOTICE_VERSIONS[harness] > 1
+    ? `harness.${harness}.noticeAcknowledged.v${HARNESS_NOTICE_VERSIONS[harness]}`
+    : `harness.${harness}.noticeAcknowledged`;
 const defaultKey = (harness: HarnessId) => `harness.${harness}.default`;
 const releaseKey = (harness: HarnessId) => `harness.${harness}.release`;
 const hiddenKey = (harness: HarnessId) => `harness.${harness}.hiddenModels`;

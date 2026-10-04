@@ -4,6 +4,8 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import type {
   AccountInfo,
   CanUseTool,
+  McpServerConfig,
+  McpSetServersResult,
   ModelInfo,
   Options,
   PermissionMode,
@@ -28,13 +30,26 @@ import {
   type LaunchContext,
   type OpenRequest,
   type SessionEvent,
+  type SignInStart,
 } from "../contract";
 import { slashCommands } from "../commands";
 import { clip, object, string } from "../json";
 import { EventQueue } from "../queue";
 import { SessionRelay } from "../relay";
-import { readAuthStatus, type AuthStatus } from "./auth";
-import { assertHome, type AccountSpec } from "../accounts";
+import {
+  logout,
+  readAuthStatus,
+  startLogin,
+  type AuthStatus,
+  type LoginProcess,
+} from "./auth";
+import { assertHome } from "../accounts";
+import {
+  CLAUDE_ACCOUNT,
+  credentialWarning,
+  hostMcpServers,
+  migrateSession,
+} from "./account";
 
 const IDLE_MS = 10 * 60_000;
 
@@ -49,6 +64,9 @@ export interface ClaudeQuery extends AsyncIterable<SDKMessage> {
   setPermissionMode(mode: PermissionMode): Promise<void>;
   setModel(model?: string): Promise<void>;
   applyFlagSettings(settings: Record<string, unknown>): Promise<void>;
+  setMcpServers(
+    servers: Record<string, McpServerConfig>,
+  ): Promise<McpSetServersResult>;
   close(): void;
 }
 type StartQuery = (params: {
@@ -62,9 +80,11 @@ const sdkQuery: StartQuery = (params) =>
   query(params) as unknown as ClaudeQuery;
 
 export interface ClaudeOptions {
-  /** Test fixtures replace the SDK query and the auth status check. */
+  /** Test fixtures replace the SDK query, the auth status check, and login and logout. */
   startQuery?: StartQuery;
   authStatus?: (context: LaunchContext) => Promise<AuthStatus>;
+  login?: (context: LaunchContext) => LoginProcess;
+  logout?: (context: LaunchContext) => Promise<void>;
   idleMs?: number;
 }
 
@@ -216,6 +236,8 @@ class ClaudeSession implements HarnessSession {
   constructor(
     private adapter: ClaudeAdapter,
     private request: OpenRequest,
+    // The host's MCP servers for this tab's folder; definitions never leave the session.
+    private servers: Record<string, McpServerConfig> = {},
   ) {
     this.sessionId = request.sessionId;
     this.loadout = request.loadout;
@@ -253,6 +275,10 @@ class ClaudeSession implements HarnessSession {
         },
       },
     });
+    if (Object.keys(this.servers).length)
+      void this.query.setMcpServers(this.servers).catch(() => {
+        /* Server failures show in Claude Code's own /mcp. */
+      });
     void this.pump(this.query);
   }
 
@@ -911,13 +937,15 @@ export function listModels(models: ModelInfo[]): HarnessModel[] {
 
 export class ClaudeAdapter implements HarnessAdapter {
   readonly id = "claude" as const;
-  // Anthropic's terms do not allow third-party products to offer claude.ai sign-in.
-  readonly signIn = "guidance" as const;
-  readonly account: AccountSpec = { variable: "CLAUDE_CONFIG_DIR" };
+  // The unmodified Claude Code runs its own `auth login`; Anthropic's page completes it and the
+  // app never sees a token (KTD2).
+  readonly signIn = "in_app" as const;
+  readonly account = CLAUDE_ACCOUNT;
   readonly reportsAgents = true;
   closed = false;
   readonly idleMs: number;
   private sessions = new Set<ClaudeSession>();
+  private login?: LoginProcess;
 
   constructor(private options: ClaudeOptions = {}) {
     this.idleMs = options.idleMs ?? IDLE_MS;
@@ -927,9 +955,10 @@ export class ClaudeAdapter implements HarnessAdapter {
     (this.options.startQuery ?? sdkQuery)(params);
 
   private authStatus(context: LaunchContext) {
+    const env = claudeEnvironment(context);
     return this.options.authStatus
       ? this.options.authStatus(context)
-      : readAuthStatus(context.executable, claudeEnvironment(context));
+      : readAuthStatus(context.executable, env);
   }
 
   async handshake(context: LaunchContext) {
@@ -943,13 +972,17 @@ export class ClaudeAdapter implements HarnessAdapter {
   }
 
   async inspect(context: LaunchContext): Promise<Inspection> {
-    const status = await this.authStatus(context);
+    const [status, warning] = await Promise.all([
+      this.authStatus(context),
+      credentialWarning(context.hostPaths),
+    ]);
     if (!status.loggedIn)
       return {
         auth: {
           state: "signed_out",
           message:
-            "Claude Code is not signed in on this computer. Sign in once with the Claude Code CLI (run claude, then /login), then refresh here.",
+            "Sign in to Claude Code from Settings. Tabs have their own sign-in, separate from Claude Code in your terminal.",
+          ...(warning ? { warning } : {}),
         },
         models: [],
         limits: [],
@@ -986,6 +1019,8 @@ export class ClaudeAdapter implements HarnessAdapter {
           ...((account.subscriptionType ?? status.subscription)
             ? { plan: account.subscriptionType ?? status.subscription }
             : {}),
+          signOut: true,
+          ...(warning ? { warning } : {}),
         },
         models: listModels(models),
         limits: [],
@@ -1014,10 +1049,15 @@ export class ClaudeAdapter implements HarnessAdapter {
       },
     });
     let timer: ReturnType<typeof setTimeout> | undefined;
+    const servers = await hostMcpServers(request.hostPaths, request.cwd);
     try {
       return slashCommands(
         await Promise.race([
-          query.supportedCommands(),
+          // The host's MCP servers go over the control channel, never on the command line.
+          (Object.keys(servers).length
+            ? query.setMcpServers(servers).catch(() => undefined)
+            : Promise.resolve()
+          ).then(() => query.supportedCommands()),
           new Promise<never>((_, reject) => {
             timer = setTimeout(
               () => reject(new Error("Claude Code did not list its commands.")),
@@ -1036,13 +1076,53 @@ export class ClaudeAdapter implements HarnessAdapter {
   async open(request: OpenRequest): Promise<HarnessSession> {
     if (this.closed)
       throw new HarnessError("failed", "The app is shutting down.");
-    const session = new ClaudeSession(this, request);
+    // A tab from before app-owned logins finds its session in the host's folder (KTD10).
+    if (request.sessionId)
+      await migrateSession(
+        request.hostPaths,
+        request.home,
+        request.sessionId,
+      ).catch(() => false);
+    const servers = await hostMcpServers(request.hostPaths, request.cwd);
+    if (this.closed)
+      throw new HarnessError("failed", "The app is shutting down.");
+    const session = new ClaudeSession(this, request, servers);
     this.sessions.add(session);
     return session;
   }
 
+  async startSignIn(context: LaunchContext): Promise<SignInStart> {
+    if ((await this.authStatus(context)).loggedIn)
+      return { state: "signed_in" };
+    this.login?.cancel();
+    const login = this.options.login
+      ? this.options.login(context)
+      : startLogin(context.executable, claudeEnvironment(context));
+    this.login = login;
+    void login.done
+      .catch(() => {})
+      .finally(() => {
+        if (this.login === login) this.login = undefined;
+      });
+    // Claude Code opens the browser itself, so there is no URL for the app to open.
+    return { state: "pending", done: login.done };
+  }
+
+  async cancelSignIn() {
+    this.login?.cancel();
+    this.login = undefined;
+  }
+
+  async signOut(context: LaunchContext) {
+    await (this.options.logout
+      ? this.options.logout(context)
+      : logout(context.executable, claudeEnvironment(context)));
+  }
+
   close() {
     this.closed = true;
+    this.login?.cancel();
+    this.login = undefined;
     for (const session of this.sessions) session.close();
     this.sessions.clear();
   }

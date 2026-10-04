@@ -256,3 +256,28 @@ test("without a usable accounts folder sign-out runs nothing (AE9)", async () =>
     harnesses.close();
   }
 });
+
+test("a host who acknowledged the old Claude notice sees the new one once", async () => {
+  const settings = new Map<string, unknown>([
+    ["harness.claude.noticeAcknowledged", true],
+  ]);
+  const root = await mkdtemp(join(tmpdir(), "multiplayer-registry-"));
+  const harnesses = new HarnessRegistry({
+    adapters: [new FakeHarness("claude")],
+    programs: new ProgramManager({ root, manifest: HARNESS_MANIFEST }),
+    accounts: new Accounts(join(root, "accounts")),
+    settings: {
+      getSetting: <T>(key: string) => settings.get(key) as T | undefined,
+      setSetting: (key, value) => settings.set(key, value),
+    },
+    changed: () => {},
+    environmentTimeoutMs: 0,
+  });
+  try {
+    assert.equal(harnesses.state("claude").noticePending, true);
+    harnesses.acknowledgeNotice("claude");
+    assert.equal(settings.get("harness.claude.noticeAcknowledged.v2"), true);
+  } finally {
+    harnesses.close();
+  }
+});

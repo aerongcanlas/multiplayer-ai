@@ -53,7 +53,7 @@ const opencodeDiscovery = {
   ],
 };
 const git = await fixtureRepository(repository, { readme: "Tabs fixture\n" });
-// Claude Code starts signed out to show guidance; the test signs it in later.
+// Claude Code starts signed out; the test signs it in from the tab later.
 await writeFile(claudeState, JSON.stringify({ signedIn: false, sessions: {} }));
 const programs = await startProgramServer(join(output, "manifest.json"));
 programs.corrupt("claude");
@@ -362,24 +362,24 @@ await run.execute(
       "A corrupted download shows the failure and a working retry",
     );
 
-    // Signed-out Claude Code shows guidance, no sign-in button, and the one-time notice.
+    // Signed-out Claude Code offers its own in-app sign-in and the one-time notice.
     await until(
       async () => (await harness("claude")).auth.state === "signed_out",
       "Claude Code sign-in state",
     );
-    await tabsPanel()
-      .getByText(/Sign in once with the Claude Code CLI/)
-      .waitFor();
-    assert.equal(
-      await tabsPanel()
-        .getByRole("button", { name: /Sign in/ })
-        .count(),
-      0,
+    const claudeSignIn = tabsPanel().getByRole("button", {
+      name: "Sign in",
+      exact: true,
+    });
+    await claudeSignIn.waitFor();
+    assert.doesNotMatch(
+      (await harness("claude")).auth.message ?? "",
+      /\/login/,
     );
     const notice = tabsPanel().getByRole("note", {
       name: "Claude Code sign-in notice",
     });
-    await notice.getByText(/never asks for it/).waitFor();
+    await notice.getByText(/never sees your password or token/).waitFor();
     await run.page.screenshot({
       path: join(output, "03-claude-signed-out.png"),
     });
@@ -389,21 +389,18 @@ await run.execute(
       "notice acknowledgement",
     );
     assert.equal(await tabsPanel().getByRole("note").count(), 0);
-    await writeFile(
-      claudeState,
-      JSON.stringify({ signedIn: true, sessions: {} }),
-    );
-    await openSettings("Claude Code");
-    await harnessRow("Claude Code")
-      .getByRole("button", { name: "Refresh Claude Code", exact: true })
-      .click();
-    await closeSettings();
+    // The fixture's `claude auth login` succeeds in the app's own Claude home.
+    await claudeSignIn.click();
     await until(
       async () => (await tabNamed("Claude Code 1"))?.status === "idle",
       "the Claude Code tab to become ready",
     );
+    assert.equal(
+      (await harness("claude")).auth.account,
+      "fixture@example.invalid",
+    );
     await checkpoint(
-      "Signed-out Claude Code shows guidance and the one-time notice only",
+      "Signed-out Claude Code signs in from the tab and shows the one-time notice once",
     );
 
     // A skill's question appears as a card and the answer continues the turn.

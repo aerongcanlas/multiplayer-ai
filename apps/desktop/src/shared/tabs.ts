@@ -12,8 +12,14 @@ export const HARNESS_LABELS: Record<HarnessId, string> = {
 export const HARNESS_NOTICES: Record<HarnessId, string | null> = {
   codex: null,
   claude:
-    "Claude Code tabs use the Claude Code login already on this computer. Anthropic does not allow third-party apps to offer claude.ai sign-in, so this app never asks for it.",
+    "Claude Code tabs have their own sign-in, separate from Claude Code in your terminal, so signing in or out there never signs a tab out. Sign in from Settings: Claude Code opens Anthropic's page in your browser, and this app never sees your password or token.",
   opencode: null,
+};
+// Bumped when a notice's text changes enough that hosts who acknowledged it should see it again.
+export const HARNESS_NOTICE_VERSIONS: Record<HarnessId, number> = {
+  codex: 1,
+  claude: 2,
+  opencode: 1,
 };
 
 const id = z.uuid();
