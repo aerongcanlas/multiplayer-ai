@@ -11,6 +11,7 @@ import {
   type HarnessId,
   type HarnessState,
   type Loadout,
+  type LocalServer,
   type SlashCommand,
   type Tab,
   type TranscriptBatch,
@@ -300,6 +301,24 @@ export interface SupervisorRequest {
     // Main-only: the host's login-shell environment for harness launches.
     | { type: "host.environment"; env: Record<string, string> };
 }
+/** Fixtures an unpackaged E2E run swaps in for the harness programs. */
+export interface SupervisorTesting {
+  codexFixture?: string;
+  claudeFixture?: string;
+  opencodeFixture?: string;
+  // The local servers OpenCode reports in place of probing the real ones.
+  opencodeDiscovery?: {
+    servers: LocalServer[];
+    providers: {
+      id: "ollama" | "lmstudio";
+      name: string;
+      baseURL: string;
+      models: { id: string; name: string; context?: number }[];
+    }[];
+  };
+  harnessManifest?: string;
+}
+
 export type SupervisorMessage =
   | { type: "open-login"; harness: HarnessId; url: string }
   | { type: "transcript"; batches: TranscriptBatch[] }

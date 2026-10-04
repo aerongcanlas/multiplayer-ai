@@ -21,6 +21,7 @@ import {
   TRANSCRIPT_CHANNEL,
   SHARED_TRANSCRIPT_CHANNEL,
   type Result,
+  type SupervisorTesting,
 } from "../shared/contracts";
 import { HARNESS_LABELS } from "../shared/tabs";
 import { loginAllowed } from "./supervisor-messages";
@@ -183,7 +184,6 @@ else {
         coordinator?.acceptLocal(snapshot);
       },
       (health) => window?.webContents.send(HEALTH_CHANNEL, health),
-      testing ? process.env.MP_TEST_CODEX_FIXTURE : undefined,
       {
         // Read-along taps validated batches before the window guard; transcripts reach the
         // renderer only in the trusted main frame of the app window.
@@ -199,10 +199,23 @@ else {
           if (loginAllowed(harness, url)) void shell.openExternal(url);
         },
         // Test fixtures and a local download manifest apply only to unpackaged E2E runs.
-        claudeFixture: testing ? process.env.MP_TEST_CLAUDE_FIXTURE : undefined,
-        harnessManifest: testing
-          ? process.env.MP_TEST_HARNESS_MANIFEST
-          : undefined,
+        ...(testing
+          ? {
+              testing: {
+                codexFixture: process.env.MP_TEST_CODEX_FIXTURE,
+                claudeFixture: process.env.MP_TEST_CLAUDE_FIXTURE,
+                opencodeFixture: process.env.MP_TEST_OPENCODE_FIXTURE,
+                ...(process.env.MP_TEST_OPENCODE_DISCOVERY
+                  ? {
+                      opencodeDiscovery: JSON.parse(
+                        process.env.MP_TEST_OPENCODE_DISCOVERY,
+                      ) as SupervisorTesting["opencodeDiscovery"],
+                    }
+                  : {}),
+                harnessManifest: process.env.MP_TEST_HARNESS_MANIFEST,
+              },
+            }
+          : {}),
       },
     );
     // Harnesses launch with the host's login-shell environment; the supervisor strips provider

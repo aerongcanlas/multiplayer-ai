@@ -2,8 +2,14 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import test from "node:test";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
+import { harnessAdapters } from "./adapters";
 import { Journal } from "./journal";
-import { withHost } from "./test-support";
+import { FakeHarness } from "./harnesses/fake";
+import { OpenCodeAdapter } from "./harnesses/opencode/adapter";
+import { start, withHost } from "./test-support";
 
 test("a suggestion used in a tab is submitted in a local room and stays draft in a shared room", () =>
     withHost(async ({ service, roomId, journal, settled }, fake) => {
@@ -244,3 +250,88 @@ test("deleting a room purges its chats and waits for running ones to stop", () =
             false,
         );
     }));
+
+const opencodeFixture = fileURLToPath(
+    new URL("../../scripts/opencode-fixture.mjs", import.meta.url),
+);
+const fixtureLauncher =
+    (log: string) =>
+    (_executable: string, args: string[], env: Record<string, string>) => ({
+        executable: process.execPath,
+        args: [opencodeFixture, ...args],
+        env: { ...env, MP_OPENCODE_FIXTURE_LOG: log },
+    });
+
+test("the service lists all three harnesses and runs an OpenCode tab on its fixture", async () => {
+    const logs = await mkdtemp(join(tmpdir(), "multiplayer-opencode-service-"));
+    const opencode = new OpenCodeAdapter({
+        launcher: fixtureLauncher(join(logs, "opencode.log")),
+        discover: async () => ({
+            servers: [],
+            providers: [
+                {
+                    id: "ollama",
+                    name: "Ollama",
+                    baseURL: "http://127.0.0.1:11434/v1",
+                    models: [{ id: "qwen3-coder:30b", name: "qwen3-coder:30b" }],
+                },
+            ],
+        }),
+    });
+    const setup = await start(new FakeHarness("codex"), undefined, [
+        new FakeHarness("claude", { signIn: "guidance" }),
+        opencode,
+    ]);
+    try {
+        assert.deepEqual(
+            setup.service.snapshot().harnesses!.map((state) => state.id),
+            ["codex", "claude", "opencode"],
+        );
+        await setup.registry.refresh("opencode");
+        assert.equal(setup.registry.state("opencode").auth.state, "signed_in");
+        await setup.dispatch({
+            type: "tab.open",
+            roomId: setup.roomId,
+            harness: "opencode",
+        });
+        const tab = setup.tabs().at(-1)!;
+        assert.equal(tab.loadout.harness, "opencode");
+        assert.equal(tab.loadout.model, "ollama/qwen3-coder:30b");
+        await setup.send(tab.id, "Say hello");
+        await setup.settled(tab.id);
+        const entries = await setup.transcript(tab.id);
+        assert.ok(
+            entries.some(
+                (entry) =>
+                    entry.kind === "assistant" &&
+                    entry.summary === "Hello world.",
+            ),
+        );
+        assert.equal(setup.tab(tab.id).status, "idle");
+        assert.ok(setup.tab(tab.id).sessionId?.startsWith("ses_fixture_"));
+    } finally {
+        setup.close();
+    }
+});
+
+test("fixtures are chosen by name, so leaving out OpenCode's shifts no other harness", async () => {
+    const codexFixture = fileURLToPath(
+        new URL("../../scripts/codex-fixture.mjs", import.meta.url),
+    );
+    const adapters = await harnessAdapters({ codexFixture });
+    try {
+        assert.deepEqual(
+            adapters.map((adapter) => adapter.id),
+            ["codex", "claude", "opencode"],
+        );
+        const context = {
+            executable: "/nonexistent/harness",
+            env: { PATH: process.env.PATH ?? "" },
+        };
+        // Codex answers from its fixture; OpenCode tries the real (missing) program.
+        assert.ok((await adapters[0]!.handshake(context)).version);
+        await assert.rejects(adapters[2]!.handshake(context));
+    } finally {
+        for (const adapter of adapters) adapter.close();
+    }
+});

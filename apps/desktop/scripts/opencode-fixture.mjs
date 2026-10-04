@@ -19,10 +19,12 @@ const [command, ...rest] = process.argv.slice(2);
 const env = process.env;
 const injected = JSON.parse(env.OPENCODE_CONFIG_CONTENT || "{}");
 
+// E2E runs share one environment with the Codex fixture, so OpenCode has its own log variable.
+const logFile = env.MP_OPENCODE_FIXTURE_LOG || env.MP_FIXTURE_LOG;
 function log(entry) {
-  if (!env.MP_FIXTURE_LOG) return;
+  if (!logFile) return;
   appendFileSync(
-    env.MP_FIXTURE_LOG,
+    logFile,
     `${JSON.stringify({
       pid: process.pid,
       cwd: process.cwd(),
@@ -104,7 +106,7 @@ log({
 });
 
 // Sessions outlive one process, as OpenCode keeps them on disk.
-const stateFile = env.MP_FIXTURE_LOG ? `${env.MP_FIXTURE_LOG}.sessions` : null;
+const stateFile = logFile ? `${logFile}.sessions` : null;
 const known = new Set(
   stateFile && existsSync(stateFile)
     ? readFileSync(stateFile, "utf8").split("\n").filter(Boolean)

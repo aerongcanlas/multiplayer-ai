@@ -8,6 +8,7 @@ import { SupervisorService } from "./service";
 import { inspectWorkspace } from "./workspace";
 import { HarnessRegistry } from "./harnesses/registry";
 import { FakeHarness } from "./harnesses/fake";
+import type { HarnessAdapter } from "./harnesses/contract";
 import { ProgramManager } from "./programs/manager";
 import { HARNESS_MANIFEST } from "./programs/manifest";
 import type { Snapshot, SupervisorRequest } from "../shared/contracts";
@@ -52,10 +53,13 @@ export type Setup = Awaited<ReturnType<typeof start>>;
 export async function start(
   fake: FakeHarness,
   paths?: { dir: string; repo: string; executable: string },
+  // More adapters beside the fake, each run as the same custom executable.
+  others: HarnessAdapter[] = [],
 ) {
   const { dir, repo, executable } = paths ?? (await repository());
   const journal = new Journal(join(dir, "journal.sqlite"));
-  journal.setSetting(`harness.${fake.id}.executable`, executable);
+  for (const adapter of [fake, ...others])
+    journal.setSetting(`harness.${adapter.id}.executable`, executable);
   const batches: TranscriptBatch[] = [];
   // Snapshots and transcript batches in the order the supervisor emitted them.
   const emitted: (
@@ -64,7 +68,7 @@ export async function start(
   )[] = [];
   let changed = () => {};
   const registry = new HarnessRegistry({
-    adapters: [fake],
+    adapters: [fake, ...others],
     programs: new ProgramManager({ root: dir, manifest: HARNESS_MANIFEST }),
     settings: journal,
     changed: () => changed(),

@@ -3,14 +3,17 @@ import { mkdirSync, readFileSync } from "node:fs";
 import { Journal } from "./journal";
 import { SupervisorService } from "./service";
 import { HarnessRegistry } from "./harnesses/registry";
-import { CodexAdapter } from "./harnesses/codex/adapter";
-import { ClaudeAdapter } from "./harnesses/claude/adapter";
+import { harnessAdapters } from "./adapters";
 import { ProgramManager } from "./programs/manager";
 import { HARNESS_MANIFEST } from "./programs/manifest";
 import { latestVersion } from "./programs/latest";
 import { findRelease } from "./programs/release";
 import type { ProgramManifest } from "./programs/types";
-import type { SupervisorMessage, SupervisorRequest } from "../shared/contracts";
+import type {
+  SupervisorMessage,
+  SupervisorRequest,
+  SupervisorTesting,
+} from "../shared/contracts";
 
 // Electron utilityProcess exposes parentPort, never a renderer-facing Node connection.
 const parent = (
@@ -25,11 +28,13 @@ const parent = (
   }
 ).parentPort;
 const directory = process.argv[2];
-const fixture = process.argv[3];
-const claudeFixturePath = process.argv[4];
+// Fixtures and a local manifest, set only by an unpackaged E2E launch.
+const testing = JSON.parse(process.argv[3] || "{}") as SupervisorTesting;
 // An E2E run may point managed downloads at a local server.
-const manifest = process.argv[5]
-  ? (JSON.parse(readFileSync(process.argv[5], "utf8")) as ProgramManifest)
+const manifest = testing.harnessManifest
+  ? (JSON.parse(
+      readFileSync(testing.harnessManifest, "utf8"),
+    ) as ProgramManifest)
   : HARNESS_MANIFEST;
 if (!parent || !directory)
   throw new Error("Supervisor must be launched by the desktop host.");
@@ -37,33 +42,15 @@ mkdirSync(directory, { recursive: true });
 const journal = new Journal(join(directory, "execution-journal.sqlite"));
 // Harness state changes reach the service once it exists.
 let harnessesChanged = () => {};
-// Fixtures are passed only by an unpackaged E2E launch; they run under Electron's Node.
-const fixtureLauncher =
-  (script: string) =>
-  (_executable: string, args: string[], env: Record<string, string>) => ({
-    executable: process.execPath,
-    args: [script, ...args],
-    env: { ...env, ELECTRON_RUN_AS_NODE: "1" },
-  });
 let supervisor: SupervisorService | undefined;
-// The Claude fixture is loaded only for an E2E run, so the shipped bundle never evaluates it.
 const started = (async () => {
   const registry = new HarnessRegistry({
-    adapters: [
-      new CodexAdapter(fixture ? { launcher: fixtureLauncher(fixture) } : {}),
-      new ClaudeAdapter(
-        claudeFixturePath
-          ? (await import("./harnesses/claude/fixture")).claudeFixture(
-              claudeFixturePath,
-            ).options
-          : {},
-      ),
-    ],
+    adapters: await harnessAdapters(testing),
     programs: new ProgramManager({ root: directory, manifest }),
     settings: journal,
     changed: () => harnessesChanged(),
     // An E2E run stays offline.
-    ...(fixture || claudeFixturePath || process.argv[5]
+    ...(Object.values(testing).some(Boolean)
       ? {}
       : { latest: latestVersion, release: findRelease }),
     openLogin: (harness, url) =>
