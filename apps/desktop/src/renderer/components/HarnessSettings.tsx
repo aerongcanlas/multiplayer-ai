@@ -15,6 +15,7 @@ import {
   authLabel,
   programFailed,
   programLabel,
+  serverLine,
   updateAvailable,
 } from "../lib/harness-status";
 import { Button } from "./ui/Button";
@@ -226,6 +227,34 @@ export function HarnessConnection({
           {Math.round(100 - limit.usedPercent)}% remaining · {limit.name}
         </span>
       ))}
+      {harness.localServers && (
+        <ul className="harness-servers" aria-label="Local model servers">
+          {harness.localServers.map((server) => (
+            <li key={server.id}>
+              <span className="harness-line">{serverLine(server)}</span>
+              {server.note && (
+                <span className="harness-line harness-warning">
+                  {server.note}
+                </span>
+              )}
+              {server.models.flatMap((model) =>
+                model.warning || model.unverified
+                  ? [
+                      <span
+                        className="harness-line harness-warning"
+                        key={model.id}
+                      >
+                        {model.name}:{" "}
+                        {model.warning ??
+                          "LM Studio does not say whether it supports tools."}
+                      </span>,
+                    ]
+                  : [],
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
       <HarnessStatus harness={harness} disabled={disabled} />
       <details className="harness-program">
         <summary>Program</summary>

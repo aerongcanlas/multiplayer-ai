@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { HarnessId, HarnessState, Loadout } from "../../../shared/tabs";
+import { modelGroups } from "../../lib/harness-status";
 
 const ACCESS_MODES: {
   id: Loadout["access"];
@@ -112,6 +113,7 @@ export function LoadoutBar({
   // A model that disappeared from the harness's list must be chosen again.
   const missing = Boolean(models.length && !model);
   const efforts = model?.efforts ?? [];
+  const groups = modelGroups(models);
   const isDefault = Boolean(
     model?.isDefault &&
     (!model.defaultEffort || model.defaultEffort === loadout.effort),
@@ -273,43 +275,58 @@ export function LoadoutBar({
                   {loadout.model} is unavailable — choose a model
                 </p>
               )}
-              {models.map((item) => {
-                const selected = item.id === loadout.model;
-                if (item.hidden && !selected) return null;
-                const effort = selected
-                  ? loadout.effort
-                  : (item.defaultEffort ?? item.efforts[0]);
-                return (
-                  <button
-                    type="button"
-                    role="menuitemradio"
-                    aria-checked={selected}
-                    key={item.id}
-                    className="loadout-menu-item"
-                    onClick={() => {
-                      // A model starts at the effort its row shows.
-                      const next = item.defaultEffort ?? item.efforts[0];
-                      onChange({
-                        ...loadout,
-                        model: item.id,
-                        ...(next ? { effort: next } : { effort: undefined }),
-                      });
-                      setModelOpen(false);
-                    }}
-                  >
-                    <HarnessIcon id={loadout.harness} />
-                    <span className="loadout-model-name">{item.name}</span>
-                    {effort && <span className="loadout-effort">{effort}</span>}
-                    {selected && (
-                      <Check
-                        size={14}
-                        className="loadout-menu-end"
-                        aria-hidden="true"
-                      />
-                    )}
-                  </button>
-                );
-              })}
+              {groups.flatMap((group) => [
+                // Provider headings appear once models come from more than one provider.
+                ...(group.label && groups.length > 1
+                  ? [
+                      <p
+                        className="loadout-menu-heading"
+                        key={`group:${group.provider}`}
+                      >
+                        {group.label}
+                      </p>,
+                    ]
+                  : []),
+                ...group.models.map((item) => {
+                  const selected = item.id === loadout.model;
+                  if (item.hidden && !selected) return null;
+                  const effort = selected
+                    ? loadout.effort
+                    : (item.defaultEffort ?? item.efforts[0]);
+                  return (
+                    <button
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={selected}
+                      key={item.id}
+                      className="loadout-menu-item"
+                      onClick={() => {
+                        // A model starts at the effort its row shows.
+                        const next = item.defaultEffort ?? item.efforts[0];
+                        onChange({
+                          ...loadout,
+                          model: item.id,
+                          ...(next ? { effort: next } : { effort: undefined }),
+                        });
+                        setModelOpen(false);
+                      }}
+                    >
+                      <HarnessIcon id={loadout.harness} />
+                      <span className="loadout-model-name">{item.name}</span>
+                      {effort && (
+                        <span className="loadout-effort">{effort}</span>
+                      )}
+                      {selected && (
+                        <Check
+                          size={14}
+                          className="loadout-menu-end"
+                          aria-hidden="true"
+                        />
+                      )}
+                    </button>
+                  );
+                }),
+              ])}
               {efforts.length > 0 && (
                 <>
                   <hr />

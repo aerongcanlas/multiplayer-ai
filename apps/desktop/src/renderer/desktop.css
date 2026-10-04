@@ -1413,6 +1413,23 @@ summary:focus-visible {
   align-items: center;
   justify-content: space-between;
 }
+.harness-servers {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.harness-servers li {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+.harness-line.harness-warning {
+  color: #e2b45c;
+  white-space: normal;
+}
 .harness-line {
   color: #a3a3a3;
   font-size: 11px;

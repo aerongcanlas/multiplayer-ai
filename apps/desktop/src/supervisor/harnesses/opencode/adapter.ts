@@ -35,7 +35,7 @@ const PROVIDER_NAMES: Record<string, string> = {
   lmstudio: "LM Studio",
 };
 export const NO_MODELS =
-  "No models available. Start Ollama or LM Studio with a tool-capable model (for example `ollama launch opencode`), or log in a provider with `opencode auth login`, then refresh.";
+  "No models available. Start Ollama or LM Studio with a tool-capable model and at least 32k of context (OLLAMA_CONTEXT_LENGTH for Ollama), run `ollama launch opencode`, or log in a provider with `opencode auth login`, then refresh.";
 
 /** Parses `opencode models --verbose`: an id line, then that model's JSON. */
 export function parseModels(output: string): HarnessModel[] {

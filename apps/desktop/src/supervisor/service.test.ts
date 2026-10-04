@@ -335,3 +335,29 @@ test("fixtures are chosen by name, so leaving out OpenCode's shifts no other har
         for (const adapter of adapters) adapter.close();
     }
 });
+
+test("with no usable model an OpenCode tab cannot start a turn (AE3)", async () => {
+    const logs = await mkdtemp(join(tmpdir(), "multiplayer-opencode-service-"));
+    const setup = await start(new FakeHarness("codex"), undefined, [
+        new OpenCodeAdapter({
+            launcher: fixtureLauncher(join(logs, "opencode.log")),
+            discover: async () => ({ servers: [], providers: [] }),
+        }),
+    ]);
+    try {
+        await setup.registry.refresh("opencode");
+        const state = setup.registry.state("opencode");
+        assert.equal(state.auth.state, "signed_out");
+        assert.match(state.auth.message ?? "", /No models available/);
+        await setup.dispatch({
+            type: "tab.open",
+            roomId: setup.roomId,
+            harness: "opencode",
+        });
+        const tab = setup.tabs().at(-1)!;
+        assert.equal(tab.status, "unavailable");
+        await assert.rejects(setup.send(tab.id, "Hello"));
+    } finally {
+        setup.close();
+    }
+});
