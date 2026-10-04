@@ -17,6 +17,8 @@ export interface LaunchContext {
   env: Record<string, string>;
   /** The host's output style for new sessions, where the harness has output styles. */
   outputStyle?: string;
+  /** The host's saved default model, for harnesses that need a model before a tab picks one. */
+  defaultModel?: string;
 }
 
 export interface SuggestionRequest extends LaunchContext {

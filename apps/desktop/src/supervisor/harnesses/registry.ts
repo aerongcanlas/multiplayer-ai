@@ -237,10 +237,14 @@ export class HarnessRegistry {
       const outputStyle = this.options.settings.getSetting<string>(
         styleKey(harness),
       );
+      const defaultModel = this.options.settings.getSetting<DefaultChoice>(
+        defaultKey(harness),
+      )?.model;
       const context = {
         executable: program.path,
         env,
         ...(outputStyle ? { outputStyle } : {}),
+        ...(defaultModel ? { defaultModel } : {}),
       };
       if (
         program.source === "custom" &&

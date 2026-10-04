@@ -29,15 +29,16 @@
         "test:tabs": "node scripts/tabs-e2e.mjs"
     },
     "dependencies": {
+        "@agentclientprotocol/sdk": "1.7.0",
         "@anthropic-ai/claude-agent-sdk": "0.3.286",
         "@supabase/supabase-js": "^2.115.0",
         "zod": "^4.4.3"
     },
     "devDependencies": {
-        "@multiplayer-ai/api": "workspace:*",
-        "@multiplayer-ai/domain": "workspace:*",
         "@eslint/js": "^9.39.5",
+        "@multiplayer-ai/api": "workspace:*",
         "@multiplayer-ai/db": "workspace:*",
+        "@multiplayer-ai/domain": "workspace:*",
         "@multiplayer-ai/ui": "workspace:*",
         "@tailwindcss/vite": "^4.2.1",
         "@types/node": "^24",
