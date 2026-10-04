@@ -809,10 +809,9 @@ test("Cancel during a ChatGPT sign-in sends account/login/cancel with its loginI
 
 test("Sign out logs the app home out and closes its app-server", () =>
   withAdapter(async (adapter, setup_) => {
-    assert.equal(
-      (await adapter.inspect(setup_.context)).auth.state,
-      "signed_in",
-    );
+    const signedIn = (await adapter.inspect(setup_.context)).auth;
+    assert.equal(signedIn.state, "signed_in");
+    assert.equal(signedIn.signOut, true);
     await adapter.signOut(setup_.context);
     assert.equal((await setup_.requests("account/logout")).length, 1);
     // The next use starts a new process, which reports the logout the fixture recorded.

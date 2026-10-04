@@ -53,6 +53,26 @@ export function authLabel({ id, auth }: HarnessState) {
   return "Sign-in not checked yet";
 }
 
+export type AccountAction = "sign_in" | "cancel" | "sign_out" | "command";
+
+/**
+ * The sign-in controls a harness offers now (R6, R7): Cancel while signing in, Sign in when an
+ * in-app harness is signed out, a copy-ready command for terminal sign-ins, and Sign out only
+ * while the app holds a login of its own.
+ */
+export function accountActions({
+  signIn,
+  auth,
+}: HarnessState): AccountAction[] {
+  if (auth.state === "signing_in") return ["cancel"];
+  const actions: AccountAction[] = [];
+  if (signIn === "in_app" && auth.state === "signed_out")
+    actions.push("sign_in");
+  if (signIn === "command" && auth.command) actions.push("command");
+  if (auth.signOut) actions.push("sign_out");
+  return actions;
+}
+
 /** One line telling whether a harness can start a tab right away. */
 export function readiness(harness: HarnessState | undefined) {
   if (!harness) return { ready: false, text: "Checking…" };

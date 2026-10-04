@@ -1392,6 +1392,35 @@ summary:focus-visible {
   color: #c3c3d0;
   line-height: 1.5;
 }
+.harness-command,
+.harness-confirm {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+.harness-command code {
+  max-width: 100%;
+  padding: 6px 8px;
+  overflow-x: auto;
+  border: 1px solid #ffffff14;
+  border-radius: 6px;
+  background: #1b1b22;
+  color: #d6d6e0;
+  font-size: 11px;
+  white-space: pre;
+}
+.harness-command-actions {
+  display: flex;
+  gap: 6px;
+}
+.harness-confirm p {
+  margin: 0;
+  color: #c9c9d2;
+  line-height: 1.5;
+}
 .harness-downloading {
   padding: 6px 16px;
   color: #a9b8d4;

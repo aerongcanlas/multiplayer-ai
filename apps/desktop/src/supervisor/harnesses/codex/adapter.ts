@@ -318,6 +318,7 @@ export class CodexAdapter implements HarnessAdapter {
           ...(string(account.planType)
             ? { plan: string(account.planType) }
             : {}),
+          signOut: true,
         },
         models,
         limits,

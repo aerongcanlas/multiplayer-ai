@@ -241,8 +241,12 @@ test("the login runs Claude Code's own auth login in the app home and reports it
 test("cancel kills the login program", async () => {
   const stub = await stubClaude();
   const login = startLogin(stub.executable, stub.env("hang"));
-  await wait(200);
-  const pid = await stub.pid();
+  let pid = 0;
+  for (let attempt = 0; attempt < 250 && !pid; attempt++) {
+    await wait(20);
+    pid = await stub.pid().catch(() => 0);
+  }
+  assert.ok(pid, "the login program started");
   login.cancel();
   await assert.rejects(login.done, /cancelled/);
   assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
