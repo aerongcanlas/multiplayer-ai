@@ -3,7 +3,7 @@ import { useState } from "react";
 import type { Room, Suggestion } from "../../shared/contracts";
 import { Button } from "./ui/Button";
 import { timeLabel } from "../lib/time";
-import { perform } from "../lib/desktop-store";
+import { perform, withRoom } from "../lib/desktop-store";
 import { plural } from "../lib/utils";
 
 function SuggestionCard({
@@ -25,13 +25,18 @@ function SuggestionCard({
   const [draft, setDraft] = useState(suggestion.prompt);
   const submitted = suggestion.status === "submitted";
   async function save() {
-    const result = await perform(() =>
-      window.desktop.editSuggestion(
-        roomId,
-        suggestion.id,
-        draft,
-        suggestion.revision,
-      ),
+    const result = await perform(
+      () =>
+        window.desktop.editSuggestion(
+          roomId,
+          suggestion.id,
+          draft,
+          suggestion.revision,
+        ),
+      {
+        key: `suggestion.edit:${suggestion.id}`,
+        lane: `suggestions:${roomId}`,
+      },
     );
     if (result) setEditing(false);
   }
@@ -113,8 +118,20 @@ function SuggestionCard({
                   : "Only the author or a room admin can delete this suggestion"
               }
               onClick={() =>
-                void perform(() =>
-                  window.desktop.deleteSuggestion(roomId, suggestion.id),
+                void perform(
+                  () => window.desktop.deleteSuggestion(roomId, suggestion.id),
+                  {
+                    key: `suggestion.delete:${suggestion.id}`,
+                    // Dismissed cards leave at once; their deletes then run one by one.
+                    lane: `suggestions:${roomId}`,
+                    optimistic: (snapshot) =>
+                      withRoom(snapshot, roomId, (room) => ({
+                        ...room,
+                        suggestions: room.suggestions.filter(
+                          (item) => item.id !== suggestion.id,
+                        ),
+                      })),
+                  },
                 ).then((result) => result && onDeleted())
               }
             >

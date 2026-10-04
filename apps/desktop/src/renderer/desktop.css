@@ -699,6 +699,22 @@ summary:focus-visible {
   flex-shrink: 0;
   padding: 9px 13px 12px;
 }
+.composer-lock {
+  position: relative;
+}
+.composer-repo-picker {
+  position: absolute;
+  inset: 0;
+  border-radius: 18px;
+  background: transparent;
+  cursor: pointer;
+}
+.composer-repo-picker:hover:not(:disabled) {
+  background: rgb(255 255 255 / 0.03);
+}
+.composer-repo-picker:disabled {
+  cursor: default;
+}
 .composer-hint {
   color: #8f8f9b;
   font-size: 10px;

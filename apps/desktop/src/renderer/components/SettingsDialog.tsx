@@ -7,7 +7,7 @@ import {
   DialogTitle,
 } from "@multiplayer-ai/ui/primitives/dialog";
 import type { HarnessId, HarnessState } from "../../shared/tabs";
-import { perform, useDesktop } from "../lib/desktop-store";
+import { perform, useDesktop, withHarness } from "../lib/desktop-store";
 import { readiness } from "../lib/harness-status";
 import { HarnessConnection } from "./HarnessSettings";
 import { AccountSettings } from "./SharedConnection";
@@ -53,8 +53,10 @@ function Models({
                   variant="ghost"
                   disabled={disabled}
                   onClick={() =>
-                    void perform(() =>
-                      window.desktop.setHarnessDefault(harness.id, model.id),
+                    void perform(
+                      () =>
+                        window.desktop.setHarnessDefault(harness.id, model.id),
+                      { key: `harness.default:${harness.id}` },
                     )
                   }
                 >
@@ -75,15 +77,29 @@ function Models({
                   aria-label={`Show ${model.name} in the model picker`}
                   checked={!model.hidden}
                   disabled={disabled || model.isDefault}
-                  onChange={() =>
-                    void perform(() =>
-                      window.desktop.setHarnessModelHidden(
-                        harness.id,
-                        model.id,
-                        !model.hidden,
-                      ),
-                    )
-                  }
+                  onChange={() => {
+                    const hidden = !model.hidden;
+                    void perform(
+                      () =>
+                        window.desktop.setHarnessModelHidden(
+                          harness.id,
+                          model.id,
+                          hidden,
+                        ),
+                      {
+                        lane: "settings",
+                        optimistic: (snapshot) =>
+                          withHarness(snapshot, harness.id, (item) => ({
+                            ...item,
+                            models: item.models.map((entry) =>
+                              entry.id === model.id
+                                ? { ...entry, hidden }
+                                : entry,
+                            ),
+                          })),
+                      },
+                    );
+                  }}
                 />
               </label>
             </li>
@@ -127,14 +143,20 @@ function OutputStyle({
             aria-label="Output style"
             value={harness.outputStyle ?? ""}
             disabled={disabled}
-            onChange={(event) =>
-              void perform(() =>
-                window.desktop.setHarnessOutputStyle(
-                  harness.id,
-                  event.target.value || null,
-                ),
-              )
-            }
+            onChange={(event) => {
+              const style = event.target.value || null;
+              void perform(
+                () => window.desktop.setHarnessOutputStyle(harness.id, style),
+                {
+                  lane: "settings",
+                  optimistic: (snapshot) =>
+                    withHarness(snapshot, harness.id, (item) => ({
+                      ...item,
+                      outputStyle: style ?? undefined,
+                    })),
+                },
+              );
+            }}
           >
             <option value="">{harness.label}'s own setting</option>
             {styles.map((style) => (
@@ -172,11 +194,16 @@ function NewTabs({
           aria-label="New tabs open with"
           value={current ?? ""}
           disabled={disabled}
-          onChange={(event) =>
-            void perform(() =>
-              window.desktop.setNewTabHarness(event.target.value as HarnessId),
-            )
-          }
+          onChange={(event) => {
+            const harness = event.target.value as HarnessId;
+            void perform(() => window.desktop.setNewTabHarness(harness), {
+              lane: "settings",
+              optimistic: (snapshot) => ({
+                ...snapshot,
+                newTabHarness: harness,
+              }),
+            });
+          }}
         >
           {harnesses.map((item) => (
             <option key={item.id} value={item.id}>

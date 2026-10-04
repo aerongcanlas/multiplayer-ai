@@ -2,7 +2,7 @@ import { Trash2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { Room } from "../../shared/contracts";
 import { tabBusy, type Tab } from "../../shared/tabs";
-import { perform } from "../lib/desktop-store";
+import { perform, withRoom } from "../lib/desktop-store";
 import { STATUS_LABELS } from "./tabs/labels";
 
 /** Actions for one chat, opened by right-click, Alt+click, or the context-menu key. */
@@ -64,19 +64,32 @@ function ChatMenu({
             disabled={disabled}
             onClick={() => {
               onClose(false);
-              void (async () => {
-                // An open chat closes first, stopping its turn if one runs.
-                if (
-                  !closed &&
-                  !(await perform(() =>
-                    window.desktop.closeTab(roomId, tab.id, running),
-                  ))
-                )
-                  return;
-                await perform(() =>
-                  window.desktop.deleteClosedTab(roomId, tab.id),
-                );
-              })();
+              // The chat leaves the list at once while it closes and deletes.
+              void perform(
+                async () => {
+                  // An open chat closes first, stopping its turn if one runs.
+                  if (!closed) {
+                    const result = await window.desktop.closeTab(
+                      roomId,
+                      tab.id,
+                      running,
+                    );
+                    if (!result.ok) return result;
+                  }
+                  return window.desktop.deleteClosedTab(roomId, tab.id);
+                },
+                {
+                  key: `tab.delete:${tab.id}`,
+                  optimistic: (snapshot) =>
+                    withRoom(snapshot, roomId, (room) => ({
+                      ...room,
+                      tabs: room.tabs.filter((item) => item.id !== tab.id),
+                      closedTabs: room.closedTabs?.filter(
+                        (item) => item.id !== tab.id,
+                      ),
+                    })),
+                },
+              );
             }}
           >
             <Trash2 size={13} />
@@ -98,7 +111,14 @@ function ChatMenu({
               }
               onClick={() => {
                 onClose(false);
-                void perform(() => window.desktop.closeTab(roomId, tab.id));
+                void perform(() => window.desktop.closeTab(roomId, tab.id), {
+                  key: `tab.close:${tab.id}`,
+                  optimistic: (snapshot) =>
+                    withRoom(snapshot, roomId, (room) => ({
+                      ...room,
+                      tabs: room.tabs.filter((item) => item.id !== tab.id),
+                    })),
+                });
               }}
             >
               <X size={13} />

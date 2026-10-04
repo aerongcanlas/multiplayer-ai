@@ -1,6 +1,8 @@
 import { ShieldQuestion } from "lucide-react";
 import type { ApprovalDecision, TranscriptEntry } from "../../../shared/tabs";
+import { useDesktop } from "../../lib/desktop-store";
 import { Button } from "../ui/Button";
+import { responseKey } from "./labels";
 import { SubAgentBadge } from "./SubAgentBadge";
 
 const outcome: Partial<Record<NonNullable<TranscriptEntry["state"]>, string>> =
@@ -23,6 +25,7 @@ export function ApprovalCard({
   onRespond: (decision: ApprovalDecision) => void;
 }) {
   const pending = entry.state === "pending";
+  const sending = useDesktop().busy.has(responseKey(entry.id));
   return (
     <div
       className={`approval-card ${pending ? "" : "approval-settled"}`}
@@ -39,7 +42,7 @@ export function ApprovalCard({
         <div>
           <Button
             size="xs"
-            disabled={disabled}
+            disabled={disabled || sending}
             onClick={() => onRespond("accept")}
           >
             Approve once
@@ -47,7 +50,7 @@ export function ApprovalCard({
           <Button
             size="xs"
             variant="outline"
-            disabled={disabled}
+            disabled={disabled || sending}
             onClick={() => onRespond("decline")}
           >
             Decline

@@ -500,10 +500,27 @@ try {
     "",
     "Sending starts a fresh draft immediately",
   );
-  await second.page.getByText("Sending...", { exact: true }).waitFor();
+  // A send shows as sent at once, with no "Sending..." state, while the server holds it.
+  const chatLine = (page, text) =>
+    page
+      .getByRole("region", { name: "Group Chat" })
+      .getByRole("paragraph")
+      .filter({ hasText: new RegExp(`^${text}$`) });
+  await chatLine(second.page, "Keep selected feedback visible").waitFor();
+  assert.equal(await second.page.getByText("Sending...").count(), 0);
   await second.page.keyboard.type("A second message drafted while sending");
-  assert.equal(await chatSend.isDisabled(), true);
+  assert.equal(
+    await chatSend.isEnabled(),
+    true,
+    "A send in flight never blocks the next one",
+  );
   await second.page.keyboard.press("Enter");
+  assert.equal(await chatDraft.inputValue(), "");
+  await chatLine(
+    second.page,
+    "A second message drafted while sending",
+  ).waitFor();
+  // The second send waits behind the first in the room's lane.
   assert.equal(
     apiCalls.filter((route) => route.endsWith("/messages")).length,
     1,
@@ -513,39 +530,41 @@ try {
   });
   messageGate.resolve();
   messageGate = undefined;
-  await chatSend.waitFor({ state: "visible" });
-  await second.page.waitForFunction(
-    () => !document.querySelector('[aria-label="Send message"]').disabled,
-  );
-  assert.equal(
-    await chatDraft.inputValue(),
+  await chatLine(
+    first.page,
     "A second message drafted while sending",
-  );
+  ).waitFor();
   assert.equal(
-    await chatDraft.evaluate((input) => input === document.activeElement),
-    true,
+    apiCalls.filter((route) => route.endsWith("/messages")).length,
+    2,
   );
-  await second.page.keyboard.press("Enter");
-  await second.page.waitForFunction(
-    () =>
-      document.querySelector('[aria-label="Group chat message"]').value === "",
+  const landed = (
+    await first.page.evaluate(() => window.desktop.getSnapshot())
+  ).snapshot.rooms
+    .flatMap((room) => room.messages)
+    .map((message) => message.text);
+  assert.ok(
+    landed.indexOf("Keep selected feedback visible") <
+      landed.indexOf("A second message drafted while sending"),
+    "Quick sends land in the order they were typed",
   );
+  for (const text of [
+    "Keep selected feedback visible",
+    "A second message drafted while sending",
+  ])
+    assert.equal(
+      await chatLine(second.page, text).count(),
+      1,
+      `${text} shows once after it lands`,
+    );
   assert.equal(
     await chatDraft.evaluate((input) => input === document.activeElement),
     true,
   );
   await second.page.keyboard.type("Keep typing after sending");
   assert.equal(await chatDraft.inputValue(), "Keep typing after sending");
-  await first.page
-    .getByRole("paragraph")
-    .filter({ hasText: /^A second message drafted while sending$/ })
-    .waitFor();
-  assert.equal(
-    apiCalls.filter((route) => route.endsWith("/messages")).length,
-    2,
-  );
   checkpoint(
-    "Group chat keeps focus for click and Enter sends, preserves edits during delayed sends, and blocks duplicate sends",
+    "Group chat shows sends at once, keeps focus, and delivers quick sends once each in order",
   );
   messageGate = Promise.withResolvers();
   messageReceived = Promise.withResolvers();
@@ -899,6 +918,71 @@ try {
   await ownChip.click();
   checkpoint(
     "Leaving the shared tab restores the viewer's own Mission Control, and an ended share keeps its cards",
+  );
+
+  // Members leave from the sidebar; only an admin deletes a room for everyone.
+  const created = await first.page.evaluate(() =>
+    window.desktop.createRoom("Short-lived", "shared"),
+  );
+  const shortId = created.notice.roomId;
+  const invited = await first.page.evaluate(
+    (id) => window.desktop.createInvite(id),
+    shortId,
+  );
+  await second.page.evaluate(
+    (token) => window.desktop.joinRoom(token),
+    invited.notice.token,
+  );
+  const roomButton = (page) =>
+    page
+      .getByRole("navigation", { name: "Rooms" })
+      .getByRole("button", { name: "Short-lived", exact: true });
+  const roomMenu = (page) =>
+    page.getByRole("menu", { name: "Short-lived actions" });
+  await roomButton(second.page).click({ button: "right" });
+  assert.equal(
+    await roomMenu(second.page)
+      .getByRole("menuitem", { name: /Delete/ })
+      .count(),
+    0,
+  );
+  await roomMenu(second.page)
+    .getByRole("menuitem", { name: "Leave room…" })
+    .click();
+  await roomMenu(second.page)
+    .getByRole("menuitem", { name: "Leave room", exact: true })
+    .click();
+  await roomButton(second.page).waitFor({ state: "detached" });
+  await syncShared(first.page);
+  const shortRoom = async () =>
+    (
+      await first.page.evaluate(() => window.desktop.getSnapshot())
+    ).snapshot.rooms.find((room) => room.id === shortId);
+  assert.equal((await shortRoom()).shared.members.length, 1);
+  await roomButton(first.page).click({ button: "right" });
+  await roomMenu(first.page)
+    .getByRole("menuitem", { name: "Leave room…" })
+    .waitFor();
+  await roomMenu(first.page)
+    .getByRole("menuitem", { name: "Delete room for everyone…" })
+    .click();
+  await first.page.screenshot({
+    path: join(output, "room-delete-confirm.png"),
+  });
+  await roomMenu(first.page)
+    .getByRole("menuitem", { name: "Delete permanently" })
+    .click();
+  await roomButton(first.page).waitFor({ state: "detached" });
+  assert.equal(await shortRoom(), undefined);
+  assert.equal(
+    (await pool.query("select 1 from public.room where id=$1", [shortId]))
+      .rowCount,
+    0,
+  );
+  assert.ok(apiCalls.includes(`POST /v1/rooms/${shortId}/leave`));
+  assert.ok(apiCalls.includes(`DELETE /v1/rooms/${shortId}`));
+  checkpoint(
+    "A member leaves a shared room and its admin deletes it for everyone from the sidebar",
   );
 
   offline = true;

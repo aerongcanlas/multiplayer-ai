@@ -211,3 +211,36 @@ test("the repository cannot change under a running tab", () =>
         await stopTab(room.tabs[0].id);
         await settled(room.tabs[0].id);
     }));
+
+test("deleting a room purges its chats and waits for running ones to stop", () =>
+    withHost(async ({ service, roomId, journal, settled, stopTab }) => {
+        await service.dispatch({ type: "tab.open", roomId, harness: "codex" });
+        const tabId = service.snapshot().rooms[0].tabs[0].id;
+        await service.dispatch({
+            type: "tab.send",
+            roomId,
+            tabId,
+            text: "FAKE_SLOW",
+        });
+        await assert.rejects(
+            service.dispatch({ type: "room.delete", roomId }),
+            /Stop this room's running chats/,
+        );
+        await stopTab(tabId);
+        await settled(tabId);
+        assert.ok(journal.transcriptPage(tabId).entries.length > 0);
+        await assert.rejects(
+            service.dispatch({ type: "room.leave", roomId }),
+            /main-process connection/,
+        );
+        await service.dispatch({ type: "room.delete", roomId });
+        assert.equal(
+            service.snapshot().rooms.some((room) => room.id === roomId),
+            false,
+        );
+        assert.deepEqual(journal.transcriptPage(tabId).entries, []);
+        assert.equal(
+            journal.load().rooms.some((room) => room.id === roomId),
+            false,
+        );
+    }));

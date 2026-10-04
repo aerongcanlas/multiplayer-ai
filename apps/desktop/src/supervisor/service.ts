@@ -217,6 +217,7 @@ export class SupervisorService {
       command.type === "auth.signOut" ||
       command.type === "shared.refresh" ||
       command.type === "room.join" ||
+      command.type === "room.leave" ||
       command.type === "invite.create" ||
       command.type === "sharedTab.watch" ||
       command.type === "sharedTab.unwatch" ||
@@ -231,6 +232,16 @@ export class SupervisorService {
       return { snapshot: await this.suggest(command) };
     if (isTabCommand(command))
       throw new Error("Chat tabs are unavailable in this build.");
+    if (command.type === "room.delete") {
+      const room = findRoom(this.state, command.roomId);
+      if (room.tabs.some((tab) => tabBusy(tab.status) || tab.runningAgents))
+        throw new Error("Stop this room's running chats first.");
+      this.host?.purge(room.id);
+      this.transaction((draft) => {
+        draft.rooms = draft.rooms.filter((item) => item.id !== room.id);
+      });
+      return { snapshot: this.snapshot() };
+    }
     this.transaction((draft) => {
       if (command.type === "room.create") {
         draft.rooms.push({

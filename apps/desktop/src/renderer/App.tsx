@@ -33,6 +33,7 @@ import { GroupChatPanel } from "./components/GroupChatPanel";
 import { MissionControlPanel } from "./components/MissionControlPanel";
 import { AccountFooter } from "./components/SharedConnection";
 import { RoomEntryDialog } from "./components/RoomEntryDialog";
+import { RoomMenu } from "./components/RoomMenu";
 import { SidebarSection } from "./components/SidebarSection";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { TabsPanel } from "./components/tabs/TabsPanel";
@@ -180,12 +181,12 @@ function RoomView({
               variant="outline"
               disabled={disabled}
               onClick={() =>
-                void perform(
-                  () => window.desktop.createInvite(room.id),
-                  (notice) => {
+                void perform(() => window.desktop.createInvite(room.id), {
+                  key: `invite:${room.id}`,
+                  onNotice: (notice) => {
                     if (notice.kind === "invite") setInvite(notice.token);
                   },
-                )
+                })
               }
             >
               <Users size={14} />
@@ -197,7 +198,9 @@ function RoomView({
             variant="outline"
             disabled={disabled || active}
             onClick={() =>
-              void perform(() => window.desktop.selectWorkspace(room.id))
+              void perform(() => window.desktop.selectWorkspace(room.id), {
+                key: `workspace:${room.id}`,
+              })
             }
             title={
               room.workspace
@@ -392,7 +395,11 @@ function ConnectionStatus({
               size="xs"
               variant="ghost"
               disabled={disabled}
-              onClick={() => void perform(() => window.desktop.refreshShared())}
+              onClick={() =>
+                void perform(() => window.desktop.refreshShared(), {
+                  key: "shared.refresh",
+                })
+              }
             >
               Retry
             </Button>
@@ -404,7 +411,7 @@ function ConnectionStatus({
 }
 
 export default function App() {
-  const { snapshot, health, pending, error } = useDesktop();
+  const { snapshot, health, error } = useDesktop();
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(() =>
     getStored("multiplayer:room"),
   );
@@ -412,6 +419,28 @@ export default function App() {
     () => getStored("multiplayer:sidebar") !== "closed",
   );
   const [roomDialog, setRoomDialog] = useState<"create" | "join" | null>(null);
+  const [roomMenu, setRoomMenu] = useState<{
+    roomId: string;
+    at: { x: number; y: number };
+    button: HTMLButtonElement;
+  } | null>(null);
+  function openRoomMenu(
+    roomId: string,
+    event: React.MouseEvent<HTMLButtonElement>,
+  ) {
+    event.preventDefault();
+    const button = event.currentTarget;
+    const rect = button.getBoundingClientRect();
+    // The context-menu key reports no pointer position; anchor under the room instead.
+    const keyboard = event.clientX === 0 && event.clientY === 0;
+    setRoomMenu({
+      roomId,
+      button,
+      at: keyboard
+        ? { x: rect.left + 12, y: rect.bottom + 2 }
+        : { x: event.clientX, y: event.clientY },
+    });
+  }
   const addRoomRef = useRef<HTMLButtonElement>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [roomOrder, setRoomOrder] = useSavedOrder("multiplayer:roomOrder");
@@ -437,7 +466,7 @@ export default function App() {
   const room =
     snapshot?.rooms.find((room) => room.id === selectedRoomId) ??
     snapshot?.rooms[0];
-  const disabled = pending > 0 || health.status !== "live";
+  const disabled = health.status !== "live";
   // The listener below always calls the latest travel, which reads the latest history.
   const travelRef = useRef(travel);
   useEffect(() => {
@@ -553,8 +582,9 @@ export default function App() {
   }
   async function openChat(roomId: string, tab: Tab, closed: boolean) {
     if (closed) {
-      const result = await perform(() =>
-        window.desktop.reopenTab(roomId, tab.id),
+      const result = await perform(
+        () => window.desktop.reopenTab(roomId, tab.id),
+        { key: `tab.reopen:${tab.id}` },
       );
       if (!result) return;
     }
@@ -666,7 +696,15 @@ export default function App() {
                           aria-current={
                             item.id === room?.id ? "page" : undefined
                           }
-                          onClick={() => selectRoom(item.id)}
+                          aria-haspopup="menu"
+                          title={`${item.name} · right-click for actions`}
+                          onClick={(event) => {
+                            if (event.altKey) openRoomMenu(item.id, event);
+                            else selectRoom(item.id);
+                          }}
+                          onContextMenu={(event) =>
+                            openRoomMenu(item.id, event)
+                          }
                         >
                           {item.shared ? (
                             <Users size={15} />
@@ -793,6 +831,30 @@ export default function App() {
           }}
         />
       )}
+      {roomMenu &&
+        (() => {
+          const target = snapshot?.rooms.find(
+            (item) => item.id === roomMenu.roomId,
+          );
+          return target ? (
+            <RoomMenu
+              key={target.id}
+              room={target}
+              at={roomMenu.at}
+              disabled={
+                disabled ||
+                Boolean(
+                  target.shared &&
+                  snapshot?.collaboration?.status !== "connected",
+                )
+              }
+              onClose={(refocus) => {
+                if (refocus) roomMenu.button.focus();
+                setRoomMenu(null);
+              }}
+            />
+          ) : null;
+        })()}
       {roomDialog && (
         <RoomEntryDialog
           mode={roomDialog}

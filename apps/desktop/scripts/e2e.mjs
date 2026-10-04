@@ -111,6 +111,8 @@ await run.execute(
                 "cancelSignIn",
                 "refreshShared",
                 "joinRoom",
+                "deleteRoom",
+                "leaveRoom",
                 "createInvite",
                 "createSuggestion",
                 "editSuggestion",

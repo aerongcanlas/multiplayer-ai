@@ -414,6 +414,13 @@ export class CollaborationClient {
         case "invite.create":
           path = `/v1/rooms/${command.roomId}/invites`;
           break;
+        case "room.delete":
+          path = `/v1/rooms/${command.roomId}`;
+          method = "DELETE";
+          break;
+        case "room.leave":
+          path = `/v1/rooms/${command.roomId}/leave`;
+          break;
         case "message.send":
           path = `/v1/rooms/${command.roomId}/messages`;
           body = { text: command.text };

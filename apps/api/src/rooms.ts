@@ -97,6 +97,20 @@ async function member(db: PoolClient, actor: string, roomId: string) {
   return rows[0];
 }
 
+// Serializes leaving and deleting, so two last members leaving at once cannot strand the room.
+async function lockRoom(db: PoolClient, roomId: string) {
+  const { rowCount } = await db.query(
+    "select 1 from public.room where id = $1 for update",
+    [roomId],
+  );
+  if (!rowCount)
+    throw new ApiError(
+      403,
+      "forbidden",
+      "You are no longer a member of this room.",
+    );
+}
+
 async function mutate(
   pool: Pool,
   actor: string,
@@ -315,6 +329,57 @@ export function registerRooms(app: FastifyInstance, pool: Pool) {
         "update public.desktop_prompt_suggestion set prompt = $1, revision = revision + 1, updated_at = now() where id = $2",
         [prompt, suggestionId],
       );
+      return { roomId };
+    });
+  });
+
+  // Deleting a room removes its members, messages, invites, suggestions, threads and shared tabs.
+  app.delete("/v1/rooms/:roomId", async (request) => {
+    const { roomId } = roomParams.parse(request.params);
+    return mutate(pool, request.actor, async (db) => {
+      await lockRoom(db, roomId);
+      const membership = await member(db, request.actor, roomId);
+      if (!membership.is_admin)
+        throw new ApiError(
+          403,
+          "forbidden",
+          "Only room admins can delete this room.",
+        );
+      await db.query("delete from public.room where id = $1", [roomId]);
+      return { roomId };
+    });
+  });
+
+  // The last member leaving deletes the room; the last admin leaving promotes the earliest member.
+  app.post("/v1/rooms/:roomId/leave", async (request) => {
+    const { roomId } = roomParams.parse(request.params);
+    z.strictObject({}).parse(request.body ?? {});
+    return mutate(pool, request.actor, async (db) => {
+      await lockRoom(db, roomId);
+      await member(db, request.actor, roomId);
+      await db.query(
+        "delete from public.desktop_tab_share where room_id = $1 and host_id = $2",
+        [roomId, request.actor],
+      );
+      await db.query(
+        "delete from public.room_member where room_id = $1 and member_id = $2",
+        [roomId, request.actor],
+      );
+      const { rows } = await db.query<{ admins: number; members: number }>(
+        `select count(*)::int as members, count(*) filter (where is_admin)::int as admins
+        from public.room_member where room_id = $1`,
+        [roomId],
+      );
+      if (rows[0].members === 0)
+        await db.query("delete from public.room where id = $1", [roomId]);
+      else if (rows[0].admins === 0)
+        await db.query(
+          `update public.room_member set is_admin = true
+          where room_id = $1 and member_id = (
+            select member_id from public.room_member where room_id = $1
+            order by created_at, member_id limit 1)`,
+          [roomId],
+        );
       return { roomId };
     });
   });
