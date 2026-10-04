@@ -3,6 +3,7 @@ import type { HarnessId } from "../../shared/tabs";
 const PACKAGES: Record<HarnessId, string> = {
   codex: "@openai/codex",
   claude: "@anthropic-ai/claude-code",
+  opencode: "opencode-ai",
 };
 
 /**

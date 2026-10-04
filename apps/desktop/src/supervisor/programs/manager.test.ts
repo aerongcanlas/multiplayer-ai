@@ -92,6 +92,7 @@ const manifest = (
       },
     },
   },
+  opencode: { version: "3.0.0", platforms: {} },
 });
 
 const files = async (root: string, harness: string, version: string) => {

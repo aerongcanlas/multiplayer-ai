@@ -1289,6 +1289,10 @@ summary:focus-visible {
   color: #fbe3d6;
   background: #6a3c2a;
 }
+.tab-picker-mark.harness-opencode {
+  color: #f1ecec;
+  background: #3a3a3a;
+}
 .tab-picker-text {
   display: flex;
   flex: 1;

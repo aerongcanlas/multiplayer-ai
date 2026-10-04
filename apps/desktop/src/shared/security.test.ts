@@ -102,6 +102,13 @@ test("transcript messages of unknown shape are dropped and sign-in URLs are allo
   assert.equal(loginAllowed("codex", "https://user:pw@chatgpt.com/x"), false);
   // Claude Code tabs never open an in-app sign-in.
   assert.equal(loginAllowed("claude", "https://claude.ai/login"), false);
+  // OpenCode tabs use OpenCode's own login, so no URL is ever opened for them.
+  for (const url of [
+    "https://opencode.ai/auth",
+    "https://auth.openai.com/authorize",
+    "https://chatgpt.com/x",
+  ])
+    assert.equal(loginAllowed("opencode", url), false);
   assert.equal(loginAllowed("cursor", "https://auth.openai.com/x"), false);
   assert.equal(requestTimeout("harness.refresh"), 90_000);
   assert.equal(requestTimeout("tab.send"), 20_000);

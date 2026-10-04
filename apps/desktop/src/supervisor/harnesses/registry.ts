@@ -1,5 +1,6 @@
 import {
   HARNESS_LABELS,
+  HARNESS_NOTICES,
   newerVersion,
   type HarnessId,
   type HarnessModel,
@@ -144,7 +145,7 @@ export class HarnessRegistry {
         modelsRefreshedAt: null,
         limits: [],
         noticePending:
-          adapter.signIn === "guidance" &&
+          HARNESS_NOTICES[adapter.id] !== null &&
           !options.settings.getSetting<boolean>(noticeKey(adapter.id)),
       });
       adapter.onChange?.(() => void this.refresh(adapter.id));

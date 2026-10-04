@@ -1,11 +1,19 @@
 import { z } from "zod";
 
-export const HARNESS_IDS = ["codex", "claude"] as const;
+export const HARNESS_IDS = ["codex", "claude", "opencode"] as const;
 export const harnessIdSchema = z.enum(HARNESS_IDS);
 export type HarnessId = z.infer<typeof harnessIdSchema>;
 export const HARNESS_LABELS: Record<HarnessId, string> = {
   codex: "Codex",
   claude: "Claude Code",
+  opencode: "OpenCode",
+};
+// A one-time notice the host acknowledges before the harness's first tab; null for none.
+export const HARNESS_NOTICES: Record<HarnessId, string | null> = {
+  codex: null,
+  claude:
+    "Claude Code tabs use the Claude Code login already on this computer. Anthropic does not allow third-party apps to offer claude.ai sign-in, so this app never asks for it.",
+  opencode: null,
 };
 
 const id = z.uuid();
@@ -303,7 +311,7 @@ export interface HarnessState {
   limits: { name: string; usedPercent: number; resetsAt: number | null }[];
   // Whether the harness reports its sub-agents.
   reportsAgents: boolean;
-  // Claude Code shows a one-time notice about Anthropic's third-party login policy.
+  // A harness with a notice (Claude Code's login policy) shows it once until acknowledged.
   noticePending: boolean;
 }
 

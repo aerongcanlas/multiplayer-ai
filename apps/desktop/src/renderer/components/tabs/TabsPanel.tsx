@@ -3,7 +3,6 @@ import { useEffect, useRef, useState } from "react";
 import type { ReadAlongStatus } from "../../../shared/collaboration";
 import type { Room, Suggestion } from "../../../shared/contracts";
 import {
-  HARNESS_IDS,
   HARNESS_LABELS,
   tabBusy,
   type ApprovalDecision,
@@ -481,7 +480,8 @@ export function TabsPanel({
               this room&apos;s repository.
             </p>
             <div className="card-actions">
-              {HARNESS_IDS.map((id) => (
+              {/* Only harnesses this build registered are offered. */}
+              {harnesses.map(({ id, label }) => (
                 <Button
                   key={id}
                   size="xs"
@@ -489,7 +489,7 @@ export function TabsPanel({
                   onClick={() => void open(id)}
                 >
                   <Plus size={12} />
-                  {HARNESS_LABELS[id]}
+                  {label}
                 </Button>
               ))}
             </div>

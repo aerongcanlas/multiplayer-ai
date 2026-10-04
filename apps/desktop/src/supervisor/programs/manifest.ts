@@ -212,4 +212,8 @@ export const HARNESS_MANIFEST: ProgramManifest = {
       },
     },
   },
+  opencode: {
+    version: "1.18.34",
+    platforms: {},
+  },
 };

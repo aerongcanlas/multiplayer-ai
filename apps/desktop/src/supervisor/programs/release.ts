@@ -97,6 +97,20 @@ async function claude(
   };
 }
 
+type Lookup = (
+  version: string,
+  platform: PlatformKey,
+  request: typeof fetch,
+) => Promise<ProgramAsset>;
+
+const LOOKUPS: Record<HarnessId, Lookup> = {
+  codex,
+  claude,
+  opencode: async (version) => {
+    throw new Error(`OpenCode ${version} cannot be installed from this build.`);
+  },
+};
+
 /**
  * Where to download a published version and the digest its publisher lists for it. Unlike the
  * embedded manifest, this trusts the publisher's own listing at the time of the update.
@@ -109,10 +123,6 @@ export async function findRelease(
 ): Promise<ProgramRelease> {
   if (!/^\d+\.\d+\.\d+$/.test(version))
     throw new Error("That is not a released version.");
-  const asset = await (harness === "codex" ? codex : claude)(
-    version,
-    platform,
-    request,
-  );
+  const asset = await LOOKUPS[harness](version, platform, request);
   return { version, asset };
 }

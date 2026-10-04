@@ -9,7 +9,7 @@ import {
   ShieldCheck,
   Star,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { HarnessId, HarnessState, Loadout } from "../../../shared/tabs";
 
 const ACCESS_MODES: {
@@ -32,14 +32,9 @@ const ACCESS_MODES: {
   },
 ];
 
-/** The mark of the harness a model comes from. */
-export function HarnessIcon({ id }: { id: HarnessId }) {
-  return id === "codex" ? (
-    <svg
-      className="loadout-harness-icon"
-      viewBox="0 0 16 16"
-      aria-hidden="true"
-    >
+const HARNESS_MARKS: Record<HarnessId, ReactNode> = {
+  codex: (
+    <>
       <circle cx="8" cy="8" r="8" fill="#6f6bf2" />
       <path
         d="M4.6 6l2.2 2-2.2 2M8.4 10.2h3"
@@ -49,20 +44,42 @@ export function HarnessIcon({ id }: { id: HarnessId }) {
         strokeLinecap="round"
         strokeLinejoin="round"
       />
-    </svg>
-  ) : (
+    </>
+  ),
+  claude: (
+    <path
+      d="M8 1v14M1 8h14M3 3l10 10M13 3L3 13"
+      fill="none"
+      stroke="#d97757"
+      strokeWidth="2"
+      strokeLinecap="round"
+    />
+  ),
+  opencode: (
+    <>
+      <rect x="1" y="1" width="14" height="14" rx="3" fill="#2b2b2b" />
+      <rect
+        x="4.5"
+        y="4.5"
+        width="7"
+        height="7"
+        fill="none"
+        stroke="#f1ecec"
+        strokeWidth="1.6"
+      />
+    </>
+  ),
+};
+
+/** The mark of the harness a model comes from. */
+export function HarnessIcon({ id }: { id: HarnessId }) {
+  return (
     <svg
       className="loadout-harness-icon"
       viewBox="0 0 16 16"
       aria-hidden="true"
     >
-      <path
-        d="M8 1v14M1 8h14M3 3l10 10M13 3L3 13"
-        fill="none"
-        stroke="#d97757"
-        strokeWidth="2"
-        strokeLinecap="round"
-      />
+      {HARNESS_MARKS[id]}
     </svg>
   );
 }

@@ -5,7 +5,11 @@ import {
   RefreshCw,
   RotateCcw,
 } from "lucide-react";
-import type { HarnessState } from "../../shared/tabs";
+import {
+  HARNESS_NOTICES,
+  type HarnessId,
+  type HarnessState,
+} from "../../shared/tabs";
 import { perform } from "../lib/desktop-store";
 import {
   authLabel,
@@ -15,7 +19,14 @@ import {
 } from "../lib/harness-status";
 import { Button } from "./ui/Button";
 
-/** Setup a harness still needs: program problems, sign-in, and the Claude policy notice. */
+// The in-app sign-in each harness offers; guidance harnesses show their setup message instead.
+const SIGN_IN_LABELS: Record<HarnessId, string> = {
+  codex: "Sign in with ChatGPT",
+  claude: "Sign in",
+  opencode: "Sign in",
+};
+
+/** Setup a harness still needs: program problems, sign-in, and a harness's one-time notice. */
 export function HarnessStatus({
   harness,
   disabled,
@@ -70,7 +81,7 @@ export function HarnessStatus({
             }
           >
             <LogIn size={12} />
-            Sign in with ChatGPT
+            {SIGN_IN_LABELS[harness.id]}
           </Button>
         ) : (
           <p className="harness-guidance">{auth.message}</p>
@@ -78,17 +89,13 @@ export function HarnessStatus({
       {auth.state === "unknown" && auth.message && (
         <p className="subtle">{auth.message}</p>
       )}
-      {harness.noticePending && (
+      {harness.noticePending && HARNESS_NOTICES[harness.id] && (
         <div
           className="harness-notice"
           role="note"
           aria-label={`${harness.label} sign-in notice`}
         >
-          <p>
-            {harness.label} tabs use the Claude Code login already on this
-            computer. Anthropic does not allow third-party apps to offer
-            claude.ai sign-in, so this app never asks for it.
-          </p>
+          <p>{HARNESS_NOTICES[harness.id]}</p>
           <Button
             size="xs"
             variant="outline"

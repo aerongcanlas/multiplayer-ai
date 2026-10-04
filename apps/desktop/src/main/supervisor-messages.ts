@@ -29,6 +29,7 @@ export function parseTranscript(value: unknown): TranscriptBatch[] | null {
 const LOGIN_HOSTS: Record<HarnessId, string[]> = {
   codex: ["auth.openai.com", "chatgpt.com"],
   claude: [],
+  opencode: [],
 };
 
 export function loginAllowed(harness: unknown, value: string): boolean {
