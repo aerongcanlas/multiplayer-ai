@@ -1,4 +1,4 @@
-import { ArrowLeft, Bot, CircleStop, Eye, Plus, X } from "lucide-react";
+import { ArrowLeft, Bot, Eye, Plus, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { ReadAlongStatus } from "../../../shared/collaboration";
 import type { Room, Suggestion } from "../../../shared/contracts";
@@ -421,22 +421,6 @@ export function TabsPanel({
           disabled={disabled}
           onPick={(id) => void open(id)}
         />
-        {tab && stoppable && !sharedTabId && (
-          <Button
-            size="xs"
-            variant="outline"
-            className="tab-stop"
-            disabled={stale || stopping}
-            onClick={() =>
-              void perform(() => window.desktop.stopTab(room.id, tab.id), {
-                key: `tab.stop:${tab.id}`,
-              })
-            }
-          >
-            <CircleStop size={13} />
-            Stop
-          </Button>
-        )}
       </header>
       {closingTab && (
         <div
@@ -575,6 +559,16 @@ export function TabsPanel({
                   modelMissing
                 }
                 onSubmit={send}
+                onStop={
+                  stoppable
+                    ? () =>
+                        void perform(
+                          () => window.desktop.stopTab(room.id, tab.id),
+                          { key: `tab.stop:${tab.id}` },
+                        )
+                    : undefined
+                }
+                stopDisabled={stale || stopping}
                 commands={{
                   key: `${room.id}:${tab.loadout.harness}`,
                   load: async () => {

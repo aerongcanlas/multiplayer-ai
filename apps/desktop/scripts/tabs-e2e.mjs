@@ -278,7 +278,7 @@ await run.execute(
       name: "Message",
       exact: true,
     });
-    const agentSend = tabsPanel().locator('button[type="submit"]');
+    const agentSend = tabsPanel().locator(".composer-footer > button");
     assert.equal(
       await agentDraft.isEnabled(),
       true,
@@ -294,7 +294,17 @@ await run.execute(
     await agentDraft.pressSequentially("Keep this second line.");
     const followUp = await agentDraft.inputValue();
     assert.equal(followUp, "Follow up after approval\nKeep this second line.");
-    assert.equal(await agentSend.isDisabled(), true);
+    assert.equal(await agentSend.isEnabled(), true);
+    assert.equal(await agentSend.getAttribute("aria-label"), "Stop");
+    assert.equal(await agentSend.getAttribute("type"), "button");
+    assert.equal(
+      await tabsPanel()
+        .locator("header")
+        .getByRole("button", { name: "Stop", exact: true })
+        .count(),
+      0,
+      "Stop is only available in the composer",
+    );
     const startedTurns = (await codexRequests("turn/start")).length;
     await agentDraft.press("Enter");
     assert.equal(await agentDraft.inputValue(), followUp);
@@ -316,6 +326,8 @@ await run.execute(
       () => agentSend.isEnabled(),
       "Send to enable after turn completion",
     );
+    assert.equal(await agentSend.getAttribute("aria-label"), "Send");
+    assert.equal(await agentSend.getAttribute("type"), "submit");
     assert.equal(await agentDraft.inputValue(), followUp);
     assert.equal((await codexRequests("turn/start")).length, startedTurns);
     await agentDraft.focus();
@@ -591,7 +603,8 @@ await run.execute(
       "A card opens its sub-agent's transcript and back returns",
     );
 
-    // The background sub-agent asks after the turn; the tab stays idle and usable.
+    // The background sub-agent asks after the turn; drafting stays available,
+    // and the composer keeps its Stop action until the sub-agent finishes.
     const backgroundApproval = tabsPanel().getByRole("region", {
       name: "Approval for sub-agent Run the tests",
     });
@@ -600,8 +613,11 @@ await run.execute(
       .getByRole("img", { name: "A sub-agent needs you" })
       .waitFor();
     assert.equal((await tabNamed("Claude Code 1")).status, "idle");
-    await send("Hello while it waits");
-    await settled("Claude Code 1");
+    await agentDraft.fill("Hello while it waits");
+    assert.equal(await agentSend.getAttribute("aria-label"), "Stop");
+    await agentDraft.press("Enter");
+    assert.equal(await agentDraft.inputValue(), "Hello while it waits");
+    assert.equal((await tabNamed("Claude Code 1")).status, "idle");
     await backgroundApproval
       .getByRole("button", { name: "Approve once", exact: true })
       .click();
@@ -616,6 +632,9 @@ await run.execute(
     await settled("Claude Code 1");
     await agentCard("Run the tests").getByText("All tests passed.").waitFor();
     assert.equal((await tabNamed("Claude Code 1")).runningAgents, undefined);
+    assert.equal(await agentDraft.inputValue(), "Hello while it waits");
+    await send("Hello while it waits");
+    await settled("Claude Code 1");
     assert.equal(
       await tabChip("Claude Code 1")
         .getByText(/running/)
@@ -669,7 +688,9 @@ await run.execute(
     }, "both tabs to run");
     assert.equal(await agentDraft.isEnabled(), true);
     await agentDraft.fill("Keep this draft after stopping");
-    assert.equal(await agentSend.isDisabled(), true);
+    assert.equal(await agentSend.isEnabled(), true);
+    assert.equal(await agentSend.getAttribute("aria-label"), "Stop");
+    assert.equal(await agentSend.getAttribute("type"), "button");
     await agentDraft.press("Enter");
     assert.equal(
       await agentDraft.inputValue(),
@@ -679,7 +700,12 @@ await run.execute(
       .getByRole("button", { name: "Stop", exact: true })
       .click();
     await settled("Codex 1");
-    await until(() => agentSend.isEnabled(), "Send to enable after Stop");
+    await until(
+      async () =>
+        (await agentSend.getAttribute("aria-label")) === "Send" &&
+        (await agentSend.isEnabled()),
+      "Send to enable after Stop",
+    );
     assert.equal(
       await agentDraft.inputValue(),
       "Keep this draft after stopping",

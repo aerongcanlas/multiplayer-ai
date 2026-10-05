@@ -35,6 +35,10 @@ export interface ComposerProps {
   onAccepted?(revision: number, result: SubmissionResult): void;
   disabled?: boolean;
   busy?: boolean;
+  /** When provided, the send control stops the active agent instead. */
+  onStop?(): void;
+  stopDisabled?: boolean;
+  stopLabel?: string;
   placeholder?: string;
   label?: string;
   submitLabel?: string;
@@ -65,6 +69,9 @@ export function Composer({
   onAccepted,
   disabled = false,
   busy = false,
+  onStop,
+  stopDisabled = false,
+  stopLabel = "Stop",
   placeholder = "What should the agent do?",
   label = "Message the agent",
   submitLabel = "Send message",
@@ -122,7 +129,7 @@ export function Composer({
 
   async function submit() {
     const submission = submissionFromDraft(draftRef.current, {
-      busy: busy || inFlight.current.has(targetKey),
+      busy: busy || Boolean(onStop) || inFlight.current.has(targetKey),
       disabled,
       composing,
       maxLength,
@@ -279,14 +286,37 @@ export function Composer({
             ) : null)}
         </div>
         <Button
-          aria-label={submitLabel}
-          aria-busy={busy || pendingTargets.has(targetKey)}
-          title={submitLabel}
-          disabled={sendDisabled}
+          aria-label={onStop ? stopLabel : submitLabel}
+          aria-busy={
+            onStop ? stopDisabled : busy || pendingTargets.has(targetKey)
+          }
+          title={onStop ? stopLabel : submitLabel}
+          disabled={onStop ? stopDisabled : sendDisabled}
           size={compact ? "icon-sm" : "icon"}
-          type="submit"
+          type={onStop ? "button" : "submit"}
+          onClick={onStop}
         >
-          <ArrowUp size={compact ? 16 : undefined} />
+          {onStop ? (
+            // A solid rounded square, the same footprint as the arrow it replaces.
+            <svg
+              viewBox="0 0 16 16"
+              width={compact ? 16 : 18}
+              height={compact ? 16 : 18}
+              aria-hidden="true"
+              data-icon="stop"
+            >
+              <rect
+                x="3.5"
+                y="3.5"
+                width="9"
+                height="9"
+                rx="2"
+                fill="currentColor"
+              />
+            </svg>
+          ) : (
+            <ArrowUp size={compact ? 16 : undefined} />
+          )}
         </Button>
       </div>
     </form>

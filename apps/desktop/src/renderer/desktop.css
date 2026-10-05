@@ -1320,9 +1320,6 @@ summary:focus-visible {
 .tab-picker-chevron {
   color: #8c8c97;
 }
-.tab-stop {
-  margin-left: auto;
-}
 .tab-rename input {
   width: 150px;
   padding: 4px 7px;
@@ -1485,13 +1482,23 @@ summary:focus-visible {
 .panel-composer .composer-footer > div {
   flex: 1;
 }
-.panel-composer .composer-footer > button[type="submit"] {
+/* The send control turns into Stop while the tab runs; both share the white circle. */
+.panel-composer .composer-footer > button:last-child {
   flex-shrink: 0;
   width: 30px;
   height: 30px;
   color: #171717;
   background: #fff;
   border-radius: 50%;
+  transition:
+    background-color 120ms ease,
+    opacity 120ms ease;
+}
+.panel-composer .composer-footer > button:last-child:hover:not(:disabled) {
+  background: #e5e5e5;
+}
+.panel-composer .composer-footer > button[type="button"]:last-child:disabled {
+  opacity: 0.6;
 }
 .loadout-bar {
   display: flex;
