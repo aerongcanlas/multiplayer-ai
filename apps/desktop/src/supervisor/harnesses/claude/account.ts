@@ -8,13 +8,13 @@ import {
   rename,
   rm,
 } from "node:fs/promises";
-import { join, relative, resolve, sep } from "node:path";
+import { join, resolve } from "node:path";
 import type { McpServerConfig } from "@anthropic-ai/claude-agent-sdk";
 import { hostHome, type AccountSpec, type HostPaths } from "../accounts";
 import { object } from "../json";
 
 /** The host's own Claude Code folder, where its setup lives. */
-export const hostClaudeDir = (host: HostPaths) =>
+const hostClaudeDir = (host: HostPaths) =>
   host.CLAUDE_CONFIG_DIR || join(hostHome(host), ".claude");
 
 /**
@@ -41,10 +41,17 @@ export const CLAUDE_ACCOUNT: AccountSpec = {
  * The host's `.claude.json`, which holds its user and local MCP servers. It sits in
  * CLAUDE_CONFIG_DIR when the host sets one, and in the home folder otherwise (KTD5).
  */
-export const hostClaudeJson = (host: HostPaths) =>
-  host.CLAUDE_CONFIG_DIR
-    ? join(host.CLAUDE_CONFIG_DIR, ".claude.json")
-    : join(hostHome(host), ".claude.json");
+const hostClaudeJson = (host: HostPaths) =>
+  join(host.CLAUDE_CONFIG_DIR || hostHome(host), ".claude.json");
+
+/** A JSON file's top-level object; a missing or invalid file gives undefined. */
+async function readJson(path: string) {
+  try {
+    return object(JSON.parse(await readFile(path, "utf8")));
+  } catch {
+    return undefined;
+  }
+}
 
 const servers = (value: unknown) =>
   Object.fromEntries(
@@ -66,12 +73,8 @@ export async function hostMcpServers(
   host: HostPaths,
   cwd?: string,
 ): Promise<Record<string, McpServerConfig>> {
-  let config: Record<string, unknown>;
-  try {
-    config = object(JSON.parse(await readFile(hostClaudeJson(host), "utf8")));
-  } catch {
-    return {};
-  }
+  const config = await readJson(hostClaudeJson(host));
+  if (!config) return {};
   const local = cwd
     ? servers(object(object(config.projects)[resolve(cwd)]).mcpServers)
     : {};
@@ -92,16 +95,8 @@ const CREDENTIAL_ENV =
  * names the setting, never its value.
  */
 export async function credentialWarning(host: HostPaths) {
-  let settings: Record<string, unknown>;
-  try {
-    settings = object(
-      JSON.parse(
-        await readFile(join(hostClaudeDir(host), "settings.json"), "utf8"),
-      ),
-    );
-  } catch {
-    return undefined;
-  }
+  const settings = await readJson(join(hostClaudeDir(host), "settings.json"));
+  if (!settings) return undefined;
   const keys = [
     ...CREDENTIAL_SETTINGS.filter((key) => settings[key] !== undefined),
     ...Object.keys(object(settings.env))
@@ -114,21 +109,17 @@ export async function credentialWarning(host: HostPaths) {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-const inside = (root: string, path: string) => {
-  const rel = relative(root, path);
-  return Boolean(rel) && !rel.startsWith("..") && !rel.includes(`..${sep}`);
-};
-
+// The project folder holding a session's transcript. Symlinked folders are never scanned.
 async function findSession(projects: string, sessionId: string) {
-  const names = await readdir(projects).catch(() => [] as string[]);
-  for (const name of names) {
-    const folder = join(projects, name);
-    const info = await lstat(folder).catch(() => null);
-    if (!info?.isDirectory()) continue;
-    const file = await lstat(join(folder, `${sessionId}.jsonl`)).catch(
-      () => null,
-    );
-    if (file?.isFile()) return name;
+  const entries = await readdir(projects, { withFileTypes: true }).catch(
+    () => [],
+  );
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const file = await lstat(
+      join(projects, entry.name, `${sessionId}.jsonl`),
+    ).catch(() => null);
+    if (file?.isFile()) return entry.name;
   }
   return undefined;
 }
@@ -146,12 +137,12 @@ export async function migrateSession(
   const target = resolve(home, "projects");
   if (await findSession(target, sessionId)) return false;
   const source = resolve(hostClaudeDir(host), "projects");
-  if (resolve(source) === target) return false;
+  if (source === target) return false;
+  // `sessionId` is a UUID and `name` a directory entry, so neither can leave its folder.
   const name = await findSession(source, sessionId);
   if (!name) return false;
   const from = join(source, name);
   const to = join(target, name);
-  if (!inside(source, from) || !inside(target, to)) return false;
   await mkdir(to, { recursive: true, mode: 0o700 });
   // Symlinked entries in the host session folder are never followed.
   const filter = async (path: string) =>
@@ -161,13 +152,11 @@ export async function migrateSession(
   if (folderInfo?.isDirectory()) {
     const staging = join(to, `.${sessionId}.${randomUUID()}.tmp`);
     await cp(folder, staging, { recursive: true, filter });
+    // A folder already there from an earlier, unfinished copy is kept.
     await rename(staging, join(to, sessionId)).catch(async (error: unknown) => {
       await rm(staging, { recursive: true, force: true });
-      if (
-        (error as NodeJS.ErrnoException).code !== "EEXIST" &&
-        (error as NodeJS.ErrnoException).code !== "ENOTEMPTY"
-      )
-        throw error;
+      const { code } = error as NodeJS.ErrnoException;
+      if (code !== "EEXIST" && code !== "ENOTEMPTY") throw error;
     });
   }
   const file = `${sessionId}.jsonl`;

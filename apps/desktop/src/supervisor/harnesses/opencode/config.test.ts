@@ -114,6 +114,49 @@ test("MCP tools of host servers ask, and a host deny on one tool stays", () => {
   assert.equal(decide(agent, "my_srv_drop", "*"), "deny");
 });
 
+/** A host agent block as OpenCode merges it: host keys keep their position, injected values win. */
+function mergedAgent(rules: Rules, mcp: Rules = {}) {
+  const built = build({ mcp, agent: { build: { permission: rules } } });
+  return { ...rules, ...agentRules(built, "build") };
+}
+
+test("a host wildcard after an acting key never loosens reads", () => {
+  const denied = mergedAgent({ bash: "ask", "*": "deny" });
+  assert.equal(decide(denied, "read", "a.ts"), "deny");
+  assert.equal(
+    decide(mergedAgent({ bash: "ask", "*": "ask" }), "read", "a.ts"),
+    "ask",
+  );
+  const scoped = mergedAgent({
+    bash: "ask",
+    "*": { "*": "allow", "secret/*": "deny" },
+  });
+  assert.equal(decide(scoped, "read", "secret/a"), "deny");
+  assert.equal(decide(scoped, "read", "src/a.ts"), "allow");
+  assert.equal(decide(scoped, "edit", "src/a.ts"), "ask");
+  // A plain allow is rewritten to ask, so reads get OpenCode's own rules back.
+  const open = mergedAgent({ bash: "ask", "*": "allow" });
+  assert.equal(decide(open, "read", "src/a.ts"), "allow");
+  assert.equal(decide(open, "read", ".env"), "ask");
+  assert.equal(decide(open, "edit", "src/a.ts"), "ask");
+});
+
+test("an exact MCP tool allow under a gated server wildcard still asks", () => {
+  const agent = mergedAgent(
+    { "gh_*": "ask", gh_create: "allow" },
+    { gh: { type: "local", command: ["x"] } },
+  );
+  assert.equal(decide(agent, "gh_create", "*"), "ask");
+});
+
+test("a masked host value on a plain key is kept as a deny", () => {
+  const built = build({
+    mcp: { apikey: { type: "local", command: ["x"] } },
+    permission: { apikey_drop: "***" },
+  });
+  assert.equal(decide(agentRules(built, "build"), "apikey_drop", "*"), "deny");
+});
+
 test("rules masked by `debug config` are kept as denies", () => {
   const built = build({ permission: { edit: { "secret/*": "***" } } });
   assert.equal(decide(built.permission, "edit", "secret/a"), "deny");

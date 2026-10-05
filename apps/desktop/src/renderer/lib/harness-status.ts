@@ -53,7 +53,7 @@ export function authLabel({ id, auth }: HarnessState) {
   return "Sign-in not checked yet";
 }
 
-export type AccountAction = "sign_in" | "cancel" | "sign_out" | "command";
+type AccountAction = "sign_in" | "cancel" | "sign_out" | "command";
 
 /**
  * The sign-in controls a harness offers now (R6, R7): Cancel while signing in, Sign in when an

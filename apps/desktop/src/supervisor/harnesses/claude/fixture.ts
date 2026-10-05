@@ -124,7 +124,7 @@ export function claudeFixture(
         reject(new Error("Sign-in cancelled."));
       };
     });
-    return { done, cancel: () => cancel() };
+    return { done, cancel };
   };
   const logout = async (context: LaunchContext) => {
     log("logout", context.env);

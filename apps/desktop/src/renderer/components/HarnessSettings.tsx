@@ -9,12 +9,7 @@ import {
   RotateCcw,
   X,
 } from "lucide-react";
-import {
-  HARNESS_NOTICES,
-  tabBusy,
-  type HarnessId,
-  type HarnessState,
-} from "../../shared/tabs";
+import { HARNESS_NOTICES, tabBusy, type HarnessState } from "../../shared/tabs";
 import { perform, useDesktop } from "../lib/desktop-store";
 import {
   accountActions,
@@ -25,13 +20,6 @@ import {
   updateAvailable,
 } from "../lib/harness-status";
 import { Button } from "./ui/Button";
-
-// The in-app sign-in each harness offers; other harnesses show their setup message instead.
-const SIGN_IN_LABELS: Record<HarnessId, string> = {
-  codex: "Sign in with ChatGPT",
-  claude: "Sign in",
-  opencode: "Sign in",
-};
 
 /** Setup a harness still needs: program problems, sign-in, and a harness's one-time notice. */
 export function HarnessStatus({
@@ -46,6 +34,7 @@ export function HarnessStatus({
   const { program, auth } = harness;
   const failed = programFailed(program);
   const actions = accountActions(harness);
+  const notice = harness.noticePending && HARNESS_NOTICES[harness.id];
   return (
     <div
       className={`harness-status ${compact ? "harness-status-compact" : ""}`}
@@ -91,7 +80,7 @@ export function HarnessStatus({
           }
         >
           <LogIn size={12} />
-          {SIGN_IN_LABELS[harness.id]}
+          {harness.id === "codex" ? "Sign in with ChatGPT" : "Sign in"}
         </Button>
       )}
       {actions.includes("cancel") && (
@@ -120,13 +109,13 @@ export function HarnessStatus({
       {auth.state === "unknown" && auth.message && (
         <p className="subtle">{auth.message}</p>
       )}
-      {harness.noticePending && HARNESS_NOTICES[harness.id] && (
+      {notice && (
         <div
           className="harness-notice"
           role="note"
           aria-label={`${harness.label} sign-in notice`}
         >
-          <p>{HARNESS_NOTICES[harness.id]}</p>
+          <p>{notice}</p>
           <Button
             size="xs"
             variant="outline"
@@ -275,12 +264,6 @@ function UpdateNotice({
 }) {
   const update = updateAvailable(harness);
   const later = !harness.program.customPath && harness.laterVersion;
-  if (
-    !update &&
-    !later &&
-    (!harness.bundledVersion || harness.program.customPath)
-  )
-    return null;
   return (
     <>
       {later && (
@@ -386,20 +369,15 @@ export function HarnessConnection({
                   {server.note}
                 </span>
               )}
-              {server.models.flatMap((model) =>
-                model.warning || model.unverified
-                  ? [
-                      <span
-                        className="harness-line harness-warning"
-                        key={model.id}
-                      >
-                        {model.name}:{" "}
-                        {model.warning ??
-                          "LM Studio does not say whether it supports tools."}
-                      </span>,
-                    ]
-                  : [],
-              )}
+              {server.models
+                .filter((model) => model.warning || model.unverified)
+                .map((model) => (
+                  <span className="harness-line harness-warning" key={model.id}>
+                    {model.name}:{" "}
+                    {model.warning ??
+                      "LM Studio does not say whether it supports tools."}
+                  </span>
+                ))}
             </li>
           ))}
         </ul>

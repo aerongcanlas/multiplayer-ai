@@ -40,7 +40,7 @@ const values = (options: SessionConfigOption[], id: string) => {
 };
 
 /** Maps a failed prompt onto a harness failure with a fixed message. */
-export function promptError(error: unknown): HarnessError {
+function promptError(error: unknown): HarnessError {
   if (error instanceof HarnessError) return error;
   if (error instanceof RequestError && error.code === -32000) {
     const provider = string(object(error.data).providerId);
@@ -62,7 +62,6 @@ interface Pending {
 }
 
 export class OpenCodeSession implements HarnessSession {
-  readonly sessionId: string;
   private queue?: EventQueue<HarnessEvent>;
   private turn?: { events: TurnEvents; loadout: Loadout };
   private pending = new Map<string, Pending>();
@@ -75,10 +74,9 @@ export class OpenCodeSession implements HarnessSession {
     private adapter: OpenCodeAdapter,
     private request: OpenRequest,
     public process: OpenCodeProcess,
-    sessionId: string,
+    readonly sessionId: string,
     private options: SessionConfigOption[],
   ) {
-    this.sessionId = sessionId;
     this.announced = Boolean(request.sessionId);
     process.sessions.set(sessionId, this);
   }
@@ -185,9 +183,7 @@ export class OpenCodeSession implements HarnessSession {
       this.queue = undefined;
       this.turn = undefined;
       this.prompting = undefined;
-      for (const pending of this.pending.values())
-        pending.resolve({ outcome: { outcome: "cancelled" } });
-      this.pending.clear();
+      this.cancelPending();
       process.release();
     }
   }
@@ -221,22 +217,20 @@ export class OpenCodeSession implements HarnessSession {
     }
     const request = randomUUID();
     const input = object(toolCall.rawInput);
-    const command = string(input.command);
+    const detail =
+      toolDetail(toolCall.content) ??
+      (Object.keys(input).length
+        ? clip(JSON.stringify(input, null, 2), 20_000)
+        : undefined);
     this.queue!.push({
       type: "approval",
       request,
       summary: outside
         ? `Access outside this checkout: ${title}`
         : toolCall.kind === "execute"
-          ? `Run command: ${clip(command || title)}`
-          : toolSummary(title, toolCall.kind ?? undefined),
-      ...((toolDetail(toolCall.content) ?? Object.keys(input).length)
-        ? {
-            detail:
-              toolDetail(toolCall.content) ??
-              clip(JSON.stringify(input, null, 2), 20_000),
-          }
-        : {}),
+          ? `Run command: ${clip(string(input.command) || title)}`
+          : toolSummary(title, toolCall.kind),
+      ...(detail ? { detail } : {}),
     });
     return new Promise((resolve) =>
       this.pending.set(request, { options, resolve }),
@@ -259,11 +253,15 @@ export class OpenCodeSession implements HarnessSession {
     throw new Error("OpenCode does not ask questions in this app.");
   }
 
-  async stop() {
-    this.stopRequested = true;
+  private cancelPending() {
     for (const pending of this.pending.values())
       pending.resolve({ outcome: { outcome: "cancelled" } });
     this.pending.clear();
+  }
+
+  async stop() {
+    this.stopRequested = true;
+    this.cancelPending();
     if (!this.process.alive) return;
     await this.process
       .call(
@@ -291,7 +289,7 @@ export class OpenCodeSession implements HarnessSession {
   }
 
   crashed(message: string) {
-    this.pending.clear();
+    this.cancelPending();
     if (this.active) return this.queue!.fail(this.crash(message));
     if (!this.closed)
       this.request.listener?.({
@@ -305,6 +303,7 @@ export class OpenCodeSession implements HarnessSession {
     this.closed = true;
     if (this.active) void this.stop().catch(() => {});
     this.process.sessions.delete(this.sessionId);
-    this.adapter.left(this.process);
+    // A draining process closes once nothing runs there; an idle one times out.
+    this.process.touch();
   }
 }

@@ -35,7 +35,7 @@ const PROVIDER_NAMES: Record<string, string> = {
   ollama: "Ollama",
   lmstudio: "LM Studio",
 };
-export const NO_MODELS =
+const NO_MODELS =
   "No models available. Start Ollama or LM Studio with a tool-capable model and at least 32k of context (OLLAMA_CONTEXT_LENGTH for Ollama), run `ollama launch opencode`, or sign in a hosted provider with the command shown in Settings, then refresh.";
 
 /** Parses `opencode models --verbose`: an id line, then that model's JSON. */
@@ -56,7 +56,7 @@ export function parseModels(output: string): HarnessModel[] {
             JSON.parse(lines.slice(index + 1, end + 1).join("\n")),
           );
         } catch {
-          details = {};
+          /* Unreadable details leave the model with its id only. */
         }
         index = end;
       }
@@ -95,7 +95,8 @@ export class OpenCodeAdapter implements HarnessAdapter, ProcessOwner {
   readonly idleMs: number;
   readonly stopTimeoutMs: number;
   closed = false;
-  private processes = new Map<string, OpenCodeProcess>();
+  // Every running process, including draining ones that take no new turns.
+  private processes = new Set<OpenCodeProcess>();
   private hostConfigs: HostConfigs;
   private discovery?: Promise<Discovery>;
   private commandsByFolder = new Map<string, SlashCommand[]>();
@@ -112,8 +113,11 @@ export class OpenCodeAdapter implements HarnessAdapter, ProcessOwner {
 
   private discovered(env: Record<string, string>, fresh = false) {
     if (fresh || !this.discovery) {
-      this.discovery = (this.options.discover ?? discover)(env);
-      this.discovery.catch(() => (this.discovery = undefined));
+      const discovery = (this.options.discover ?? discover)(env);
+      this.discovery = discovery;
+      discovery.catch(() => {
+        if (this.discovery === discovery) this.discovery = undefined;
+      });
     }
     return this.discovery;
   }
@@ -132,7 +136,12 @@ export class OpenCodeAdapter implements HarnessAdapter, ProcessOwner {
       hostedLogin: login,
       env: context.env,
     });
-    return { ...built, login, found };
+    return {
+      ...built,
+      key: `${context.executable}\n${built.hash}`,
+      login,
+      found,
+    };
   }
 
   /** The process for an executable and config, started on first use. The caller releases it. */
@@ -142,24 +151,25 @@ export class OpenCodeAdapter implements HarnessAdapter, ProcessOwner {
   ) {
     if (this.closed)
       throw new HarnessError("failed", "The app is shutting down.");
-    const key = `${context.executable}\n${config.hash}`;
-    let process = this.processes.get(key);
-    if (!process?.alive || process.draining) {
+    let process = [...this.processes].find(
+      (item) => item.key === config.key && item.alive && !item.draining,
+    );
+    if (!process) {
       process = new OpenCodeProcess(
-        key,
+        config.key,
         context,
         config.env,
         this.launcher,
         this,
       );
-      this.processes.set(key, process);
+      this.processes.add(process);
     }
     process.hold();
     try {
       await process.ready;
     } catch (error) {
+      // A process that fails to start has already closed itself.
       process.release();
-      process.close();
       throw new HarnessError(
         "unavailable",
         `OpenCode could not start. ${error instanceof Error ? error.message : ""}`.trim(),
@@ -170,14 +180,11 @@ export class OpenCodeAdapter implements HarnessAdapter, ProcessOwner {
 
   // ProcessOwner: events and permission requests are routed by OpenCode's session ID.
   update(process: OpenCodeProcess, params: SessionNotification) {
-    (
-      process.sessions.get(params.sessionId) as OpenCodeSession | undefined
-    )?.update(params);
+    process.sessions.get(params.sessionId)?.update(params);
   }
 
   permission(process: OpenCodeProcess, params: RequestPermissionRequest) {
-    const session = process.sessions.get(params.sessionId) as
-      OpenCodeSession | undefined;
+    const session = process.sessions.get(params.sessionId);
     // A request no open tab owns is never allowed.
     if (!session) return Promise.resolve(choose(params.options, "reject_once"));
     return session.permission(params);
@@ -185,20 +192,11 @@ export class OpenCodeAdapter implements HarnessAdapter, ProcessOwner {
 
   exited(process: OpenCodeProcess, message: string) {
     this.forget(process);
-    for (const session of process.sessions.values())
-      (session as OpenCodeSession).crashed(message);
+    for (const session of process.sessions.values()) session.crashed(message);
   }
 
   forget(process: OpenCodeProcess) {
-    if (this.processes.get(process.key) === process)
-      this.processes.delete(process.key);
-  }
-
-  /** A session left its process; a process that no tab still needs drains. */
-  left(process: OpenCodeProcess) {
-    if (!process.sessions.size && this.processes.get(process.key) !== process)
-      process.retire();
-    else process.touch();
+    this.processes.delete(process);
   }
 
   /**
@@ -207,9 +205,9 @@ export class OpenCodeAdapter implements HarnessAdapter, ProcessOwner {
    */
   async place(session: OpenCodeSession, request: OpenRequest) {
     const config = await this.config(request, request.cwd);
-    const key = `${request.executable}\n${config.hash}`;
     const current = session.process;
-    if (current.alive && !current.draining && current.key === key) return;
+    if (current.alive && !current.draining && current.key === config.key)
+      return;
     const process = await this.process(request, config);
     try {
       await this.resume(process, session.sessionId, request.cwd);
@@ -217,7 +215,7 @@ export class OpenCodeAdapter implements HarnessAdapter, ProcessOwner {
       process.sessions.set(session.sessionId, session);
       session.process = process;
       // Other tabs move at their next turn; running turns finish where they are.
-      if (current.alive) current.retire();
+      current.retire();
     } finally {
       process.release();
     }
@@ -319,33 +317,30 @@ export class OpenCodeAdapter implements HarnessAdapter, ProcessOwner {
     const config = await this.config(request, request.cwd);
     const process = await this.process(request, config);
     try {
-      let sessionId = request.sessionId;
-      let options;
-      if (sessionId)
-        ({ configOptions: options } = await this.resume(
-          process,
-          sessionId,
-          request.cwd,
-        ));
-      else
-        ({ sessionId, configOptions: options } = await process
-          .call(
-            (connection) =>
-              connection.newSession({ cwd: request.cwd, mcpServers: [] }),
-            60_000,
-          )
-          .catch((error: unknown) => {
-            throw new HarnessError(
-              "failed",
-              `OpenCode could not open a session. ${error instanceof Error ? error.message : ""}`.trim(),
-            );
-          }));
+      const { sessionId } = request;
+      const opened = sessionId
+        ? {
+            ...(await this.resume(process, sessionId, request.cwd)),
+            sessionId,
+          }
+        : await process
+            .call(
+              (connection) =>
+                connection.newSession({ cwd: request.cwd, mcpServers: [] }),
+              60_000,
+            )
+            .catch((error: unknown) => {
+              throw new HarnessError(
+                "failed",
+                `OpenCode could not open a session. ${error instanceof Error ? error.message : ""}`.trim(),
+              );
+            });
       return new OpenCodeSession(
         this,
         request,
         process,
-        sessionId,
-        options ?? [],
+        opened.sessionId,
+        opened.configOptions ?? [],
       );
     } finally {
       process.release();
@@ -374,7 +369,7 @@ export class OpenCodeAdapter implements HarnessAdapter, ProcessOwner {
 
   close() {
     this.closed = true;
-    for (const process of [...this.processes.values()]) process.close();
+    for (const process of [...this.processes]) process.close();
     this.processes.clear();
   }
 }

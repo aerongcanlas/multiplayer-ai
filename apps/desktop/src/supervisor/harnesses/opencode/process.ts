@@ -12,9 +12,10 @@ import {
 } from "@agentclientprotocol/sdk";
 import type { LaunchContext } from "../contract";
 import { launchEnvironment } from "../environment";
+import type { OpenCodeSession } from "./session";
 
 // The embedded HTTP server stays on loopback; port 0 lets OpenCode pick a free one.
-export const ARGS = ["acp", "--hostname", "127.0.0.1", "--port", "0"];
+const ARGS = ["acp", "--hostname", "127.0.0.1", "--port", "0"];
 
 /** Test fixtures replace how the executable is launched. */
 export type Launcher = (
@@ -43,7 +44,7 @@ export interface ProcessOwner {
 }
 
 /** The variables every OpenCode launch carries on top of the host environment. */
-export function lockedEnvironment(
+function lockedEnvironment(
   env: Record<string, string>,
   config: Record<string, string>,
 ) {
@@ -100,7 +101,7 @@ export class OpenCodeProcess {
   readonly connection: ClientSideConnection;
   readonly ready: Promise<void>;
   // Every session opened on this process, keyed by OpenCode's session ID.
-  readonly sessions = new Map<string, unknown>();
+  readonly sessions = new Map<string, OpenCodeSession>();
   version: string | null = null;
   // Holds for work in progress (inspect, open, a running turn) keep the process open.
   busy = 0;
@@ -246,7 +247,6 @@ export class OpenCodeProcess {
   /** Stops taking new turns; the process closes when its running work ends. */
   retire() {
     this.draining = true;
-    this.owner.forget(this);
     this.touch();
   }
 

@@ -18,7 +18,7 @@ const VERBS: Partial<Record<ToolKind, string>> = {
 const FILE_KINDS = new Set<ToolKind>(["edit", "read", "delete", "move"]);
 
 /** A tool's shareable one-line summary from its title and kind. */
-export function toolSummary(title: string, kind: ToolKind | undefined) {
+export function toolSummary(title: string, kind?: ToolKind | null) {
   const line = clip(title.replace(/\s+/g, " ").trim() || "a tool", 200);
   const verb = kind && VERBS[kind];
   return verb && !line.startsWith(verb) ? `${verb} ${line}` : line;

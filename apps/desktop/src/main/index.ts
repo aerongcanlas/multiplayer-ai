@@ -215,13 +215,11 @@ else {
                 codexFixture: process.env.MP_TEST_CODEX_FIXTURE,
                 claudeFixture: process.env.MP_TEST_CLAUDE_FIXTURE,
                 opencodeFixture: process.env.MP_TEST_OPENCODE_FIXTURE,
-                ...(process.env.MP_TEST_OPENCODE_DISCOVERY
-                  ? {
-                      opencodeDiscovery: JSON.parse(
-                        process.env.MP_TEST_OPENCODE_DISCOVERY,
-                      ) as SupervisorTesting["opencodeDiscovery"],
-                    }
-                  : {}),
+                opencodeDiscovery: process.env.MP_TEST_OPENCODE_DISCOVERY
+                  ? (JSON.parse(
+                      process.env.MP_TEST_OPENCODE_DISCOVERY,
+                    ) as SupervisorTesting["opencodeDiscovery"])
+                  : undefined,
                 harnessManifest: process.env.MP_TEST_HARNESS_MANIFEST,
               },
             }

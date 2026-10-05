@@ -181,6 +181,21 @@ test("a pending sign-in without a URL opens nothing", async () => {
   }
 });
 
+test("a fresh refresh reads again after a check that started before a sign-out", async () => {
+  const { fake, harnesses } = await signingIn();
+  try {
+    fake.signedIn = true;
+    fake.inspectDelayMs = 50;
+    void harnesses.refresh("codex");
+    await settle();
+    fake.signedIn = false;
+    await harnesses.refresh("codex", true);
+    assert.equal(harnesses.state("codex").auth.state, "signed_out");
+  } finally {
+    harnesses.close();
+  }
+});
+
 test("cancel and timeout end the sign-in and return to signed out (AE4)", async () => {
   const cancelled = await signingIn();
   try {

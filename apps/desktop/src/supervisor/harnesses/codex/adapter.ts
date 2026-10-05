@@ -127,6 +127,8 @@ export class CodexAdapter implements HarnessAdapter {
 
   exited(process: CodexProcess, message: string) {
     this.forget(process);
+    // A sign-in on a process that died can no longer complete.
+    if (this.login?.process === process) this.login.settle(new Error(message));
     for (const session of process.sessions) session.crashed(message);
   }
 
@@ -135,13 +137,11 @@ export class CodexAdapter implements HarnessAdapter {
       message.method === "account/login/completed" ||
       message.method === "account/updated"
     ) {
-      const login = this.login;
       if (
         message.method === "account/login/completed" &&
-        login &&
-        string(message.params.loginId) === login.loginId
+        string(message.params.loginId) === this.login?.loginId
       )
-        login.settle(
+        this.login.settle(
           message.params.success === true
             ? undefined
             : new Error(

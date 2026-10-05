@@ -20,7 +20,7 @@ import { dirname, join, resolve, sep } from "node:path";
 import type { HarnessId } from "../../shared/tabs";
 
 /** The variable each harness reads its home folder from (KTD1). */
-export type HomeVariable = "CLAUDE_CONFIG_DIR" | "CODEX_HOME";
+type HomeVariable = "CLAUDE_CONFIG_DIR" | "CODEX_HOME";
 
 /** Where the host keeps its own setup: the home folder and each harness's folder variable. */
 export type HostPaths = Partial<
@@ -106,15 +106,6 @@ async function info(path: string) {
   }
 }
 
-/** The host's environment with the harness home path the app prepared laid over it. */
-export function withHome(
-  env: Record<string, string>,
-  variable: HomeVariable,
-  home: string,
-) {
-  return { ...env, [variable]: home };
-}
-
 /**
  * Throws unless the launch environment names the prepared home, so no harness program runs
  * against the host's own folder. With `accounts`, the home must also be that root's.
@@ -158,34 +149,24 @@ export class Accounts {
   }
 
   /** Creates the home and links host setup into it. Throws when the home cannot be made. */
-  prepare(
-    harness: HarnessId,
-    spec: AccountSpec,
-    host: HostPaths,
-  ): Promise<string> {
-    let home: string;
-    try {
-      home = this.home(harness);
-    } catch (error) {
-      return Promise.reject(error as Error);
-    }
-    const previous = this.chains.get(home) ?? Promise.resolve();
-    const run = previous
+  async prepare(harness: HarnessId, spec: AccountSpec, host: HostPaths) {
+    const home = this.home(harness);
+    const run = (this.chains.get(home) ?? Promise.resolve())
       .catch(() => {})
       .then(() => this.reconcile(home, spec, host));
     this.chains.set(home, run);
-    return run.then(
-      () => home,
-      (error: unknown) => {
-        throw new AccountError(
-          `The app could not prepare its ${harness} folder: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      },
-    );
+    try {
+      await run;
+    } catch (error) {
+      throw new AccountError(
+        `The app could not prepare its ${harness} folder: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    return home;
   }
 
   private async reconcile(home: string, spec: AccountSpec, host: HostPaths) {
-    await mkdir(this.root!, { recursive: true, mode: 0o700 });
+    // Recursive mkdir gives the accounts root the same private mode when it creates it.
     await mkdir(home, { recursive: true, mode: 0o700 });
     if (this.platform !== "win32") await chmod(home, 0o700);
     if (!spec.source) return;
@@ -217,27 +198,21 @@ export class Accounts {
   /** Every host entry the spec carries over that exists on the host right now. */
   private async desired(source: string, spec: AccountSpec) {
     const result = new Map<string, Entry>();
-    const add = async (name: string, copy: boolean) => {
+    // Windows links folders as junctions and copies files; symlinks need extra rights there.
+    const win32 = this.platform === "win32";
+    const link: EntryKind = win32 ? "junction" : "symlink";
+    const named = [
+      ...(spec.links ?? []).map((name) => ({ name, copy: false })),
+      ...(spec.copies ?? []).map((name) => ({ name, copy: true })),
+    ];
+    for (const { name, copy } of named) {
+      if (NEVER.has(name) || name.includes("/") || name.includes(sep)) continue;
       const target = join(source, name);
       const found = await stat(target).catch(() => null);
-      if (!found) return;
-      const directory = found.isDirectory();
-      // Windows links folders as junctions and copies files; symlinks need extra rights there.
-      const kind: EntryKind =
-        copy || (this.platform === "win32" && !directory)
-          ? "copy"
-          : this.platform === "win32"
-            ? "junction"
-            : "symlink";
-      if (kind === "copy" && directory) return;
+      if (!found || (copy && found.isDirectory())) continue;
+      const kind = copy || (win32 && !found.isDirectory()) ? "copy" : link;
       result.set(name, { kind, target });
-    };
-    for (const name of spec.links ?? [])
-      if (!NEVER.has(name) && !name.includes("/") && !name.includes(sep))
-        await add(name, false);
-    for (const name of spec.copies ?? [])
-      if (!NEVER.has(name) && !name.includes("/") && !name.includes(sep))
-        await add(name, true);
+    }
     if (spec.projectMemory) {
       const projects = join(source, "projects");
       const names = await readdir(projects).catch(() => [] as string[]);
@@ -246,10 +221,7 @@ export class Accounts {
         const memory = join(projects, name, "memory");
         const found = await stat(memory).catch(() => null);
         if (found?.isDirectory())
-          result.set(`projects/${name}/memory`, {
-            kind: this.platform === "win32" ? "junction" : "symlink",
-            target: memory,
-          });
+          result.set(`projects/${name}/memory`, { kind: link, target: memory });
       }
     }
     return result;
@@ -271,19 +243,14 @@ export class Accounts {
     // Real files the harness made itself stay untouched.
     if (!recorded) return undefined;
     if (want.kind === "copy") {
-      if (current.isSymbolicLink() || !current.isFile()) {
+      // Something other than the copy, or a copy the harness changed: keep it beside the refresh.
+      if (!current.isFile() || (await hashOf(path)) !== recorded.hash) {
         await this.backup(path);
         return this.create(path, want);
       }
-      const hash = await hashOf(path);
-      if (hash !== recorded.hash) {
-        // The harness changed its copy; keep that edit beside the refreshed file.
-        await this.backup(path);
-        return this.create(path, want);
-      }
-      if ((await hashOf(want.target)) !== recorded.hash)
-        return this.create(path, want);
-      return recorded;
+      return (await hashOf(want.target)) === recorded.hash
+        ? recorded
+        : this.create(path, want);
     }
     if (current.isSymbolicLink()) {
       const target = await readlink(path).catch(() => "");

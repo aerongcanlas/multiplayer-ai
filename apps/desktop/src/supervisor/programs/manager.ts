@@ -13,7 +13,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { Readable, Transform, type Writable } from "node:stream";
+import { PassThrough, Readable, Transform, type Writable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { ReadableStream as WebReadableStream } from "node:stream/web";
 import { createGunzip, createZstdDecompress } from "node:zlib";
@@ -303,14 +303,14 @@ export class ProgramManager extends EventEmitter {
     const partial = `${target}.partial`;
     const unpacked = `${target}.unpacked`;
     try {
-      await this.download(harness, asset, partial);
       const binary = pinnedDigest(asset);
-      const decompress = decompressor(asset);
       if (!binary)
         throw new ProgramError(
           "checksum_mismatch",
           "The harness program has no pinned checksum.",
         );
+      await this.download(harness, asset, partial);
+      const decompress = decompressor(asset);
       if (decompress) {
         const digest = createHash("sha256");
         let size = 0;
@@ -370,14 +370,11 @@ export class ProgramManager extends EventEmitter {
       await this.download(harness, asset, partial);
       await mkdir(staging, { recursive: true });
       try {
-        const decompress = decompressor(asset);
-        if (decompress)
-          await pipeline(
-            createReadStream(partial),
-            decompress,
-            extractTar(staging),
-          );
-        else await pipeline(createReadStream(partial), extractTar(staging));
+        await pipeline(
+          createReadStream(partial),
+          decompressor(asset) ?? new PassThrough(),
+          extractTar(staging),
+        );
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === "ENOSPC") throw error;
         throw new ProgramError(
@@ -456,9 +453,8 @@ export class ProgramManager extends EventEmitter {
         `The harness download failed (HTTP ${response.status}). Retry in a moment.`,
       );
     const expected = asset.download;
-    const digest = createHash("sha256");
-    // An npm package is checked against its sha512 integrity as it streams.
-    const integrity = expected.sha256 ? null : createHash("sha512");
+    // An npm package is checked against its sha512 integrity instead.
+    const digest = createHash(expected.sha256 ? "sha256" : "sha512");
     let received = 0;
     const length = Number(response.headers.get("content-length"));
     const total = expected.size ?? (length > 0 ? length : 0);
@@ -486,13 +482,12 @@ export class ProgramManager extends EventEmitter {
           } satisfies ProgramProgress);
         }
       }),
-      ...(integrity ? [hashing(integrity, () => {})] : []),
       this.writer(partial),
     );
     const matches = expected.sha256
       ? digest.digest("hex") === expected.sha256 && received === expected.size
       : "integrity" in expected &&
-        `sha512-${integrity!.digest("base64")}` === expected.integrity &&
+        `sha512-${digest.digest("base64")}` === expected.integrity &&
         (expected.size === undefined || received === expected.size);
     if (!matches)
       throw new ProgramError(

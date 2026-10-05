@@ -2,6 +2,7 @@ import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 
 const exec = promisify(execFile);
+const RUN = { windowsHide: true, maxBuffer: 256 * 1024 };
 
 export interface AuthStatus {
   loggedIn: boolean;
@@ -17,12 +18,7 @@ export async function readAuthStatus(
   executable: string,
   env: Record<string, string>,
 ): Promise<AuthStatus> {
-  const options = {
-    env,
-    timeout: 15_000,
-    windowsHide: true,
-    maxBuffer: 256 * 1024,
-  };
+  const options = { ...RUN, env, timeout: 15_000 };
   const [status, version] = await Promise.all([
     exec(executable, ["auth", "status", "--json"], options).catch(
       // Signed-out installs can exit non-zero while still printing the JSON status.
@@ -64,7 +60,6 @@ export function startLogin(
 ): LoginProcess {
   const child = spawn(executable, ["auth", "login", "--claudeai"], {
     env,
-    stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
   });
   let tail = "";
@@ -100,10 +95,5 @@ export function startLogin(
 
 /** Runs Claude Code's own `auth logout` against the app's folder. */
 export async function logout(executable: string, env: Record<string, string>) {
-  await exec(executable, ["auth", "logout"], {
-    env,
-    timeout: 30_000,
-    windowsHide: true,
-    maxBuffer: 256 * 1024,
-  });
+  await exec(executable, ["auth", "logout"], { ...RUN, env, timeout: 30_000 });
 }

@@ -386,9 +386,11 @@ export class FakeHarness implements HarnessAdapter {
 
   async inspect(context: LaunchContext): Promise<Inspection> {
     this.calls.push(`inspect:${context.executable}`);
+    // The sign-in state is read when the check starts, like a real harness's status call.
+    const signedIn = this.signedIn;
     if (this.inspectDelayMs)
       await new Promise((resolve) => setTimeout(resolve, this.inspectDelayMs));
-    return this.signedIn
+    return signedIn
       ? {
           auth: {
             state: "signed_in",

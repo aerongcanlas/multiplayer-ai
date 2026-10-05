@@ -17,7 +17,6 @@ import { launchEnvironment } from "./environment";
 import {
   assertHome,
   hostPaths,
-  withHome,
   type Accounts,
   type HostPaths,
 } from "./accounts";
@@ -64,6 +63,11 @@ export function signInReason(error: unknown) {
   return clean || "Sign-in did not finish.";
 }
 
+/** A pending sign-in and its timeout. */
+type PendingSignIn = { timer?: ReturnType<typeof setTimeout> };
+/** The launch environment without host credentials, and where the host keeps its own setup. */
+type Environment = { env: Record<string, string>; host: HostPaths };
+
 /** The host's own default model, and the effort each model starts at. */
 interface DefaultChoice {
   model: string;
@@ -106,20 +110,9 @@ export class HarnessRegistry {
   private generations = new Map<HarnessId, number>();
   // Custom executables that passed the handshake, so turns do not repeat it.
   private handshaken = new Map<HarnessId, string>();
-  // The one pending sign-in per harness, with its timeout.
-  private signingIn = new Map<
-    HarnessId,
-    { timer?: ReturnType<typeof setTimeout> }
-  >();
-  // The launch environment without host credentials, and where the host keeps its own setup.
-  private environment: Promise<{
-    env: Record<string, string>;
-    host: HostPaths;
-  }>;
-  private provideEnvironment!: (value: {
-    env: Record<string, string>;
-    host: HostPaths;
-  }) => void;
+  private signingIn = new Map<HarnessId, PendingSignIn>();
+  private environment: Promise<Environment>;
+  private provideEnvironment!: (value: Environment) => void;
   private fallback?: ReturnType<typeof setTimeout>;
   private closed = false;
 
@@ -169,6 +162,9 @@ export class HarnessRegistry {
       const customPath = options.settings.getSetting<string>(
         executableKey(adapter.id),
       );
+      const outputStyle = options.settings.getSetting<string>(
+        styleKey(adapter.id),
+      );
       this.states.set(adapter.id, {
         id: adapter.id,
         label: HARNESS_LABELS[adapter.id],
@@ -185,13 +181,7 @@ export class HarnessRegistry {
           ? { bundledVersion: options.programs.bundled(adapter.id) }
           : {}),
         models: [],
-        ...(options.settings.getSetting<string>(styleKey(adapter.id))
-          ? {
-              outputStyle: options.settings.getSetting<string>(
-                styleKey(adapter.id),
-              ),
-            }
-          : {}),
+        ...(outputStyle ? { outputStyle } : {}),
         modelsRefreshedAt: null,
         limits: [],
         noticePending:
@@ -223,7 +213,7 @@ export class HarnessRegistry {
     this.provideEnvironment(this.split(env));
   }
 
-  private split(env: Record<string, string | undefined>) {
+  private split(env: Record<string, string | undefined>): Environment {
     return { env: launchEnvironment(env), host: hostPaths(env) };
   }
 
@@ -288,16 +278,14 @@ export class HarnessRegistry {
           host,
         );
       } catch (error) {
-        const message =
-          error instanceof Error
-            ? error.message
-            : "The app could not prepare its harness folder.";
+        // Accounts.prepare only throws AccountError.
+        const { message } = error as Error;
         update((state) => {
           state.auth = { state: "unknown", message };
         });
         throw new HarnessError("unavailable", message);
       }
-      env = withHome(hostEnv, adapter.account.variable, home);
+      env = { ...hostEnv, [adapter.account.variable]: home };
       assertHome(
         { env, home },
         adapter.account.variable,
@@ -396,10 +384,14 @@ export class HarnessRegistry {
     }
   }
 
-  /** Acquires the program if needed and re-reads sign-in and models. */
-  refresh(harness: HarnessId): Promise<void> {
+  /**
+   * Acquires the program if needed and re-reads sign-in and models. `fresh` waits out a read
+   * already in flight, which may predate a sign-in or sign-out, and then reads again.
+   */
+  refresh(harness: HarnessId, fresh = false): Promise<void> {
     const running = this.refreshing.get(harness);
-    if (running) return running;
+    if (running)
+      return fresh ? running.then(() => this.refresh(harness)) : running;
     const update = this.updater(harness);
     this.checkLatest(harness);
     const job: Promise<void> = (async () => {
@@ -473,19 +465,26 @@ export class HarnessRegistry {
         `${HARNESS_LABELS[harness]} signs in outside the app. See Settings for how.`,
       );
     if (this.signingIn.has(harness)) return;
-    const pending: { timer?: ReturnType<typeof setTimeout> } = {};
+    const pending: PendingSignIn = {};
     this.signingIn.set(harness, pending);
     const current = () => this.signingIn.get(harness) === pending;
+    // Every caller checks current() first.
     const end = () => {
       clearTimeout(pending.timer);
-      if (current()) this.signingIn.delete(harness);
+      this.signingIn.delete(harness);
     };
     try {
       const started = await adapter.startSignIn(await this.context(harness));
-      if (!current()) return;
+      if (!current()) {
+        // Cancelled or closed while the login program was starting: end that program too, unless
+        // a newer sign-in now owns the adapter's login.
+        if (started.state === "pending" && !this.signingIn.has(harness))
+          void adapter.cancelSignIn?.().catch(() => {});
+        return;
+      }
       if (started.state === "signed_in") {
         end();
-        return this.refresh(harness);
+        return this.refresh(harness, true);
       }
       this.update(harness, (state) => {
         state.auth = {
@@ -503,7 +502,7 @@ export class HarnessRegistry {
         () => {
           if (!current()) return;
           end();
-          void this.refresh(harness);
+          void this.refresh(harness, true);
         },
         (error: unknown) => {
           if (!current()) return;
@@ -529,7 +528,7 @@ export class HarnessRegistry {
 
   private async endSignIn(
     harness: HarnessId,
-    pending: { timer?: ReturnType<typeof setTimeout> },
+    pending: PendingSignIn,
     message: string,
   ) {
     if (this.signingIn.get(harness) !== pending) return;

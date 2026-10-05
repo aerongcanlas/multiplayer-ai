@@ -1,5 +1,4 @@
 import { homedir } from "node:os";
-import { assertHome } from "../accounts";
 import type { LaunchContext } from "../contract";
 import { object, string } from "../json";
 import type { CodexAdapter } from "./adapter";
@@ -19,7 +18,7 @@ export type Launcher = (
 export const versionOf = (userAgent: string) =>
   /\/(\d+\.\d+\.\d+)/.exec(userAgent)?.[1] ?? null;
 
-/** One shared app-server process per executable. */
+/** One shared app-server process per executable and app home. */
 export class CodexProcess {
   readonly transport: JsonRpcTransport;
   readonly ready: Promise<void>;
@@ -34,7 +33,6 @@ export class CodexProcess {
     launcher: Launcher,
     private adapter: CodexAdapter,
   ) {
-    assertHome(context, "CODEX_HOME");
     const launch = launcher(context.executable, ARGS, context.env);
     const transport = new JsonRpcTransport({
       executable: launch.executable,

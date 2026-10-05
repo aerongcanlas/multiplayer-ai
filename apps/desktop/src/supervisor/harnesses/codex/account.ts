@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { hostHome, type AccountSpec, type HostPaths } from "../accounts";
 
 /** The host's own Codex folder, where its setup lives. */
-export const hostCodexHome = (host: HostPaths) =>
+const hostCodexHome = (host: HostPaths) =>
   host.CODEX_HOME || join(hostHome(host), ".codex");
 
 /**

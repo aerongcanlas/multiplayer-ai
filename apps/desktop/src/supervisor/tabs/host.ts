@@ -593,13 +593,14 @@ export class TabHost {
       for (const tab of room.tabs) {
         if (tab.loadout.harness !== harness) continue;
         const live = this.live.get(tab.id);
-        const turn = live?.turn && !live.turn.finished ? live.turn : undefined;
-        if (!live?.session && !turn) continue;
+        if (!live) continue;
+        const turn = live.turn && !live.turn.finished ? live.turn : undefined;
+        if (!live.session && !turn) continue;
         if (turn) {
           turn.stopping = true;
-          for (const entryId of live!.requests.keys())
+          for (const entryId of live.requests.keys())
             this.writer.update(entryId, { state: "cancelled" });
-          live!.requests.clear();
+          live.requests.clear();
         }
         this.dropSession(room.id, tab.id, "stopped");
         if (turn) this.finish(tab.id, turn, "stopped");

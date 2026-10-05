@@ -125,6 +125,18 @@ function claudeEnvironment(context: LaunchContext): Record<string, string> {
   };
 }
 
+/**
+ * Adds the host's MCP servers over the control channel, never on the command line, where their
+ * secrets would show. Server failures show in Claude Code's own /mcp.
+ */
+const addServers = async (
+  query: ClaudeQuery,
+  servers: Record<string, McpServerConfig>,
+) => {
+  if (Object.keys(servers).length)
+    await query.setMcpServers(servers).catch(() => undefined);
+};
+
 function toolSummary(name: string, input: Record<string, unknown>) {
   if (name === "Bash") return `Run command: ${clip(string(input.command))}`;
   if (["Edit", "Write", "MultiEdit", "NotebookEdit"].includes(name))
@@ -237,7 +249,7 @@ class ClaudeSession implements HarnessSession {
     private adapter: ClaudeAdapter,
     private request: OpenRequest,
     // The host's MCP servers for this tab's folder; definitions never leave the session.
-    private servers: Record<string, McpServerConfig> = {},
+    private servers: Record<string, McpServerConfig>,
   ) {
     this.sessionId = request.sessionId;
     this.loadout = request.loadout;
@@ -275,10 +287,7 @@ class ClaudeSession implements HarnessSession {
         },
       },
     });
-    if (Object.keys(this.servers).length)
-      void this.query.setMcpServers(this.servers).catch(() => {
-        /* Server failures show in Claude Code's own /mcp. */
-      });
+    void addServers(this.query, this.servers);
     void this.pump(this.query);
   }
 
@@ -1035,6 +1044,7 @@ export class ClaudeAdapter implements HarnessAdapter {
   async commands(
     request: LaunchContext & { cwd: string },
   ): Promise<SlashCommand[]> {
+    const servers = await hostMcpServers(request.hostPaths, request.cwd);
     const channel = new PromptChannel();
     // The same settings a tab's session loads, so project and plugin skills are listed.
     const query = this.startQuery({
@@ -1049,15 +1059,10 @@ export class ClaudeAdapter implements HarnessAdapter {
       },
     });
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const servers = await hostMcpServers(request.hostPaths, request.cwd);
     try {
       return slashCommands(
         await Promise.race([
-          // The host's MCP servers go over the control channel, never on the command line.
-          (Object.keys(servers).length
-            ? query.setMcpServers(servers).catch(() => undefined)
-            : Promise.resolve()
-          ).then(() => query.supportedCommands()),
+          addServers(query, servers).then(() => query.supportedCommands()),
           new Promise<never>((_, reject) => {
             timer = setTimeout(
               () => reject(new Error("Claude Code did not list its commands.")),

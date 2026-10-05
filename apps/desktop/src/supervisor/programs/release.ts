@@ -120,9 +120,10 @@ async function opencode(
   platform: PlatformKey,
   request: typeof fetch,
 ): Promise<ProgramAsset> {
-  if (!version.startsWith(opencodeLine()))
+  const line = opencodeLine();
+  if (!version.startsWith(line))
     throw new Error(
-      `OpenCode ${version} is available after an app update; this app updates within ${opencodeLine()}x.`,
+      `OpenCode ${version} is available after an app update; this app updates within ${line}x.`,
     );
   const name = OPENCODE_PACKAGES[platform];
   const published = await json(
@@ -152,17 +153,7 @@ async function opencode(
   };
 }
 
-type Lookup = (
-  version: string,
-  platform: PlatformKey,
-  request: typeof fetch,
-) => Promise<ProgramAsset>;
-
-const LOOKUPS: Record<HarnessId, Lookup> = {
-  codex,
-  claude,
-  opencode,
-};
+const LOOKUPS: Record<HarnessId, typeof codex> = { codex, claude, opencode };
 
 /**
  * Where to download a published version and the digest its publisher lists for it. Unlike the

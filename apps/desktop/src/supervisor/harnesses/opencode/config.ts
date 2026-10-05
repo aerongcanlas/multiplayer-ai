@@ -70,25 +70,25 @@ export function matches(text: string, pattern: string) {
   ).test(value);
 }
 
-const ACTIONS = new Set(["allow", "ask", "deny"]);
+const ACTIONS = new Set<unknown>(["allow", "ask", "deny"]);
+// `debug config` masks values under secret-looking keys; a masked rule may be a deny, so it is
+// kept as one.
+const action = (value: unknown) =>
+  value === "***" ? "deny" : ACTIONS.has(value) ? (value as Action) : null;
+
 function block(value: unknown): Block {
-  if (typeof value === "string" && ACTIONS.has(value))
-    return { "*": value as Action };
+  const single = action(value);
+  if (single) return { "*": single };
   const result: Block = {};
   for (const [key, rule] of Object.entries(object(value))) {
-    if (typeof rule === "string" && ACTIONS.has(rule))
-      result[key] = rule as Action;
+    const keyAction = action(rule);
+    if (keyAction) result[key] = keyAction;
     else if (rule && typeof rule === "object")
       result[key] = Object.fromEntries(
-        Object.entries(rule).flatMap(([pattern, action]) =>
-          ACTIONS.has(action)
-            ? [[pattern, action]]
-            : // `debug config` masks values under secret-looking keys; an unknown rule may be a
-              // deny, so it is kept as one.
-              action === "***"
-              ? [[pattern, "deny"]]
-              : [],
-        ),
+        Object.entries(rule).flatMap(([pattern, choice]) => {
+          const patternAction = action(choice);
+          return patternAction ? [[pattern, patternAction]] : [];
+        }),
       ) as Record<string, Action>;
   }
   return result;
@@ -145,6 +145,18 @@ function narrower(key: string, host: Rule[]) {
   return extra;
 }
 
+const allowsAsk = (value: Block[string]) =>
+  typeof value === "string"
+    ? value === "allow"
+      ? "ask"
+      : value
+    : Object.fromEntries(
+        Object.entries(value).map(([pattern, action]) => [
+          pattern,
+          action === "allow" ? "ask" : action,
+        ]),
+      );
+
 /**
  * Rules that place the blanket ask and host denies in evaluation order. A key the host block
  * already has keeps the host's position, so its gated value goes through a second merge stage.
@@ -170,35 +182,35 @@ function agentRules(
       first[key] = "ask";
       second[key] = value;
     } else first[key] = value;
-  // A host wildcard key after an acting key would overrule it, so its allows become asks.
+  // A host key after an acting key would overrule it, so its allows become asks: a wildcard key,
+  // or one tool of a gated MCP server.
   const firstActing = Math.min(
     ...keys.map((key) => order.indexOf(key)).filter((index) => index >= 0),
   );
-  let rewrote = false;
   for (const [index, key] of order.entries()) {
-    if (!wildcard(key) || index < firstActing || keys.includes(key)) continue;
-    const value = hostBlock[key]!;
-    first[key] =
-      typeof value === "string"
-        ? value === "allow"
-          ? "ask"
-          : value
-        : Object.fromEntries(
-            Object.entries(value).map(([pattern, action]) => [
-              pattern,
-              action === "allow" ? "ask" : action,
-            ]),
-          );
-    rewrote = true;
+    if (index < firstActing || keys.includes(key)) continue;
+    if (
+      !wildcard(key) &&
+      !keys.some((acting) => wildcard(acting) && matches(key, acting))
+    )
+      continue;
+    first[key] = allowsAsk(hostBlock[key]!);
   }
-  if (rewrote)
-    for (const [key, value] of Object.entries(READ_ONLY))
-      if (!(key in hostBlock)) first[key] = value;
+  // A read-only key whose last covering host wildcard was changed gets the host's own rules for
+  // it back, after that wildcard (OpenCode's rules for a plain allow), so reads never loosen.
+  for (const [key, value] of Object.entries(READ_ONLY)) {
+    if (key in hostBlock) continue;
+    const last = order.findLast((host) => wildcard(host) && matches(key, host));
+    if (last === undefined || !(last in first)) continue;
+    const host = hostBlock[last]!;
+    if (JSON.stringify(first[last]) !== JSON.stringify(host))
+      first[key] = host === "allow" ? value : host;
+  }
   return { first, second };
 }
 
 /** OpenCode's data folder, where its own plans and login live. */
-export const dataDir = (env: Record<string, string>) =>
+const dataDir = (env: Record<string, string>) =>
   join(
     env.XDG_DATA_HOME || join(env.HOME || homedir(), ".local", "share"),
     "opencode",
@@ -227,20 +239,22 @@ export class HostConfigs {
 
   get(context: LaunchContext, cwd: string) {
     const key = `${context.executable}\n${cwd}`;
-    let config = this.cache.get(key);
-    if (!config) {
-      config = runCommand(context, this.launcher, ["debug", "config"], {
-        cwd,
-        // Any config content keeps OpenCode from seeding a global config file.
-        config: { OPENCODE_CONFIG_CONTENT: "{}" },
-      }).then((output) => {
-        const start = output.indexOf("{");
-        if (start < 0) throw new Error("OpenCode printed no config.");
-        return object(JSON.parse(output.slice(start)));
-      });
-      this.cache.set(key, config);
-      config.catch(() => this.cache.delete(key));
-    }
+    const cached = this.cache.get(key);
+    if (cached) return cached;
+    const config = runCommand(context, this.launcher, ["debug", "config"], {
+      cwd,
+      // Any config content keeps OpenCode from seeding a global config file.
+      config: { OPENCODE_CONFIG_CONTENT: "{}" },
+    }).then((output) => {
+      const start = output.indexOf("{");
+      if (start < 0) throw new Error("OpenCode printed no config.");
+      return object(JSON.parse(output.slice(start)));
+    });
+    this.cache.set(key, config);
+    // A failure is retried next time, unless a refresh already replaced it.
+    config.catch(() => {
+      if (this.cache.get(key) === config) this.cache.delete(key);
+    });
     return config;
   }
 

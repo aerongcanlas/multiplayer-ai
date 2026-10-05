@@ -38,7 +38,6 @@ export interface ComposerProps {
   /** When provided, the send control stops the active agent instead. */
   onStop?(): void;
   stopDisabled?: boolean;
-  stopLabel?: string;
   placeholder?: string;
   label?: string;
   submitLabel?: string;
@@ -71,7 +70,6 @@ export function Composer({
   busy = false,
   onStop,
   stopDisabled = false,
-  stopLabel = "Stop",
   placeholder = "What should the agent do?",
   label = "Message the agent",
   submitLabel = "Send message",
@@ -176,6 +174,7 @@ export function Composer({
     composing ||
     validationError !== null ||
     !value.trim();
+  const buttonLabel = onStop ? "Stop" : submitLabel;
   return (
     <form
       data-slot="composer"
@@ -286,11 +285,11 @@ export function Composer({
             ) : null)}
         </div>
         <Button
-          aria-label={onStop ? stopLabel : submitLabel}
+          aria-label={buttonLabel}
           aria-busy={
             onStop ? stopDisabled : busy || pendingTargets.has(targetKey)
           }
-          title={onStop ? stopLabel : submitLabel}
+          title={buttonLabel}
           disabled={onStop ? stopDisabled : sendDisabled}
           size={compact ? "icon-sm" : "icon"}
           type={onStop ? "button" : "submit"}
@@ -303,7 +302,6 @@ export function Composer({
               width={compact ? 16 : 18}
               height={compact ? 16 : 18}
               aria-hidden="true"
-              data-icon="stop"
             >
               <rect
                 x="3.5"

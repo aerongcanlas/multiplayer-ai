@@ -199,10 +199,9 @@ export class SupervisorService {
         try {
           await signOut();
         } finally {
-          await registry.refresh(command.harness);
+          await registry.refresh(command.harness, true);
         }
-      }
-      else if (command.type === "harness.useManaged") {
+      } else if (command.type === "harness.useManaged") {
         registry.setExecutable(command.harness, null);
         void registry.refresh(command.harness);
       } else if (command.type === "harness.acknowledgeNotice")
