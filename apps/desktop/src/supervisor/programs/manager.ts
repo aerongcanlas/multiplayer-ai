@@ -133,6 +133,18 @@ const classify = (error: unknown, fallback: string): ProgramError => {
   return new ProgramError("network", fallback);
 };
 
+/** The error for a failed unpack: a full disk passes through; anything else is a corrupt download. */
+const corrupt = (error: unknown, message: string) =>
+  (error as NodeJS.ErrnoException).code === "ENOSPC"
+    ? error
+    : new ProgramError("checksum_mismatch", message);
+
+const mismatch = () =>
+  new ProgramError(
+    "checksum_mismatch",
+    "The unpacked harness program does not match its pinned checksum.",
+  );
+
 /**
  * Downloads pinned harness programs into app data, verifies them against the embedded manifest,
  * and resolves custom executables. It knows nothing about harness protocols.
@@ -291,18 +303,41 @@ export class ProgramManager extends EventEmitter {
     const { platform, asset } = this.asset(harness);
     const target = this.location(harness, asset);
     const version = this.pinned(harness);
-    if (await this.verified(target, asset)) {
-      await this.writeMeta(target, harness, platform, asset);
-      return { path: target, source: "managed", version };
+    if (!(await this.verified(target, asset))) {
+      if (asset.archive === "tar")
+        await this.acquireArchive(harness, asset, this.folder(harness));
+      else await this.acquireFile(harness, asset, target);
     }
-    if (asset.archive === "tar")
-      return this.acquireArchive(harness, platform, asset, target, version);
+    await this.writeMeta(target, harness, platform, asset);
+    return { path: target, source: "managed", version };
+  }
+
+  /** Runs a download step; when it fails, its scratch paths go and the error is classified. */
+  private async attempt(scratch: string[], work: () => Promise<void>) {
+    try {
+      await work();
+    } catch (error) {
+      for (const path of scratch)
+        await rm(path, { recursive: true, force: true });
+      throw classify(
+        error,
+        "The harness program could not be downloaded. Check your connection and retry.",
+      );
+    }
+  }
+
+  /** Downloads a single-file program, unpacking it when compressed, then swaps it in. */
+  private async acquireFile(
+    harness: HarnessId,
+    asset: ProgramAsset,
+    target: string,
+  ) {
     await rm(target, { force: true });
     await rm(`${target}.meta`, { force: true });
     await mkdir(dirname(target), { recursive: true });
     const partial = `${target}.partial`;
     const unpacked = `${target}.unpacked`;
-    try {
+    await this.attempt([partial, unpacked], async () => {
       const binary = pinnedDigest(asset);
       if (!binary)
         throw new ProgramError(
@@ -326,47 +361,28 @@ export class ProgramManager extends EventEmitter {
             this.writer(unpacked),
           );
         } catch (error) {
-          if ((error as NodeJS.ErrnoException).code === "ENOSPC") throw error;
-          throw new ProgramError(
-            "checksum_mismatch",
-            "The downloaded harness program is corrupt.",
-          );
+          throw corrupt(error, "The downloaded harness program is corrupt.");
         }
         if (digest.digest("hex") !== binary.sha256 || size !== binary.size)
-          throw new ProgramError(
-            "checksum_mismatch",
-            "The unpacked harness program does not match its pinned checksum.",
-          );
+          throw mismatch();
         await rm(partial, { force: true });
       } else await rename(partial, unpacked);
       if (process.platform !== "win32") await chmod(unpacked, 0o755);
       await rename(unpacked, target);
-      await this.writeMeta(target, harness, platform, asset);
-      return { path: target, source: "managed", version };
-    } catch (error) {
-      await rm(partial, { force: true });
-      await rm(unpacked, { force: true });
-      throw classify(
-        error,
-        "The harness program could not be downloaded. Check your connection and retry.",
-      );
-    }
+    });
   }
 
   /** Unpacks a verified package into a staging folder, checks the executable, then swaps it in. */
   private async acquireArchive(
     harness: HarnessId,
-    platform: PlatformKey,
     asset: ProgramAsset,
-    target: string,
-    version: string,
-  ): Promise<ResolvedProgram> {
-    const folder = this.folder(harness);
+    folder: string,
+  ) {
     const partial = `${folder}.partial`;
     const staging = `${folder}.unpacked`;
     await mkdir(dirname(folder), { recursive: true });
     await rm(staging, { recursive: true, force: true });
-    try {
+    await this.attempt([partial, staging], async () => {
       await this.download(harness, asset, partial);
       await mkdir(staging, { recursive: true });
       try {
@@ -376,9 +392,8 @@ export class ProgramManager extends EventEmitter {
           extractTar(staging),
         );
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOSPC") throw error;
-        throw new ProgramError(
-          "checksum_mismatch",
+        throw corrupt(
+          error,
           `The downloaded harness package could not be unpacked. ${error instanceof Error ? error.message : ""}`.trim(),
         );
       }
@@ -392,25 +407,13 @@ export class ProgramManager extends EventEmitter {
       if (!asset.binary && actual.size > 0) asset.binary = actual;
       const binary = pinnedDigest(asset);
       if (actual.sha256 !== binary?.sha256 || actual.size !== binary.size)
-        throw new ProgramError(
-          "checksum_mismatch",
-          "The unpacked harness program does not match its pinned checksum.",
-        );
+        throw mismatch();
       // Package entries do not always carry an executable mode.
       if (process.platform !== "win32") await chmod(executable, 0o755);
       await rm(partial, { force: true });
       await rm(folder, { recursive: true, force: true });
       await rename(staging, folder);
-      await this.writeMeta(target, harness, platform, asset);
-      return { path: target, source: "managed", version };
-    } catch (error) {
-      await rm(partial, { force: true });
-      await rm(staging, { recursive: true, force: true });
-      throw classify(
-        error,
-        "The harness program could not be downloaded. Check your connection and retry.",
-      );
-    }
+    });
   }
 
   private async download(

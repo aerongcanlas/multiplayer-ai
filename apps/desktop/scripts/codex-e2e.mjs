@@ -3,7 +3,6 @@
 // downloads the pinned Codex, prints the real ChatGPT sign-in page for you to finish in a browser,
 // runs one read-only plan-mode turn for the release check, and signs the app's Codex home out.
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { setTimeout as wait } from "node:timers/promises";
 import {
@@ -11,6 +10,7 @@ import {
     createRun,
     fingerprint,
     fixtureRepository,
+    jsonLines,
     outputDirectory,
     testEnvironment,
 } from "./e2e-support.mjs";
@@ -65,21 +65,28 @@ const run = createRun({
             };
         }),
 });
-const { launch, checkpoint, snapshot, until, send, selectRepository } = run;
-const codex = async () =>
-    (await snapshot()).harnesses.find((item) => item.id === "codex");
+const {
+    launch,
+    checkpoint,
+    snapshot,
+    harness,
+    until,
+    send,
+    selectRepository,
+    newTab,
+    openSettings,
+    closeSettings,
+} = run;
+const codex = () => harness("codex");
 const tab = async () => (await snapshot()).rooms[0].tabs[0];
+/** The pages the app asked the system browser to open. */
+const opened = () => run.application.evaluate(() => globalThis.opened);
 
 await run.execute(
     async () => {
         await launch();
         await selectRepository(repository);
-        await run.page
-            .getByRole("button", { name: "New tab", exact: true })
-            .click();
-        await run.page
-            .getByRole("menuitem", { name: "Codex", exact: true })
-            .click();
+        await newTab("Codex");
         await until(
             async () => ["ready"].includes((await codex()).program.state),
             "the managed Codex download",
@@ -107,17 +114,10 @@ await run.execute(
                     })
                     .click();
                 await until(
-                    async () =>
-                        (
-                            await run.application.evaluate(
-                                () => globalThis.opened,
-                            )
-                        ).length > 0,
+                    async () => (await opened()).length > 0,
                     "the ChatGPT sign-in page",
                 );
-                const [url] = await run.application.evaluate(
-                    () => globalThis.opened,
-                );
+                const [url] = await opened();
                 console.log(`ACTION: open this page and sign in: ${url}`);
                 await until(
                     async () => (await codex()).auth.state === "signed_in",
@@ -146,10 +146,9 @@ await run.execute(
                 async () => (await codex()).auth.state === "signed_in",
                 "the ChatGPT sign-in",
             );
-            assert.deepEqual(
-                await run.application.evaluate(() => globalThis.opened),
-                ["https://auth.openai.com/authorize?state=fixture"],
-            );
+            assert.deepEqual(await opened(), [
+                "https://auth.openai.com/authorize?state=fixture",
+            ]);
             await checkpoint(
                 "In-app ChatGPT sign-in opens only the allowlisted login page",
             );
@@ -328,12 +327,8 @@ await run.execute(
 
         if (!live) {
             const launches = (
-                await readFile(join(output, "codex-fixture.jsonl"), "utf8")
-            )
-                .split("\n")
-                .filter(Boolean)
-                .map((line) => JSON.parse(line))
-                .filter((entry) => entry.type === "launch");
+                await jsonLines(join(output, "codex-fixture.jsonl"))
+            ).filter((entry) => entry.type === "launch");
             assert.ok(launches.length);
             for (const launch of launches)
                 assert.equal(
@@ -344,22 +339,15 @@ await run.execute(
         }
 
         // Sign out ends the app's Codex login only.
-        await run.page
-            .getByRole("button", { name: "Settings", exact: true })
-            .click();
-        await run.page
-            .getByRole("dialog", { name: "Settings" })
-            .getByRole("tab", { name: "Codex" })
-            .click();
-        await run.page
-            .getByRole("region", { name: "Harness settings" })
+        const settings = await openSettings("Codex");
+        await settings
             .getByRole("button", { name: "Sign out", exact: true })
             .click();
         await until(
             async () => (await codex()).auth.state === "signed_out",
             "Codex to sign out",
         );
-        await run.page.keyboard.press("Escape");
+        await closeSettings();
         await checkpoint("Sign out returns the app's Codex home to signed out");
 
         assert.deepEqual(

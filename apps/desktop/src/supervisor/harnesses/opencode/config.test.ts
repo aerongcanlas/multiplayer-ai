@@ -12,7 +12,7 @@ import {
   matches,
   type LocalProvider,
 } from "./config";
-import type { Launcher } from "./process";
+import type { Launcher } from "../launcher";
 
 const ollama: LocalProvider = {
   id: "ollama",

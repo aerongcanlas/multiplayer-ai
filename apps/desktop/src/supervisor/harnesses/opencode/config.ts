@@ -4,7 +4,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { LaunchContext } from "../contract";
 import { object, string } from "../json";
-import { runCommand, type Launcher } from "./process";
+import type { Launcher } from "../launcher";
+import { runCommand } from "./process";
 
 type Action = "allow" | "ask" | "deny";
 type Rule = { permission: string; pattern: string; action: Action };
@@ -130,18 +131,18 @@ function gated(
   return result;
 }
 
-/** Host keys a wildcard acting key covers more narrowly, such as one tool of an MCP server. */
-function narrower(key: string, host: Rule[]) {
+/** Host keys the MCP server wildcards cover more narrowly, such as one tool of a server. */
+function narrower(servers: string[], host: Rule[]) {
   const extra: Record<string, Record<string, Action>> = {};
-  for (const rule of host)
-    if (
-      rule.action === "deny" &&
-      rule.permission !== key &&
-      wildcard(key) &&
-      matches(rule.permission, key)
-    )
-      // `<key>*` is a new key, so it lands after the blanket ask; it matches the same tool.
-      (extra[`${rule.permission}*`] ??= {})[rule.pattern] = "deny";
+  for (const key of servers)
+    for (const rule of host)
+      if (
+        rule.action === "deny" &&
+        rule.permission !== key &&
+        matches(rule.permission, key)
+      )
+        // `<key>*` is a new key, so it lands after the blanket ask; it matches the same tool.
+        (extra[`${rule.permission}*`] ??= {})[rule.pattern] = "deny";
   return extra;
 }
 
@@ -170,18 +171,14 @@ function agentRules(
   const first: Block = {};
   const second: Block = {};
   const order = Object.keys(hostBlock);
-  for (const key of keys) {
-    const value = gatedFor(key);
+  const place = (key: string, value: Block[string]) => {
     if (typeof hostBlock[key] === "object") {
       first[key] = "ask";
       second[key] = value;
     } else first[key] = value;
-  }
-  for (const [key, value] of Object.entries(extra))
-    if (typeof hostBlock[key] === "object") {
-      first[key] = "ask";
-      second[key] = value;
-    } else first[key] = value;
+  };
+  for (const key of keys) place(key, gatedFor(key));
+  for (const [key, value] of Object.entries(extra)) place(key, value);
   // A host key after an acting key would overrule it, so its allows become asks: a wildcard key,
   // or one tool of a gated MCP server.
   const firstActing = Math.min(
@@ -285,7 +282,7 @@ export function buildConfig(input: ConfigInput) {
     permission[key] = "ask";
     topLevel[key] = gated(key, globalRules);
   }
-  for (const key of mcp) Object.assign(topLevel, narrower(key, globalRules));
+  Object.assign(topLevel, narrower(mcp, globalRules));
 
   const hostAgents = object(host.agent);
   const names = new Set(["build", "plan", ...Object.keys(hostAgents)]);
@@ -297,22 +294,19 @@ export function buildConfig(input: ConfigInput) {
     if (hostAgent.disable === true) continue;
     const hostBlock = block(hostAgent.permission);
     const combined = [...globalRules, ...rules(hostBlock)];
-    const gatedFor = (key: string) => {
-      // Plan mode stays read-only apart from OpenCode's own plan files.
-      if (name === "plan" && key === "edit")
-        return gated(key, combined, {
-          "*": "deny",
-          "*opencode/plans/*.md": "ask",
-        });
-      if (name === "plan" && key === "external_directory")
-        return gated(key, combined, { [plans]: "allow" });
-      return gated(key, combined);
-    };
-    const extra = Object.assign(
-      {},
-      ...mcp.map((key) => narrower(key, combined)),
-    ) as Record<string, Record<string, Action>>;
-    const { first, second } = agentRules(hostBlock, keys, gatedFor, extra);
+    // Plan mode stays read-only apart from OpenCode's own plan files.
+    const starts: Record<string, Record<string, Action>> = name === "plan"
+      ? {
+          edit: { "*": "deny", "*opencode/plans/*.md": "ask" },
+          external_directory: { [plans]: "allow" },
+        }
+      : {};
+    const { first, second } = agentRules(
+      hostBlock,
+      keys,
+      (key) => gated(key, combined, starts[key]),
+      narrower(mcp, combined),
+    );
     agent[name] = { permission: { ...first, task: "deny" } };
     // The mode-to-agent merge makes an agent primary, so a sub-agent keeps one stage.
     if (Object.keys(second).length && string(hostAgent.mode) !== "subagent")

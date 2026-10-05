@@ -10,8 +10,7 @@
 // each tarball is checked against npm's sha512 integrity, then its sha256 and the unpacked
 // binary's sha256 are recorded.
 import { createHash } from "node:crypto";
-import { writeFile } from "node:fs/promises";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { runInNewContext } from "node:vm";
 import { fileURLToPath } from "node:url";
 import { gunzipSync, zstdDecompressSync } from "node:zlib";
@@ -147,41 +146,50 @@ const opencodePackages = {
   "win32-x64": "opencode-windows-x64",
 };
 
+async function opencodePlatform(platform, name) {
+  const published = await (
+    await fetch(`https://registry.npmjs.org/${name}/${OPENCODE_VERSION}`)
+  ).json();
+  const integrity = published.dist?.integrity;
+  if (!/^sha512-/.test(integrity ?? ""))
+    throw new Error(`${name}@${OPENCODE_VERSION} has no sha512 integrity.`);
+  const url = `https://registry.npmjs.org/${name}/-/${name}-${OPENCODE_VERSION}.tgz`;
+  const tarball = await download(url);
+  if (
+    `sha512-${createHash("sha512").update(tarball).digest("base64")}` !==
+    integrity
+  )
+    throw new Error(`${name} does not match its npm integrity.`);
+  const entries = tarEntries(gunzipSync(tarball));
+  const file = platform.startsWith("win32")
+    ? "package/bin/opencode.exe"
+    : "package/bin/opencode";
+  const binary = entries.get(file);
+  if (!binary)
+    throw new Error(
+      `${name} has no ${file}; it holds ${[...entries.keys()].join(", ")}.`,
+    );
+  console.error(`${name}: ${file} ${binary.length} bytes`);
+  return {
+    url,
+    file,
+    download: { sha256: sha256(tarball), size: tarball.length },
+    compression: "gzip",
+    archive: "tar",
+    binary: { sha256: sha256(binary), size: binary.length },
+  };
+}
+
+// The per-platform packages are independent, so they download together.
 async function opencode() {
-  const platforms = {};
-  for (const [platform, name] of Object.entries(opencodePackages)) {
-    const published = await (
-      await fetch(`https://registry.npmjs.org/${name}/${OPENCODE_VERSION}`)
-    ).json();
-    const integrity = published.dist?.integrity;
-    if (!/^sha512-/.test(integrity ?? ""))
-      throw new Error(`${name}@${OPENCODE_VERSION} has no sha512 integrity.`);
-    const url = `https://registry.npmjs.org/${name}/-/${name}-${OPENCODE_VERSION}.tgz`;
-    const tarball = await download(url);
-    if (
-      `sha512-${createHash("sha512").update(tarball).digest("base64")}` !==
-      integrity
-    )
-      throw new Error(`${name} does not match its npm integrity.`);
-    const entries = tarEntries(gunzipSync(tarball));
-    const file = platform.startsWith("win32")
-      ? "package/bin/opencode.exe"
-      : "package/bin/opencode";
-    const binary = entries.get(file);
-    if (!binary)
-      throw new Error(
-        `${name} has no ${file}; it holds ${[...entries.keys()].join(", ")}.`,
-      );
-    platforms[platform] = {
-      url,
-      file,
-      download: { sha256: sha256(tarball), size: tarball.length },
-      compression: "gzip",
-      archive: "tar",
-      binary: { sha256: sha256(binary), size: binary.length },
-    };
-    console.error(`${name}: ${file} ${binary.length} bytes`);
-  }
+  const platforms = Object.fromEntries(
+    await Promise.all(
+      Object.entries(opencodePackages).map(async ([platform, name]) => [
+        platform,
+        await opencodePlatform(platform, name),
+      ]),
+    ),
+  );
   return { version: OPENCODE_VERSION, platforms };
 }
 
@@ -221,7 +229,8 @@ const pins = { codex, claude, opencode };
 let manifest;
 if (only) {
   if (!pins[only]) throw new Error(`Unknown harness ${only}.`);
-  // The generated file is one object literal; the other harnesses keep their entries.
+  // The generated file is one object literal (prettier unquotes its keys, so it is not JSON);
+  // the other harnesses keep their entries.
   const source = await readFile(target, "utf8");
   const literal = source.slice(
     source.indexOf("= ", source.indexOf("HARNESS_MANIFEST")) + 2,

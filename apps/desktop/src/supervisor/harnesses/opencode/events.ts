@@ -70,13 +70,15 @@ export class TurnEvents {
       case "tool_call_update": {
         const known = this.tools.get(update.toolCallId);
         if (!known) this.segment++;
+        const kind = update.kind ?? known?.kind;
         // File tools are titled by their tool name; the path they touch says more.
-        const path = FILE_KINDS.has(update.kind ?? known?.kind ?? "other")
-          ? update.locations?.[0]?.path
-          : undefined;
+        const path =
+          kind && FILE_KINDS.has(kind)
+            ? update.locations?.[0]?.path
+            : undefined;
         const tool = {
           title: path || string(update.title) || known?.title || "",
-          kind: update.kind ?? known?.kind ?? undefined,
+          kind,
           detail: toolDetail(update.content) ?? known?.detail,
         };
         this.tools.set(update.toolCallId, tool);

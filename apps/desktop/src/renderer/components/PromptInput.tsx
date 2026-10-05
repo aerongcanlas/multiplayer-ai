@@ -16,6 +16,7 @@ interface Props {
   busy?: boolean;
   onStop?(): void;
   stopDisabled?: boolean;
+  stopping?: boolean;
   label: string;
   placeholder: string;
   submitLabel: string;

@@ -72,23 +72,22 @@ export function startLogin(
   const done = new Promise<void>((resolve, reject) => {
     child.on("error", reject);
     child.on("close", (code) => {
-      if (code === 0 && !cancelled) resolve();
-      else
-        reject(
-          new Error(
-            cancelled
-              ? "Sign-in cancelled."
-              : tail.trim() || `Claude Code sign-in exited with code ${code}.`,
-          ),
-        );
+      if (code === 0 && !cancelled) return resolve();
+      reject(
+        new Error(
+          cancelled
+            ? "Sign-in cancelled."
+            : tail.trim() || `Claude Code sign-in exited with code ${code}.`,
+        ),
+      );
     });
   });
   return {
     done,
     cancel() {
       cancelled = true;
-      child.stdin.end();
-      if (child.exitCode === null) child.kill();
+      // A no-op once the program has exited.
+      child.kill();
     },
   };
 }

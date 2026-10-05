@@ -12,23 +12,11 @@ import {
 } from "@agentclientprotocol/sdk";
 import type { LaunchContext } from "../contract";
 import { launchEnvironment } from "../environment";
+import type { Launcher } from "../launcher";
 import type { OpenCodeSession } from "./session";
 
 // The embedded HTTP server stays on loopback; port 0 lets OpenCode pick a free one.
 const ARGS = ["acp", "--hostname", "127.0.0.1", "--port", "0"];
-
-/** Test fixtures replace how the executable is launched. */
-export type Launcher = (
-  executable: string,
-  args: string[],
-  env: Record<string, string>,
-) => { executable: string; args: string[]; env: Record<string, string> };
-
-export const direct: Launcher = (executable, args, env) => ({
-  executable,
-  args,
-  env,
-});
 
 /** The adapter side of a process: where its session events and permission requests go. */
 export interface ProcessOwner {

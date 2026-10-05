@@ -209,6 +209,19 @@ test("a spec's copies are copied on every platform", async () => {
   );
 });
 
+test("an unchanged copy's manifest entry follows a moved host folder", async () => {
+  const { dir, source, accounts, host, manifest } = await setup();
+  const spec = { ...SPEC, links: [], copies: ["settings.json"] };
+  await accounts.prepare("claude", spec, host);
+  const moved = join(dir, "moved");
+  await mkdir(moved, { recursive: true });
+  await writeFile(join(moved, "settings.json"), '{"model":"sonnet"}');
+  await accounts.prepare("claude", spec, { ...host, CLAUDE_CONFIG_DIR: moved });
+  const entry = (await manifest()).entries["settings.json"];
+  assert.equal(entry?.target, join(moved, "settings.json"));
+  assert.notEqual(entry?.target, join(source, "settings.json"));
+});
+
 test("concurrent prepares of one home both resolve with one consistent manifest", async () => {
   const { accounts, host, home, manifest } = await setup();
   const [first, second] = await Promise.all([

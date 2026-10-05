@@ -963,11 +963,21 @@ export class ClaudeAdapter implements HarnessAdapter {
   startQuery: StartQuery = (params) =>
     (this.options.startQuery ?? sdkQuery)(params);
 
-  private authStatus(context: LaunchContext) {
+  /**
+   * Runs one of Claude Code's auth commands, or its test fixture. The environment is built first
+   * either way, so a launch that does not name the app home is refused even in tests.
+   */
+  private auth<T>(
+    context: LaunchContext,
+    fixture: ((context: LaunchContext) => T) | undefined,
+    command: (executable: string, env: Record<string, string>) => T,
+  ): T {
     const env = claudeEnvironment(context);
-    return this.options.authStatus
-      ? this.options.authStatus(context)
-      : readAuthStatus(context.executable, env);
+    return fixture ? fixture(context) : command(context.executable, env);
+  }
+
+  private authStatus(context: LaunchContext) {
+    return this.auth(context, this.options.authStatus, readAuthStatus);
   }
 
   async handshake(context: LaunchContext) {
@@ -1078,9 +1088,13 @@ export class ClaudeAdapter implements HarnessAdapter {
     }
   }
 
-  async open(request: OpenRequest): Promise<HarnessSession> {
+  private assertOpen() {
     if (this.closed)
       throw new HarnessError("failed", "The app is shutting down.");
+  }
+
+  async open(request: OpenRequest): Promise<HarnessSession> {
+    this.assertOpen();
     // A tab from before app-owned logins finds its session in the host's folder (KTD10).
     if (request.sessionId)
       await migrateSession(
@@ -1089,8 +1103,7 @@ export class ClaudeAdapter implements HarnessAdapter {
         request.sessionId,
       ).catch(() => false);
     const servers = await hostMcpServers(request.hostPaths, request.cwd);
-    if (this.closed)
-      throw new HarnessError("failed", "The app is shutting down.");
+    this.assertOpen();
     const session = new ClaudeSession(this, request, servers);
     this.sessions.add(session);
     return session;
@@ -1100,9 +1113,7 @@ export class ClaudeAdapter implements HarnessAdapter {
     if ((await this.authStatus(context)).loggedIn)
       return { state: "signed_in" };
     this.login?.cancel();
-    const login = this.options.login
-      ? this.options.login(context)
-      : startLogin(context.executable, claudeEnvironment(context));
+    const login = this.auth(context, this.options.login, startLogin);
     this.login = login;
     void login.done
       .catch(() => {})
@@ -1119,9 +1130,7 @@ export class ClaudeAdapter implements HarnessAdapter {
   }
 
   async signOut(context: LaunchContext) {
-    await (this.options.logout
-      ? this.options.logout(context)
-      : logout(context.executable, claudeEnvironment(context)));
+    await this.auth(context, this.options.logout, logout);
   }
 
   close() {

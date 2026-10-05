@@ -9,7 +9,13 @@ import {
   RotateCcw,
   X,
 } from "lucide-react";
-import { HARNESS_NOTICES, tabBusy, type HarnessState } from "../../shared/tabs";
+import type { Result } from "../../shared/contracts";
+import {
+  HARNESS_NOTICES,
+  tabBusy,
+  type HarnessId,
+  type HarnessState,
+} from "../../shared/tabs";
 import { perform, useDesktop } from "../lib/desktop-store";
 import {
   accountActions,
@@ -20,6 +26,16 @@ import {
   updateAvailable,
 } from "../lib/harness-status";
 import { Button } from "./ui/Button";
+
+/** A click handler for one harness command, keyed so a second click waits for the first. */
+const act =
+  (
+    { id }: HarnessState,
+    key: string,
+    call: (id: HarnessId) => Promise<Result>,
+  ) =>
+  () =>
+    void perform(() => call(id), { key: `harness.${key}:${id}` });
 
 /** Setup a harness still needs: program problems, sign-in, and a harness's one-time notice. */
 export function HarnessStatus({
@@ -50,15 +66,11 @@ export function HarnessStatus({
           size="xs"
           variant="outline"
           disabled={disabled}
-          onClick={() =>
-            void perform(
-              () =>
-                program.state === "custom_invalid"
-                  ? window.desktop.useManagedHarness(harness.id)
-                  : window.desktop.refreshHarness(harness.id),
-              { key: `harness.program:${harness.id}` },
-            )
-          }
+          onClick={act(harness, "program", (id) =>
+            program.state === "custom_invalid"
+              ? window.desktop.useManagedHarness(id)
+              : window.desktop.refreshHarness(id),
+          )}
         >
           <RotateCcw size={12} />
           {program.state === "custom_invalid"
@@ -73,11 +85,9 @@ export function HarnessStatus({
         <Button
           size="xs"
           disabled={disabled}
-          onClick={() =>
-            void perform(() => window.desktop.signInHarness(harness.id), {
-              key: `harness.signIn:${harness.id}`,
-            })
-          }
+          onClick={act(harness, "signIn", (id) =>
+            window.desktop.signInHarness(id),
+          )}
         >
           <LogIn size={12} />
           {harness.id === "codex" ? "Sign in with ChatGPT" : "Sign in"}
@@ -88,11 +98,9 @@ export function HarnessStatus({
           size="xs"
           variant="outline"
           disabled={disabled}
-          onClick={() =>
-            void perform(() => window.desktop.cancelHarnessSignIn(harness.id), {
-              key: `harness.signIn:${harness.id}`,
-            })
-          }
+          onClick={act(harness, "signIn", (id) =>
+            window.desktop.cancelHarnessSignIn(id),
+          )}
         >
           <X size={12} />
           Cancel sign-in
@@ -120,12 +128,9 @@ export function HarnessStatus({
             size="xs"
             variant="outline"
             disabled={disabled}
-            onClick={() =>
-              void perform(
-                () => window.desktop.acknowledgeHarnessNotice(harness.id),
-                { key: `harness.notice:${harness.id}` },
-              )
-            }
+            onClick={act(harness, "notice", (id) =>
+              window.desktop.acknowledgeHarnessNotice(id),
+            )}
           >
             Got it
           </Button>
@@ -143,7 +148,8 @@ function SignInCommand({
   harness: HarnessState;
   disabled: boolean;
 }) {
-  const [copied, setCopied] = useState(false);
+  // The command last copied; "Copied" reads true only while the shown command is still it.
+  const [copied, setCopied] = useState<string | null>(null);
   const command = harness.auth.command ?? "";
   return (
     <div
@@ -162,22 +168,20 @@ function SignInCommand({
           onClick={() =>
             void navigator.clipboard
               .writeText(command)
-              .then(() => setCopied(true))
-              .catch(() => setCopied(false))
+              .then(() => setCopied(command))
+              .catch(() => setCopied(null))
           }
         >
           <Copy size={12} />
-          {copied ? "Copied" : "Copy"}
+          {copied === command ? "Copied" : "Copy"}
         </Button>
         <Button
           size="xs"
           variant="ghost"
           disabled={disabled}
-          onClick={() =>
-            void perform(() => window.desktop.refreshHarness(harness.id), {
-              key: `harness.refresh:${harness.id}`,
-            })
-          }
+          onClick={act(harness, "refresh", (id) =>
+            window.desktop.refreshHarness(id),
+          )}
         >
           <RefreshCw size={12} />
           Refresh
@@ -204,12 +208,9 @@ function SignOut({
     ),
   );
   const [confirming, setConfirming] = useState(false);
-  const signOut = () => {
-    setConfirming(false);
-    void perform(() => window.desktop.signOutHarness(harness.id), {
-      key: `harness.signOut:${harness.id}`,
-    });
-  };
+  const signOut = act(harness, "signOut", (id) =>
+    window.desktop.signOutHarness(id),
+  );
   if (confirming)
     return (
       <div
@@ -226,7 +227,10 @@ function SignOut({
             size="xs"
             variant="destructive"
             disabled={disabled}
-            onClick={signOut}
+            onClick={() => {
+              setConfirming(false);
+              signOut();
+            }}
           >
             <LogOut size={12} />
             Sign out
@@ -282,11 +286,9 @@ function UpdateNotice({
               variant="outline"
               disabled={disabled}
               title={`Downloads ${harness.label} ${update.version}, newer than the version this app was tested with.`}
-              onClick={() =>
-                void perform(() => window.desktop.updateHarness(harness.id), {
-                  key: `harness.update:${harness.id}`,
-                })
-              }
+              onClick={act(harness, "update", (id) =>
+                window.desktop.updateHarness(id),
+              )}
             >
               Update
             </Button>
@@ -302,12 +304,9 @@ function UpdateNotice({
             size="xs"
             variant="ghost"
             disabled={disabled}
-            onClick={() =>
-              void perform(
-                () => window.desktop.revertHarnessUpdate(harness.id),
-                { key: `harness.update:${harness.id}` },
-              )
-            }
+            onClick={act(harness, "update", (id) =>
+              window.desktop.revertHarnessUpdate(id),
+            )}
           >
             Revert
           </Button>
@@ -334,11 +333,9 @@ export function HarnessConnection({
           variant="ghost"
           aria-label={`Refresh ${harness.label}`}
           disabled={disabled}
-          onClick={() =>
-            void perform(() => window.desktop.refreshHarness(harness.id), {
-              key: `harness.refresh:${harness.id}`,
-            })
-          }
+          onClick={act(harness, "refresh", (id) =>
+            window.desktop.refreshHarness(id),
+          )}
         >
           <RefreshCw size={12} />
         </Button>
@@ -392,12 +389,9 @@ export function HarnessConnection({
           size="xs"
           variant="outline"
           disabled={disabled}
-          onClick={() =>
-            void perform(
-              () => window.desktop.chooseHarnessExecutable(harness.id),
-              { key: `harness.program:${harness.id}` },
-            )
-          }
+          onClick={act(harness, "program", (id) =>
+            window.desktop.chooseHarnessExecutable(id),
+          )}
         >
           <FolderOpen size={12} />
           Choose executable…
@@ -407,11 +401,9 @@ export function HarnessConnection({
             size="xs"
             variant="ghost"
             disabled={disabled}
-            onClick={() =>
-              void perform(() => window.desktop.useManagedHarness(harness.id), {
-                key: `harness.program:${harness.id}`,
-              })
-            }
+            onClick={act(harness, "program", (id) =>
+              window.desktop.useManagedHarness(id),
+            )}
           >
             Use managed program
           </Button>

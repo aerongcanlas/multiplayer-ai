@@ -23,7 +23,8 @@ import { EventQueue } from "../queue";
 import type { TurnStartParams } from "./generated/v2/TurnStartParams";
 import type { ThreadResumeParams } from "./generated/v2/ThreadResumeParams";
 import type { ThreadStartParams } from "./generated/v2/ThreadStartParams";
-import { ARGS, CodexProcess, versionOf, type Launcher } from "./process";
+import { direct, type Launcher } from "../launcher";
+import { ARGS, CodexProcess, versionOf } from "./process";
 import { CodexSession } from "./session";
 import { listSkills } from "./skills";
 import {
@@ -37,7 +38,6 @@ import { CODEX_ACCOUNT } from "./account";
 
 const IDLE_MS = 10 * 60_000;
 const LOGIN_HOSTS = ["auth.openai.com", "chatgpt.com"];
-const direct: Launcher = (executable, args, env) => ({ executable, args, env });
 
 const loginUrlAllowed = (value: string) => {
   try {
@@ -339,7 +339,7 @@ export class CodexAdapter implements HarnessAdapter {
 
   async startSignIn(context: LaunchContext): Promise<SignInStart> {
     const process = await this.process(context);
-    let held = false;
+    let done: Promise<void> | undefined;
     try {
       const account = object(
         object(
@@ -357,27 +357,31 @@ export class CodexAdapter implements HarnessAdapter {
       const url = string(result.authUrl);
       if (!loginUrlAllowed(url))
         throw new Error("Codex returned an unsupported sign-in URL.");
-      const loginId = string(result.loginId);
-      const done = new Promise<void>((resolve, reject) => {
-        const login = {
-          loginId,
-          process,
-          settle: (error?: Error) => {
-            if (this.login !== login) return;
-            this.login = undefined;
-            process.release();
-            if (error) reject(error);
-            else resolve();
-          },
-        };
-        this.login?.settle(new Error("A newer sign-in started."));
-        this.login = login;
-      });
-      held = true;
+      done = this.trackLogin(process, string(result.loginId));
       return { state: "pending", url, done };
     } finally {
-      if (!held) process.release();
+      // A pending login takes over the process hold until it settles.
+      if (!done) process.release();
     }
+  }
+
+  /** Makes the login the pending one; the promise settles when Codex reports how it ended. */
+  private trackLogin(process: CodexProcess, loginId: string) {
+    return new Promise<void>((resolve, reject) => {
+      const login = {
+        loginId,
+        process,
+        settle: (error?: Error) => {
+          if (this.login !== login) return;
+          this.login = undefined;
+          process.release();
+          if (error) reject(error);
+          else resolve();
+        },
+      };
+      this.login?.settle(new Error("A newer sign-in started."));
+      this.login = login;
+    });
   }
 
   async cancelSignIn() {
@@ -579,6 +583,8 @@ export class CodexAdapter implements HarnessAdapter {
 
   close() {
     this.closed = true;
+    // Closing a process does not report an exit, so a pending login is ended here.
+    this.login?.settle(new Error("The app is shutting down."));
     for (const process of [...this.processes.values()]) process.close();
     this.processes.clear();
   }

@@ -9,12 +9,8 @@ import type {
   RequestPermissionResponse,
   SessionNotification,
 } from "@agentclientprotocol/sdk";
-import {
-  OpenCodeProcess,
-  runCommand,
-  type Launcher,
-  type ProcessOwner,
-} from "./process";
+import type { Launcher } from "../launcher";
+import { OpenCodeProcess, runCommand, type ProcessOwner } from "./process";
 
 const FIXTURE = fileURLToPath(
   new URL("../../../../scripts/opencode-fixture.mjs", import.meta.url),

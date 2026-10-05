@@ -47,7 +47,9 @@ for (const folder of Object.values(isolated))
   await mkdir(folder, { recursive: true });
 const userData = join(output, "user-data");
 
-function liveRun(name, extra = {}) {
+/** One app run with its own output folder; all runs share the user data and OpenCode home. */
+async function liveRun(name, extra = {}) {
+  await mkdir(join(output, name), { recursive: true });
   return createRun({
     output: join(output, name),
     environment: testEnvironment({
@@ -61,11 +63,9 @@ function liveRun(name, extra = {}) {
     consoleErrors: false,
   });
 }
-await mkdir(join(output, "no-local"), { recursive: true });
-await mkdir(join(output, "ollama"), { recursive: true });
 
 // 1. No local server and no OpenCode login: OpenCode's anonymous free models never count.
-const empty = liveRun("no-local", {
+const empty = await liveRun("no-local", {
   MP_TEST_OPENCODE_DISCOVERY: JSON.stringify({
     servers: [
       { id: "ollama", label: "Ollama", running: false, models: [] },
@@ -74,17 +74,11 @@ const empty = liveRun("no-local", {
     providers: [],
   }),
 });
-const opencodeIn = (run) => async () =>
-  (await run.snapshot()).harnesses.find((item) => item.id === "opencode");
 await empty.execute(async () => {
   await empty.launch();
-  const opencode = opencodeIn(empty);
-  await empty.page
-    .getByRole("button", { name: "Settings", exact: true })
-    .click();
-  const dialog = empty.page.getByRole("dialog", { name: "Settings" });
-  await dialog.getByRole("tab", { name: "OpenCode" }).click();
-  await dialog
+  const opencode = () => empty.harness("opencode");
+  const settings = await empty.openSettings("OpenCode");
+  await settings
     .getByRole("button", { name: "Refresh OpenCode", exact: true })
     .click();
   await empty.until(
@@ -98,10 +92,7 @@ await empty.execute(async () => {
     async () => (await opencode()).auth.state === "signed_out",
     "OpenCode to report no models",
   );
-  await dialog
-    .getByRole("region", { name: "Harness settings" })
-    .getByText("No models available", { exact: true })
-    .waitFor();
+  await settings.getByText("No models available", { exact: true }).waitFor();
   assert.deepEqual((await opencode()).models, []);
   await empty.page.screenshot({ path: join(output, "no-local.png") });
   await empty.checkpoint(
@@ -138,8 +129,8 @@ await empty.execute(async () => {
 });
 
 // 2. A real Ollama model edits a file after one approval, stops, and resumes after a restart.
-const run = liveRun("ollama");
-const opencode = opencodeIn(run);
+const run = await liveRun("ollama");
+const opencode = () => run.harness("opencode");
 const tab = async () => (await run.snapshot()).rooms[0].tabs[0];
 const panel = () => run.page.getByRole("region", { name: "AI tabs" });
 const settled = (label) => run.settled(tab, label, 10 * 60_000);
@@ -147,10 +138,7 @@ const listed = (tags.models ?? []).map((model) => model.name);
 await run.execute(async () => {
   await run.launch();
   await run.selectRepository(repository);
-  await panel().getByRole("button", { name: "New tab", exact: true }).click();
-  await run.page
-    .getByRole("menuitem", { name: "OpenCode", exact: true })
-    .click();
+  await run.newTab("OpenCode");
   await run.until(
     async () => (await tab())?.status === "idle",
     "a ready OpenCode tab",
@@ -177,8 +165,9 @@ await run.execute(async () => {
   await run.send(
     "Use your write tool to create the file live-check.txt in the current working directory (use the relative path live-check.txt) containing exactly the word hi. Do nothing else.",
   );
+  // Approve each card as it appears until the turn is idle with nothing left to approve.
   let approvals = 0;
-  while ((await tab()).status !== "idle" || approvals === 0) {
+  for (;;) {
     const approve = panel()
       .getByRole("button", { name: "Approve once", exact: true })
       .first();

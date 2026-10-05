@@ -345,12 +345,7 @@ await run.execute(
         if (packaged) {
             // The Claude Code harness state exists only once the supervisor has loaded the Claude Agent
             // SDK, so reaching it proves the SDK loads from the packaged build.
-            await page
-                .getByRole("button", { name: "New tab", exact: true })
-                .click();
-            await page
-                .getByRole("menuitem", { name: "Claude Code", exact: true })
-                .click();
+            await run.newTab("Claude Code");
             await page.getByRole("tab", { name: /Claude Code 1/ }).waitFor();
             const state = await snapshot();
             assert.equal(state.rooms[1].tabs[0].status, "unavailable");
@@ -431,12 +426,7 @@ await run.execute(
         await page.screenshot({ path: join(output, "02-new-tab-menu.png") });
         await page.keyboard.press("Escape");
         assert.equal(await picker.count(), 0);
-        await page
-            .getByRole("button", { name: "New tab", exact: true })
-            .click();
-        await page
-            .getByRole("menuitem", { name: "Codex", exact: true })
-            .click();
+        await run.newTab("Codex");
         await page.getByRole("tab", { name: /Codex 1/ }).waitFor();
         for (let attempt = 0; attempt < 100; attempt++) {
             if ((await snapshot()).rooms[1].tabs[0].status === "idle") break;

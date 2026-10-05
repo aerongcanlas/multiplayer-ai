@@ -17,21 +17,16 @@ import {
 import { slashCommands } from "../commands";
 import { object, string } from "../json";
 import { buildConfig, HostConfigs, hostedLogin } from "./config";
+import { direct, type Launcher } from "../launcher";
 import { discover, type Discovery } from "./discovery";
-import {
-  direct,
-  OpenCodeProcess,
-  runCommand,
-  type Launcher,
-  type ProcessOwner,
-} from "./process";
+import { OpenCodeProcess, runCommand, type ProcessOwner } from "./process";
 import { choose, OpenCodeSession } from "./session";
 import { loginCommand } from "./account";
 
 const IDLE_MS = 10 * 60_000;
 const EFFORT = /^[a-z][a-z0-9_-]{0,23}$/;
-const LOCAL = new Set(["ollama", "lmstudio"]);
-const PROVIDER_NAMES: Record<string, string> = {
+// The local model servers' display names; any other provider is shown by its id.
+const LOCAL: Record<string, string> = {
   ollama: "Ollama",
   lmstudio: "LM Studio",
 };
@@ -301,9 +296,9 @@ export class OpenCodeAdapter implements HarnessAdapter, ProcessOwner {
       auth: models.length
         ? {
             state: "signed_in",
-            account: providers.every((id) => LOCAL.has(id))
+            account: providers.every((id) => Object.hasOwn(LOCAL, id))
               ? "Local models"
-              : providers.map((id) => PROVIDER_NAMES[id] ?? id).join(", "),
+              : providers.map((id) => LOCAL[id] ?? id).join(", "),
             command,
           }
         : { state: "signed_out", message: NO_MODELS, command },

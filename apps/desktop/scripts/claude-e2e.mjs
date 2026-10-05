@@ -67,9 +67,19 @@ const run = createRun({
   poll: 500,
   consoleErrors: false,
 });
-const { launch, checkpoint, snapshot, until, send, selectRepository } = run;
-const claude = async () =>
-  (await snapshot()).harnesses.find((item) => item.id === "claude");
+const {
+  launch,
+  checkpoint,
+  snapshot,
+  harness,
+  until,
+  send,
+  selectRepository,
+  newTab,
+  openSettings,
+  closeSettings,
+} = run;
+const claude = () => harness("claude");
 const tab = async () => (await snapshot()).rooms[0].tabs[0];
 const panel = () => run.page.getByRole("region", { name: "AI tabs" });
 const settled = () => run.settled(tab);
@@ -88,16 +98,22 @@ const claudeCli = async (args, configDir) =>
       CLAUDE_CONFIG_DIR: configDir,
     },
   });
-/** Re-reads sign-in in Settings, as the app itself sees it. */
+/** Re-reads sign-in in Settings, as the app itself sees it, and waits for that read to land. */
 async function refreshClaude() {
-  await run.page.getByRole("button", { name: "Settings", exact: true }).click();
-  const dialog = run.page.getByRole("dialog", { name: "Settings" });
-  await dialog.getByRole("tab", { name: "Claude Code" }).click();
-  await dialog
+  const { modelsRefreshedAt } = await claude();
+  const settings = await openSettings("Claude Code");
+  await settings
     .getByRole("button", { name: "Refresh Claude Code", exact: true })
     .click();
-  await run.page.keyboard.press("Escape");
-  await wait(3_000);
+  await closeSettings();
+  // A successful read stamps the refresh time; a failed one reports the state as unknown.
+  await until(async () => {
+    const current = await claude();
+    return (
+      current.modelsRefreshedAt !== modelsRefreshedAt ||
+      current.auth.state === "unknown"
+    );
+  }, "Claude Code's sign-in to be re-read");
 }
 
 await run.execute(async () => {
@@ -105,12 +121,7 @@ await run.execute(async () => {
   // A reused profile already has its repository and Claude Code tab.
   if (!(await snapshot()).rooms[0]?.workspace)
     await selectRepository(repository);
-  if (!(await snapshot()).rooms[0]?.tabs.length) {
-    await panel().getByRole("button", { name: "New tab", exact: true }).click();
-    await run.page
-      .getByRole("menuitem", { name: "Claude Code", exact: true })
-      .click();
-  }
+  if (!(await snapshot()).rooms[0]?.tabs.length) await newTab("Claude Code");
   await until(
     async () => (await claude()).program.state === "ready",
     "the managed download",
@@ -207,10 +218,7 @@ await run.execute(async () => {
   await checkpoint("Native plan mode continues into execution from its card");
 
   // Two tabs run at once without either signing out.
-  await panel().getByRole("button", { name: "New tab", exact: true }).click();
-  await run.page
-    .getByRole("menuitem", { name: "Claude Code", exact: true })
-    .click();
+  await newTab("Claude Code");
   const tabs = async () => (await snapshot()).rooms[0].tabs;
   await until(
     async () => (await tabs())[1]?.status === "idle",
@@ -262,20 +270,13 @@ await run.execute(async () => {
   );
 
   // Sign out runs Claude Code's own logout in the app's home, so no keychain item is left.
-  await run.page.getByRole("button", { name: "Settings", exact: true }).click();
-  await run.page
-    .getByRole("dialog", { name: "Settings" })
-    .getByRole("tab", { name: "Claude Code" })
-    .click();
-  await run.page
-    .getByRole("region", { name: "Harness settings" })
-    .getByRole("button", { name: "Sign out", exact: true })
-    .click();
+  const settings = await openSettings("Claude Code");
+  await settings.getByRole("button", { name: "Sign out", exact: true }).click();
   await until(
     async () => (await claude()).auth.state === "signed_out",
     "Claude Code to sign out",
   );
-  await run.page.keyboard.press("Escape");
+  await closeSettings();
   // The app re-runs Claude Code's own `auth status` against its folder.
   await refreshClaude();
   assert.equal((await claude()).auth.state, "signed_out");

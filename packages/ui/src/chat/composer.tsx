@@ -38,6 +38,8 @@ export interface ComposerProps {
   /** When provided, the send control stops the active agent instead. */
   onStop?(): void;
   stopDisabled?: boolean;
+  /** A stop request is still in flight; the Stop control waits for it. */
+  stopping?: boolean;
   placeholder?: string;
   label?: string;
   submitLabel?: string;
@@ -70,6 +72,7 @@ export function Composer({
   busy = false,
   onStop,
   stopDisabled = false,
+  stopping = false,
   placeholder = "What should the agent do?",
   label = "Message the agent",
   submitLabel = "Send message",
@@ -286,11 +289,9 @@ export function Composer({
         </div>
         <Button
           aria-label={buttonLabel}
-          aria-busy={
-            onStop ? stopDisabled : busy || pendingTargets.has(targetKey)
-          }
+          aria-busy={onStop ? stopping : busy || pendingTargets.has(targetKey)}
           title={buttonLabel}
-          disabled={onStop ? stopDisabled : sendDisabled}
+          disabled={onStop ? stopDisabled || stopping : sendDisabled}
           size={compact ? "icon-sm" : "icon"}
           type={onStop ? "button" : "submit"}
           onClick={onStop}

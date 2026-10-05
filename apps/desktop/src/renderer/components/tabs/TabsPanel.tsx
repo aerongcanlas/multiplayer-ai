@@ -568,7 +568,8 @@ export function TabsPanel({
                         )
                     : undefined
                 }
-                stopDisabled={stale || stopping}
+                stopDisabled={stale}
+                stopping={stopping}
                 commands={{
                   key: `${room.id}:${tab.loadout.harness}`,
                   load: async () => {

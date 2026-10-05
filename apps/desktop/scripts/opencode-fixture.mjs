@@ -17,6 +17,7 @@ import {
 
 const [command, ...rest] = process.argv.slice(2);
 const env = process.env;
+const VERSION = "1.18.34";
 const injected = JSON.parse(env.OPENCODE_CONFIG_CONTENT || "{}");
 
 // E2E runs share one environment with the Codex fixture, so OpenCode has its own log variable.
@@ -59,7 +60,7 @@ function models() {
 }
 
 if (command === "--version") {
-  console.log("1.18.34");
+  console.log(VERSION);
   process.exit(0);
 }
 if (command === "debug" && rest[0] === "config") {
@@ -221,7 +222,7 @@ new AgentSideConnection((connection) => {
           sessionCapabilities: { resume: {}, close: {} },
         },
         authMethods: [],
-        agentInfo: { name: "OpenCode", version: "1.18.34" },
+        agentInfo: { name: "OpenCode", version: VERSION },
       };
     },
     async authenticate() {
@@ -350,22 +351,16 @@ new AgentSideConnection((connection) => {
         });
       }
       if (prompt.includes("FIXTURE_PERMISSION")) {
-        await update(id, {
-          sessionUpdate: "tool_call",
+        const toolCall = {
           toolCallId: "call_bash",
           title: "touch made.txt",
           kind: "execute",
           status: "pending",
           rawInput: { command: "touch made.txt" },
-        });
+        };
+        await update(id, { sessionUpdate: "tool_call", ...toolCall });
         const choice = await Promise.race([
-          answer({
-            toolCallId: "call_bash",
-            title: "touch made.txt",
-            kind: "execute",
-            status: "pending",
-            rawInput: { command: "touch made.txt" },
-          }),
+          answer(toolCall),
           cancel.then(() => "cancelled"),
         ]);
         if (cancelled || choice === "cancelled")

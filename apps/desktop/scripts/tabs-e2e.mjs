@@ -2,7 +2,7 @@
 // Claude Code, and OpenCode tabs, approvals, questions, plan mode, Stop, close, suggestions, restart resume,
 // crash recovery, Mission Control's lead context, sub-agent cards, and drill-in, and app-owned
 // harness logins over a fake host setup. Nothing leaves the machine.
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { createHash } from "node:crypto";
 import {
   lstat,
@@ -20,6 +20,7 @@ import {
   createRun,
   crashApplication,
   fixtureRepository,
+  jsonLines,
   outputDirectory,
   stubOpenDialog,
   testEnvironment,
@@ -33,12 +34,13 @@ const codexState = join(output, "codex-threads.json");
 // A fake host setup: Claude Code and Codex folders the app links from, never writes to.
 const hostClaude = join(output, "host-claude");
 const hostCodex = join(output, "host-codex");
-const SECRETS = [
-  "sk-ant-oat01-e2e-host-token",
-  "e2e-mcp-secret-env",
-  "e2e-mcp-secret-header",
-  "e2e-marker-credential",
-];
+// Host values that must never reach app state, logs, or snapshots.
+const SECRETS = {
+  token: "sk-ant-oat01-e2e-host-token",
+  mcpEnv: "e2e-mcp-secret-env",
+  mcpHeader: "e2e-mcp-secret-header",
+  credential: "e2e-marker-credential",
+};
 const opencodeLog = join(output, "opencode-fixture.jsonl");
 // OpenCode sees one local Ollama model in place of probing the real servers.
 const opencodeDiscovery = {
@@ -72,28 +74,29 @@ const opencodeDiscovery = {
   ],
 };
 const git = await fixtureRepository(repository, { readme: "Tabs fixture\n" });
-await mkdir(join(hostClaude, "skills", "host-skill"), { recursive: true });
-await writeFile(
+/** Writes a host file, creating its folder. */
+async function seed(path, content) {
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, content);
+}
+await seed(
   join(hostClaude, "skills", "host-skill", "SKILL.md"),
   "---\nname: host-skill\ndescription: A host skill\n---\nBody\n",
 );
-await writeFile(join(hostClaude, "settings.json"), '{"model":"sonnet"}\n');
-await mkdir(join(hostClaude, "projects", "-host-repo", "memory"), {
-  recursive: true,
-});
-await writeFile(
+await seed(join(hostClaude, "settings.json"), '{"model":"sonnet"}\n');
+await seed(
   join(hostClaude, "projects", "-host-repo", "memory", "MEMORY.md"),
   "- host memory\n",
 );
-await writeFile(join(hostClaude, ".credentials.json"), "e2e-marker-credential");
-await writeFile(
+await seed(join(hostClaude, ".credentials.json"), SECRETS.credential);
+await seed(
   join(hostClaude, ".claude.json"),
   JSON.stringify({
     mcpServers: {
       "e2e-server": {
         type: "stdio",
         command: "e2e-mcp",
-        env: { API_TOKEN: "e2e-mcp-secret-env" },
+        env: { API_TOKEN: SECRETS.mcpEnv },
       },
     },
     projects: {
@@ -102,7 +105,7 @@ await writeFile(
           "e2e-remote": {
             type: "http",
             url: "https://mcp.example.invalid",
-            headers: { Authorization: "Bearer e2e-mcp-secret-header" },
+            headers: { Authorization: `Bearer ${SECRETS.mcpHeader}` },
           },
         },
       },
@@ -110,20 +113,20 @@ await writeFile(
   }),
 );
 await mkdir(join(hostCodex, "skills"), { recursive: true });
-await writeFile(join(hostCodex, "config.toml"), 'model = "fixture-codex"\n');
-await writeFile(join(hostCodex, "AGENTS.md"), "Host instructions\n");
-/** Every host file with its content hash, without following links. */
-async function tree(root, base = root) {
+await seed(join(hostCodex, "config.toml"), 'model = "fixture-codex"\n');
+await seed(join(hostCodex, "AGENTS.md"), "Host instructions\n");
+/** Every entry under a folder, as a path and its kind, without following links into other folders. */
+const entriesUnder = async (root) =>
+  (await readdir(root, { recursive: true, withFileTypes: true }))
+    .filter((entry) => !entry.isDirectory())
+    .map((entry) => ({ path: join(entry.parentPath, entry.name), entry }));
+/** Every host file with its content hash. */
+async function tree(root) {
   const files = {};
-  for (const name of await readdir(root)) {
-    const path = join(root, name);
-    const info = await lstat(path);
-    if (info.isDirectory()) Object.assign(files, await tree(path, base));
-    else
-      files[path.slice(base.length)] = createHash("sha256")
-        .update(await readFile(path))
-        .digest("hex");
-  }
+  for (const { path } of await entriesUnder(root))
+    files[path.slice(root.length)] = createHash("sha256")
+      .update(await readFile(path))
+      .digest("hex");
   return files;
 }
 const hostBefore = {
@@ -157,7 +160,7 @@ const run = createRun({
     CLAUDE_CONFIG_DIR: hostClaude,
     CODEX_HOME: hostCodex,
     // A host shell's Claude Code token never reaches a harness launch (R2).
-    CLAUDE_CODE_OAUTH_TOKEN: SECRETS[0],
+    CLAUDE_CODE_OAUTH_TOKEN: SECRETS.token,
   }),
   // Record, rather than perform, anything that would leave the app window.
   prepare: (application) =>
@@ -172,27 +175,28 @@ const run = createRun({
       };
     }),
 });
-const { launch, checkpoint, snapshot, until, send, selectRepository } = run;
+const {
+  launch,
+  checkpoint,
+  snapshot,
+  harness,
+  until,
+  send,
+  selectRepository,
+  newTab,
+  openSettings,
+  closeSettings,
+} = run;
 
 const room = async () => (await snapshot()).rooms[0];
 const tabNamed = async (title) =>
   (await room()).tabs.find((tab) => tab.title === title);
-const harness = async (id) =>
-  (await snapshot()).harnesses.find((item) => item.id === id);
 const tabsPanel = () => run.page.getByRole("region", { name: "AI tabs" });
-const settings = () =>
-  run.page.getByRole("region", { name: "Harness settings" });
 const harnessRow = (label) =>
-  settings().locator(".harness-row").filter({ hasText: label });
-/** Opens Settings on one harness's page; Escape closes it again. */
-async function openSettings(label) {
-  await run.page.getByRole("button", { name: "Settings", exact: true }).click();
-  await run.page
-    .getByRole("dialog", { name: "Settings" })
-    .getByRole("tab", { name: label })
-    .click();
-}
-const closeSettings = () => run.page.keyboard.press("Escape");
+  run.page
+    .getByRole("region", { name: "Harness settings" })
+    .locator(".harness-row")
+    .filter({ hasText: label });
 const mission = () => run.page.getByRole("region", { name: "Mission Control" });
 const leadContext = () =>
   mission().getByRole("region", { name: "Lead context" });
@@ -201,30 +205,17 @@ const agentCard = (description) =>
   agentTasks().locator(".agent-card").filter({ hasText: description });
 const tabChip = (title) =>
   tabsPanel().getByRole("tab", { name: new RegExp(title) });
-
-async function selectTab(title) {
-  await tabsPanel()
-    .getByRole("tab", { name: new RegExp(title) })
-    .click();
-}
+const selectTab = (title) => tabChip(title).click();
 const settled = (title) =>
   run.settled(() => tabNamed(title), `${title} to finish its turn`);
-async function opencodeRequests(method) {
-  return (await readFile(opencodeLog, "utf8"))
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => JSON.parse(line))
-    .filter((entry) => entry.method === method);
-}
 const opencodeTab = async () =>
   (await room()).tabs.find((tab) => tab.loadout.harness === "opencode");
-async function codexRequests(method) {
-  return (await readFile(codexLog, "utf8"))
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => JSON.parse(line))
-    .filter((entry) => entry.type === "request" && entry.method === method);
-}
+const opencodeRequests = async (method) =>
+  (await jsonLines(opencodeLog)).filter((entry) => entry.method === method);
+const codexRequests = async (method) =>
+  (await jsonLines(codexLog)).filter(
+    (entry) => entry.type === "request" && entry.method === method,
+  );
 
 await run.execute(
   async () => {
@@ -232,12 +223,7 @@ await run.execute(
     await selectRepository(repository);
 
     // The first Codex tab downloads, verifies, and becomes ready.
-    await tabsPanel()
-      .getByRole("button", { name: "New tab", exact: true })
-      .click();
-    await run.page
-      .getByRole("menuitem", { name: "Codex", exact: true })
-      .click();
+    await newTab("Codex");
     await until(
       async () => (await tabNamed("Codex 1"))?.status === "idle",
       "the Codex tab to become ready",
@@ -429,12 +415,7 @@ await run.execute(
     await checkpoint("A bad custom executable shows guidance with no download");
 
     // A corrupted download names the failure and offers retry; Claude Code then needs a login.
-    await tabsPanel()
-      .getByRole("button", { name: "New tab", exact: true })
-      .click();
-    await run.page
-      .getByRole("menuitem", { name: "Claude Code", exact: true })
-      .click();
+    await newTab("Claude Code");
     await until(
       async () => (await harness("claude")).program.state === "failed",
       "the corrupted Claude Code download to fail",
@@ -646,12 +627,7 @@ await run.execute(
     );
 
     // Stop on an idle tab stops its background sub-agent.
-    await tabsPanel()
-      .getByRole("button", { name: "New tab", exact: true })
-      .click();
-    await run.page
-      .getByRole("menuitem", { name: "Claude Code", exact: true })
-      .click();
+    await newTab("Claude Code");
     await until(
       async () => (await tabNamed("Claude Code 2"))?.status === "idle",
       "Claude Code 2",
@@ -720,12 +696,7 @@ await run.execute(
     await checkpoint("Two tabs run turns concurrently and stop independently");
 
     // Closing a running tab asks for confirmation.
-    await tabsPanel()
-      .getByRole("button", { name: "New tab", exact: true })
-      .click();
-    await run.page
-      .getByRole("menuitem", { name: "Codex", exact: true })
-      .click();
+    await newTab("Codex");
     await until(
       async () => (await tabNamed("Codex 2"))?.status === "idle",
       "Codex 2",
@@ -856,12 +827,7 @@ await run.execute(
     );
 
     // A background sub-agent is still running when the app dies.
-    await tabsPanel()
-      .getByRole("button", { name: "New tab", exact: true })
-      .click();
-    await run.page
-      .getByRole("menuitem", { name: "Claude Code", exact: true })
-      .click();
+    await newTab("Claude Code");
     await until(
       async () => (await tabNamed("Claude Code 3"))?.status === "idle",
       "Claude Code 3",
@@ -913,12 +879,7 @@ await run.execute(
     );
 
     // An OpenCode tab downloads its managed program and runs on the local model it found.
-    await tabsPanel()
-      .getByRole("button", { name: "New tab", exact: true })
-      .click();
-    await run.page
-      .getByRole("menuitem", { name: "OpenCode", exact: true })
-      .click();
+    await newTab("OpenCode");
     await until(
       async () => (await opencodeTab())?.status === "idle",
       "the OpenCode tab to become ready",
@@ -1098,6 +1059,7 @@ await run.execute(
       await tabsPanel().innerText(),
       /fixture@example\.invalid/,
     );
+    // The window was relaunched since the first sign-in, so the locator is made again.
     await tabsPanel()
       .getByRole("button", { name: "Sign in", exact: true })
       .click();
@@ -1156,43 +1118,32 @@ await run.execute(
     );
 
     // Launches carry the app's homes and no host credential (R2); nothing leaks (R12).
-    const claudeLaunches = (await readFile(`${claudeState}.log`, "utf8"))
-      .split("\n")
-      .filter(Boolean)
-      .map((line) => JSON.parse(line));
+    const claudeLaunches = await jsonLines(`${claudeState}.log`);
     assert.ok(claudeLaunches.length);
-    for (const launch of claudeLaunches) {
-      assert.equal(launch.configDir, join(accounts, "claude"));
-      assert.ok(!launch.envKeys.includes("CLAUDE_CODE_OAUTH_TOKEN"));
+    for (const entry of claudeLaunches) {
+      assert.equal(entry.configDir, join(accounts, "claude"));
+      assert.ok(!entry.envKeys.includes("CLAUDE_CODE_OAUTH_TOKEN"));
     }
-    const codexLaunches = (await readFile(codexLog, "utf8"))
-      .split("\n")
-      .filter(Boolean)
-      .map((line) => JSON.parse(line))
-      .filter((entry) => entry.type === "launch");
-    for (const launch of codexLaunches)
-      assert.equal(launch.env.CODEX_HOME, join(accounts, "codex"));
+    const codexLaunches = (await jsonLines(codexLog)).filter(
+      (entry) => entry.type === "launch",
+    );
+    assert.ok(codexLaunches.length);
+    for (const entry of codexLaunches)
+      assert.equal(entry.env.CODEX_HOME, join(accounts, "codex"));
     const captured = [JSON.stringify(await snapshot())];
-    /** Every app file, read without following links into the host's folders. */
-    async function appFiles(root) {
-      const found = [];
-      for (const name of await readdir(root)) {
-        const path = join(root, name);
-        const info = await lstat(path);
-        if (info.isDirectory()) found.push(...(await appFiles(path)));
-        else if (info.isFile()) found.push(path);
-      }
-      return found;
-    }
+    // Every app file, read without following links into the host's folders.
+    const appFiles = (await entriesUnder(join(output, "user-data")))
+      .filter(({ entry }) => entry.isFile())
+      .map(({ path }) => path);
     for (const file of [
-      ...(await appFiles(join(output, "user-data"))),
+      ...appFiles,
       `${claudeState}.log`,
       codexLog,
       opencodeLog,
       join(output, "latest-snapshot.yml"),
     ])
       captured.push((await readFile(file)).toString("latin1"));
-    for (const secret of SECRETS)
+    for (const secret of Object.values(SECRETS))
       assert.ok(
         captured.every((text) => !text.includes(secret)),
         `${secret} must not appear in app state, logs, or snapshots`,

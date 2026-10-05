@@ -36,6 +36,8 @@ export const OPENCODE_PACKAGES: Record<PlatformKey, string> = {
 export const opencodeLine = (pinned = HARNESS_MANIFEST.opencode.version) =>
   `${pinned.split(".").slice(0, 2).join(".")}.`;
 
+/** A released version: three numbers, no pre-release tag. */
+export const RELEASE = /^\d+\.\d+\.\d+$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 const SHA512 = /^sha512-[A-Za-z0-9+/]{86}==$/;
 
@@ -165,7 +167,7 @@ export async function findRelease(
   platform: PlatformKey,
   request: typeof fetch = fetch,
 ): Promise<ProgramRelease> {
-  if (!/^\d+\.\d+\.\d+$/.test(version))
+  if (!RELEASE.test(version))
     throw new Error("That is not a released version.");
   const asset = await LOOKUPS[harness](version, platform, request);
   return { version, asset };

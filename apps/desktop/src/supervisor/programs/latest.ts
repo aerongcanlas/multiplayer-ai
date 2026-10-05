@@ -1,13 +1,12 @@
 import type { HarnessId } from "../../shared/tabs";
 import { HARNESS_MANIFEST } from "./manifest";
-import { opencodeLine } from "./release";
+import { opencodeLine, RELEASE } from "./release";
 
 const PACKAGES: Record<HarnessId, string> = {
   codex: "@openai/codex",
   claude: "@anthropic-ai/claude-code",
   opencode: "opencode-ai",
 };
-const RELEASE = /^\d+\.\d+\.\d+$/;
 
 /** The newest version the app can move to, and a newer one that needs an app update first. */
 export interface LatestRelease {

@@ -807,6 +807,15 @@ test("Cancel during a ChatGPT sign-in sends account/login/cancel with its loginI
     );
   }));
 
+test("closing the adapter ends a pending ChatGPT sign-in", () =>
+  withAdapter({ signedIn: false, loginHang: true }, async (adapter, setup_) => {
+    const started = await adapter.startSignIn(setup_.context);
+    assert.ok(started.state === "pending");
+    const ended = assert.rejects(started.done, /shutting down/);
+    adapter.close();
+    await ended;
+  }));
+
 test("Sign out logs the app home out and closes its app-server", () =>
   withAdapter(async (adapter, setup_) => {
     const signedIn = (await adapter.inspect(setup_.context)).auth;

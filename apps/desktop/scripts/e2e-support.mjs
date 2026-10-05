@@ -100,6 +100,13 @@ export async function fingerprint(repository) {
   };
 }
 
+/** The entries of a JSON-lines file, such as a fixture's request log. */
+export const jsonLines = async (path) =>
+  (await readFile(path, "utf8"))
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+
 export function testEnvironment(extra = {}, unset = []) {
   const environment = { ...process.env, MP_E2E: "1", ...extra };
   for (const key of ["ELECTRON_RUN_AS_NODE", "ELECTRON_RENDERER_URL", ...unset])
@@ -198,6 +205,8 @@ export function createRun({
     assert.equal(result.ok, true, result.error);
     return result.snapshot;
   };
+  const harness = async (id) =>
+    (await snapshot()).harnesses.find((item) => item.id === id);
 
   const until = async (check, label, limit = untilTimeout) => {
     const end = Date.now() + limit;
@@ -228,6 +237,28 @@ export function createRun({
       .getByRole("button", { name: basename(path), exact: true })
       .waitFor();
   };
+
+  /** Opens a tab on the named harness from the AI tabs panel's menu. */
+  const newTab = async (label) => {
+    await run.page
+      .getByRole("region", { name: "AI tabs" })
+      .getByRole("button", { name: "New tab", exact: true })
+      .click();
+    await run.page.getByRole("menuitem", { name: label, exact: true }).click();
+  };
+
+  /** Opens Settings on one harness's page and returns that page; `closeSettings` dismisses it. */
+  const openSettings = async (label) => {
+    await run.page
+      .getByRole("button", { name: "Settings", exact: true })
+      .click();
+    await run.page
+      .getByRole("dialog", { name: "Settings" })
+      .getByRole("tab", { name: label })
+      .click();
+    return run.page.getByRole("region", { name: "Harness settings" });
+  };
+  const closeSettings = () => run.page.keyboard.press("Escape");
 
   const send = async (text) => {
     const panel = run.page.getByRole("region", { name: "AI tabs" });
@@ -283,9 +314,13 @@ export function createRun({
     launch,
     checkpoint,
     snapshot,
+    harness,
     until,
     settled,
     selectRepository,
+    newTab,
+    openSettings,
+    closeSettings,
     send,
     execute,
   });

@@ -598,9 +598,7 @@ export class TabHost {
         if (!live.session && !turn) continue;
         if (turn) {
           turn.stopping = true;
-          for (const entryId of live.requests.keys())
-            this.writer.update(entryId, { state: "cancelled" });
-          live.requests.clear();
+          this.cancelRequests(live);
         }
         this.dropSession(room.id, tab.id, "stopped");
         if (turn) this.finish(tab.id, turn, "stopped");
@@ -1084,9 +1082,7 @@ export class TabHost {
     const turn = live.turn && !live.turn.finished ? live.turn : undefined;
     if (turn ? turn.stopping : live.stopTimer) return;
     if (turn) turn.stopping = true;
-    for (const entryId of live.requests.keys())
-      this.writer.update(entryId, { state: "cancelled" });
-    live.requests.clear();
+    this.cancelRequests(live);
     this.writer.flush();
     this.counts(roomId, tabId);
     void live.session?.stop().catch(() => {});
@@ -1106,6 +1102,13 @@ export class TabHost {
     timer.unref?.();
     if (turn) turn.stopTimer = timer;
     else live.stopTimer = timer;
+  }
+
+  /** Cancels every pending approval and question on the tab, the lead's and its sub-agents'. */
+  private cancelRequests(live: Live) {
+    for (const entryId of live.requests.keys())
+      this.writer.update(entryId, { state: "cancelled" });
+    live.requests.clear();
   }
 
   private finish(tabId: string, turn: Turn, outcome: "completed" | "stopped") {

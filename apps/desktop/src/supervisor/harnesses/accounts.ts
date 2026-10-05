@@ -23,15 +23,13 @@ import type { HarnessId } from "../../shared/tabs";
 type HomeVariable = "CLAUDE_CONFIG_DIR" | "CODEX_HOME";
 
 /** Where the host keeps its own setup: the home folder and each harness's folder variable. */
-export type HostPaths = Partial<
-  Record<"HOME" | "USERPROFILE" | "CLAUDE_CONFIG_DIR" | "CODEX_HOME", string>
->;
 const HOST_PATHS = [
   "HOME",
   "USERPROFILE",
   "CLAUDE_CONFIG_DIR",
   "CODEX_HOME",
 ] as const;
+export type HostPaths = Partial<Record<(typeof HOST_PATHS)[number], string>>;
 
 /** The location variables of a raw host environment, and nothing else from it. */
 export function hostPaths(env: Record<string, string | undefined>): HostPaths {
@@ -90,6 +88,9 @@ export class AccountError extends Error {}
 
 const code = (error: unknown) => (error as NodeJS.ErrnoException)?.code;
 const missing = (error: unknown) => code(error) === "ENOENT";
+// Manifest names use "/" on every platform.
+const entryPath = (home: string, name: string) =>
+  join(home, ...name.split("/"));
 
 async function hashOf(path: string) {
   return createHash("sha256")
@@ -234,7 +235,7 @@ export class Accounts {
     want: Entry,
     recorded: Entry | undefined,
   ): Promise<Entry | undefined> {
-    const path = join(home, ...name.split("/"));
+    const path = entryPath(home, name);
     const current = await info(path);
     if (!current) {
       await mkdir(dirname(path), { recursive: true });
@@ -242,6 +243,8 @@ export class Accounts {
     }
     // Real files the harness made itself stay untouched.
     if (!recorded) return undefined;
+    // What matches is recorded as wanted now, so a spec or host folder change never leaves a
+    // stale kind or target behind.
     if (want.kind === "copy") {
       // Something other than the copy, or a copy the harness changed: keep it beside the refresh.
       if (!current.isFile() || (await hashOf(path)) !== recorded.hash) {
@@ -249,12 +252,12 @@ export class Accounts {
         return this.create(path, want);
       }
       return (await hashOf(want.target)) === recorded.hash
-        ? recorded
+        ? { ...want, hash: recorded.hash }
         : this.create(path, want);
     }
     if (current.isSymbolicLink()) {
       const target = await readlink(path).catch(() => "");
-      if (resolve(dirname(path), target) === want.target) return recorded;
+      if (resolve(dirname(path), target) === want.target) return want;
       await unlink(path);
       return this.create(path, want);
     }
@@ -285,7 +288,7 @@ export class Accounts {
 
   /** Removes an entry whose host source is gone; anything the harness changed is kept aside. */
   private async remove(home: string, name: string, entry: Entry) {
-    const path = join(home, ...name.split("/"));
+    const path = entryPath(home, name);
     const current = await info(path);
     if (!current) return;
     if (current.isSymbolicLink() && entry.kind !== "copy") {

@@ -467,15 +467,9 @@ export class HarnessRegistry {
     if (this.signingIn.has(harness)) return;
     const pending: PendingSignIn = {};
     this.signingIn.set(harness, pending);
-    const current = () => this.signingIn.get(harness) === pending;
-    // Every caller checks current() first.
-    const end = () => {
-      clearTimeout(pending.timer);
-      this.signingIn.delete(harness);
-    };
     try {
       const started = await adapter.startSignIn(await this.context(harness));
-      if (!current()) {
+      if (this.signingIn.get(harness) !== pending) {
         // Cancelled or closed while the login program was starting: end that program too, unless
         // a newer sign-in now owns the adapter's login.
         if (started.state === "pending" && !this.signingIn.has(harness))
@@ -483,7 +477,7 @@ export class HarnessRegistry {
         return;
       }
       if (started.state === "signed_in") {
-        end();
+        this.forget(harness, pending);
         return this.refresh(harness, true);
       }
       this.update(harness, (state) => {
@@ -500,24 +494,28 @@ export class HarnessRegistry {
       if (started.url) this.options.openLogin?.(harness, started.url);
       started.done.then(
         () => {
-          if (!current()) return;
-          end();
-          void this.refresh(harness, true);
+          if (this.forget(harness, pending)) void this.refresh(harness, true);
         },
         (error: unknown) => {
-          if (!current()) return;
-          end();
-          this.markSignedOut(harness, signInReason(error));
+          if (this.forget(harness, pending))
+            this.markSignedOut(harness, signInReason(error));
         },
       );
     } catch (error) {
-      if (!current()) return;
-      end();
+      if (!this.forget(harness, pending)) return;
       // A harness whose app folder could not be prepared keeps that reason (R15).
       if (error instanceof HarnessError && error.kind === "unavailable")
         throw error;
       this.markSignedOut(harness, signInReason(error));
     }
+  }
+
+  /** Drops `pending` while it is still the harness's sign-in; false once something else ended it. */
+  private forget(harness: HarnessId, pending: PendingSignIn) {
+    if (this.signingIn.get(harness) !== pending) return false;
+    clearTimeout(pending.timer);
+    this.signingIn.delete(harness);
+    return true;
   }
 
   /** Ends a pending sign-in and its program. */
@@ -531,9 +529,7 @@ export class HarnessRegistry {
     pending: PendingSignIn,
     message: string,
   ) {
-    if (this.signingIn.get(harness) !== pending) return;
-    clearTimeout(pending.timer);
-    this.signingIn.delete(harness);
+    if (!this.forget(harness, pending)) return;
     this.markSignedOut(harness, message);
     await this.adapter(harness)
       .cancelSignIn?.()

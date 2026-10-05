@@ -71,14 +71,14 @@ const servers = (value: unknown) =>
  */
 export async function hostMcpServers(
   host: HostPaths,
-  cwd?: string,
+  cwd: string,
 ): Promise<Record<string, McpServerConfig>> {
   const config = await readJson(hostClaudeJson(host));
   if (!config) return {};
-  const local = cwd
-    ? servers(object(object(config.projects)[resolve(cwd)]).mcpServers)
-    : {};
-  return { ...servers(config.mcpServers), ...local };
+  return {
+    ...servers(config.mcpServers),
+    ...servers(object(object(config.projects)[resolve(cwd)]).mcpServers),
+  };
 }
 
 // Settings that make Claude Code use a credential other than the app's sign-in (KTD12).
@@ -144,25 +144,27 @@ export async function migrateSession(
   const from = join(source, name);
   const to = join(target, name);
   await mkdir(to, { recursive: true, mode: 0o700 });
+  const kind = (path: string) => lstat(path).catch(() => null);
   // Symlinked entries in the host session folder are never followed.
-  const filter = async (path: string) =>
-    !(await lstat(path).catch(() => null))?.isSymbolicLink();
-  const folder = join(from, sessionId);
-  const folderInfo = await lstat(folder).catch(() => null);
-  if (folderInfo?.isDirectory()) {
-    const staging = join(to, `.${sessionId}.${randomUUID()}.tmp`);
-    await cp(folder, staging, { recursive: true, filter });
-    // A folder already there from an earlier, unfinished copy is kept.
-    await rename(staging, join(to, sessionId)).catch(async (error: unknown) => {
+  const filter = async (path: string) => !(await kind(path))?.isSymbolicLink();
+  // Copies an entry through a temporary name, so a half-done copy is never found as a session.
+  const copy = async (entry: string, recursive: boolean) => {
+    const staging = join(to, `.${entry}.${randomUUID()}.tmp`);
+    await cp(join(from, entry), staging, { recursive, filter });
+    try {
+      await rename(staging, join(to, entry));
+    } catch (error) {
       await rm(staging, { recursive: true, force: true });
+      throw error;
+    }
+  };
+  if ((await kind(join(from, sessionId)))?.isDirectory())
+    // A folder already there from an earlier, unfinished copy is kept.
+    await copy(sessionId, true).catch((error: unknown) => {
       const { code } = error as NodeJS.ErrnoException;
       if (code !== "EEXIST" && code !== "ENOTEMPTY") throw error;
     });
-  }
-  const file = `${sessionId}.jsonl`;
-  const staging = join(to, `.${file}.${randomUUID()}.tmp`);
-  await cp(join(from, file), staging, { filter });
-  // The transcript lands last, so a half-done copy is never found as a session.
-  await rename(staging, join(to, file));
+  // The transcript lands last.
+  await copy(`${sessionId}.jsonl`, false);
   return true;
 }
