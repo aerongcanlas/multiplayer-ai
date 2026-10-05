@@ -2,18 +2,24 @@
 //   node scripts/harness-manifest.mjs            writes src/supervisor/programs/manifest.ts
 //   node scripts/harness-manifest.mjs --print    prints the digests instead
 //   node scripts/harness-manifest.mjs --check    fails when a pin is behind the newest release
+//   node scripts/harness-manifest.mjs --only=opencode  re-pins one harness, keeping the others' entries
 // Codex comes from the release's per-platform `codex-package` archive, because the codex binary
 // needs its companions (codex-code-mode-host, rg) beside it. Digests come from the GitHub release
 // (trust on first use); the executable's digest is computed by downloading and unpacking each one. Claude Code digests come from the manifest.json
-// shipped in the paired Claude Agent SDK package.
+// shipped in the paired Claude Agent SDK package. OpenCode comes from npm's per-platform packages:
+// each tarball is checked against npm's sha512 integrity, then its sha256 and the unpacked
+// binary's sha256 are recorded.
 import { createHash } from "node:crypto";
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
+import { runInNewContext } from "node:vm";
 import { fileURLToPath } from "node:url";
 import { gunzipSync, zstdDecompressSync } from "node:zlib";
 
 const CODEX_VERSION = "0.160.0";
 const SDK_VERSION = "0.3.286";
 const CLAUDE_VERSION = "2.1.286";
+// In-app OpenCode updates stay within this minor line; re-verify the lockdown before moving it.
+const OPENCODE_VERSION = "1.18.34";
 const print = process.argv.includes("--print");
 
 if (process.argv.includes("--check")) {
@@ -28,6 +34,7 @@ if (process.argv.includes("--check")) {
       SDK_VERSION,
       await newest("@anthropic-ai/claude-agent-sdk"),
     ],
+    ["OpenCode", OPENCODE_VERSION, await newest("opencode-ai")],
   ];
   const behind = pins.filter(([, pinned, latest]) => pinned !== latest);
   for (const [name, pinned, latest] of pins)
@@ -128,6 +135,64 @@ function tarEntries(archive) {
   return files;
 }
 
+const opencodePackages = {
+  "darwin-arm64": "opencode-darwin-arm64",
+  "darwin-x64": "opencode-darwin-x64",
+  "linux-arm64": "opencode-linux-arm64",
+  "linux-x64": "opencode-linux-x64",
+  "linux-arm64-musl": "opencode-linux-arm64-musl",
+  "linux-x64-musl": "opencode-linux-x64-musl",
+  "win32-arm64": "opencode-windows-arm64",
+  "win32-x64": "opencode-windows-x64",
+};
+
+async function opencodePlatform(platform, name) {
+  const published = await (
+    await fetch(`https://registry.npmjs.org/${name}/${OPENCODE_VERSION}`)
+  ).json();
+  const integrity = published.dist?.integrity;
+  if (!/^sha512-/.test(integrity ?? ""))
+    throw new Error(`${name}@${OPENCODE_VERSION} has no sha512 integrity.`);
+  const url = `https://registry.npmjs.org/${name}/-/${name}-${OPENCODE_VERSION}.tgz`;
+  const tarball = await download(url);
+  if (
+    `sha512-${createHash("sha512").update(tarball).digest("base64")}` !==
+    integrity
+  )
+    throw new Error(`${name} does not match its npm integrity.`);
+  const entries = tarEntries(gunzipSync(tarball));
+  const file = platform.startsWith("win32")
+    ? "package/bin/opencode.exe"
+    : "package/bin/opencode";
+  const binary = entries.get(file);
+  if (!binary)
+    throw new Error(
+      `${name} has no ${file}; it holds ${[...entries.keys()].join(", ")}.`,
+    );
+  console.error(`${name}: ${file} ${binary.length} bytes`);
+  return {
+    url,
+    file,
+    download: { sha256: sha256(tarball), size: tarball.length },
+    compression: "gzip",
+    archive: "tar",
+    binary: { sha256: sha256(binary), size: binary.length },
+  };
+}
+
+// The per-platform packages are independent, so they download together.
+async function opencode() {
+  const platforms = Object.fromEntries(
+    await Promise.all(
+      Object.entries(opencodePackages).map(async ([platform, name]) => [
+        platform,
+        await opencodePlatform(platform, name),
+      ]),
+    ),
+  );
+  return { version: OPENCODE_VERSION, platforms };
+}
+
 async function claude() {
   const tarball = gunzipSync(
     await download(
@@ -156,12 +221,31 @@ async function claude() {
   return { version: CLAUDE_VERSION, platforms };
 }
 
-const manifest = { codex: await codex(), claude: await claude() };
+const target = fileURLToPath(
+  new URL("../src/supervisor/programs/manifest.ts", import.meta.url),
+);
+const only = process.argv.find((arg) => arg.startsWith("--only="))?.slice(7);
+const pins = { codex, claude, opencode };
+let manifest;
+if (only) {
+  if (!pins[only]) throw new Error(`Unknown harness ${only}.`);
+  // The generated file is one object literal (prettier unquotes its keys, so it is not JSON);
+  // the other harnesses keep their entries.
+  const source = await readFile(target, "utf8");
+  const literal = source.slice(
+    source.indexOf("= ", source.indexOf("HARNESS_MANIFEST")) + 2,
+    source.lastIndexOf(";"),
+  );
+  manifest = runInNewContext(`(${literal})`);
+  manifest[only] = await pins[only]();
+} else
+  manifest = {
+    codex: await codex(),
+    claude: await claude(),
+    opencode: await opencode(),
+  };
 if (print) console.log(JSON.stringify(manifest, null, 2));
 else {
-  const target = fileURLToPath(
-    new URL("../src/supervisor/programs/manifest.ts", import.meta.url),
-  );
   await writeFile(
     target,
     `// Generated by scripts/harness-manifest.mjs. Do not edit by hand; rerun the script when pins move.

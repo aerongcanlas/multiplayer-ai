@@ -14,7 +14,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Writable } from "node:stream";
-import { zstdCompressSync } from "node:zlib";
+import { gzipSync, zstdCompressSync } from "node:zlib";
 import { detectPlatform, ProgramError, ProgramManager } from "./manager";
 import type { ProgramManifest } from "./types";
 
@@ -92,6 +92,7 @@ const manifest = (
       },
     },
   },
+  opencode: { version: "3.0.0", platforms: {} },
 });
 
 const files = async (root: string, harness: string, version: string) => {
@@ -411,5 +412,158 @@ test("a package that writes outside its folder or lacks the pinned executable is
     } finally {
       await server.close();
     }
+  }
+});
+
+// An npm platform package as OpenCode publishes it: a gzip tarball under `package/`.
+async function npmSetup(entries: Parameters<typeof tar>[0]) {
+  let served: Buffer = gzipSync(tar(entries));
+  const archive = served;
+  const server = await serve((_path, respond) => respond(200, served));
+  const root = await mkdtemp(join(tmpdir(), "multiplayer-npm-"));
+  const manager = new ProgramManager({
+    root,
+    platform: "darwin-arm64",
+    manifest: {
+      ...manifest(server.url),
+      opencode: {
+        version: "3.0.0",
+        platforms: {
+          "darwin-arm64": {
+            url: `${server.url}/opencode-darwin-arm64-3.0.0.tgz`,
+            file: "package/bin/opencode",
+            download: digest(archive),
+            compression: "gzip",
+            archive: "tar",
+            binary: digest(binary),
+          },
+        },
+      },
+    },
+  });
+  return {
+    server,
+    root,
+    manager,
+    archive,
+    serve: (body: Buffer) => {
+      served = body;
+    },
+  };
+}
+
+const opencodePackage = [
+  { name: "package/package.json", body: Buffer.from("{}") },
+  // npm entries do not always carry an executable mode.
+  { name: "package/bin/opencode", body: binary, mode: 0o644 },
+];
+
+test("a gzip npm package unpacks an executable OpenCode binary that matches its digest", async () => {
+  const { server, root, manager } = await npmSetup(opencodePackage);
+  try {
+    const resolved = await manager.resolve("opencode");
+    assert.equal(
+      resolved.path,
+      join(
+        root,
+        "harnesses",
+        "opencode",
+        "3.0.0",
+        "package",
+        "bin",
+        "opencode",
+      ),
+    );
+    assert.deepEqual(await readFile(resolved.path), binary);
+    if (process.platform !== "win32") {
+      const { stat } = await import("node:fs/promises");
+      assert.ok((await stat(resolved.path)).mode & 0o100);
+    }
+    assert.equal(await manager.installed("opencode"), true);
+  } finally {
+    await server.close();
+  }
+});
+
+test("a corrupt OpenCode package is deleted and reported, and a retry succeeds", async () => {
+  const { server, root, manager, archive, serve } =
+    await npmSetup(opencodePackage);
+  try {
+    const corrupt = Buffer.from(archive);
+    corrupt[corrupt.length - 1] ^= 0xff;
+    serve(corrupt);
+    await assert.rejects(manager.resolve("opencode"), (error: ProgramError) => {
+      assert.equal(error.code, "checksum_mismatch");
+      return true;
+    });
+    assert.deepEqual(await readdir(join(root, "harnesses", "opencode")), []);
+    serve(archive);
+    assert.deepEqual(
+      await readFile((await manager.resolve("opencode")).path),
+      binary,
+    );
+  } finally {
+    await server.close();
+  }
+});
+
+test("an OpenCode package with an absolute path, a parent path, or a link is refused", async () => {
+  for (const entry of [
+    { name: "/tmp/escape", body: Buffer.from("x") },
+    { name: "package/../../escape", body: Buffer.from("x") },
+    { name: "package/bin/link", type: "2" },
+  ]) {
+    const { server, root, manager } = await npmSetup([
+      entry,
+      ...opencodePackage,
+    ]);
+    try {
+      await assert.rejects(
+        manager.resolve("opencode"),
+        (error: ProgramError) => {
+          assert.equal(error.code, "checksum_mismatch");
+          return true;
+        },
+      );
+      assert.deepEqual(await readdir(join(root, "harnesses", "opencode")), []);
+    } finally {
+      await server.close();
+    }
+  }
+});
+
+test("an OpenCode update is checked against npm's sha512 integrity before it is used", async () => {
+  const { server, root, manager, archive } = await npmSetup(opencodePackage);
+  const integrity = (buffer: Buffer) =>
+    `sha512-${createHash("sha512").update(buffer).digest("base64")}`;
+  const release = (value: string) => ({
+    version: "3.0.1",
+    asset: {
+      url: `${server.url}/opencode-darwin-arm64-3.0.1.tgz`,
+      file: "package/bin/opencode",
+      download: { integrity: value },
+      compression: "gzip" as const,
+      archive: "tar" as const,
+    },
+  });
+  try {
+    manager.use("opencode", release(integrity(Buffer.from("other"))));
+    await assert.rejects(manager.resolve("opencode"), (error: ProgramError) => {
+      assert.equal(error.code, "checksum_mismatch");
+      return true;
+    });
+    assert.equal(
+      existsSync(join(root, "harnesses", "opencode", "3.0.1")),
+      false,
+    );
+    manager.use("opencode", release(integrity(archive)));
+    const resolved = await manager.resolve("opencode");
+    assert.equal(resolved.version, "3.0.1");
+    assert.deepEqual(await readFile(resolved.path), binary);
+    // The executable's digest is learned from the unpack so later launches verify it.
+    assert.deepEqual(manager.release("opencode")?.asset.binary, digest(binary));
+    assert.equal(await manager.installed("opencode"), true);
+  } finally {
+    await server.close();
   }
 });

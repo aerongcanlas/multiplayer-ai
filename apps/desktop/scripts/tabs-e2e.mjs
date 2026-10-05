@@ -1,9 +1,18 @@
-// Chat tabs end to end with harness fixtures: managed downloads from a loopback server, Codex and
-// Claude Code tabs, approvals, questions, plan mode, Stop, close, suggestions, restart resume,
-// crash recovery, and Mission Control's lead context, sub-agent cards, and drill-in. Nothing leaves
-// the machine.
-import { join } from "node:path";
-import { readFile, writeFile } from "node:fs/promises";
+// Chat tabs end to end with harness fixtures: managed downloads from a loopback server, Codex,
+// Claude Code, and OpenCode tabs, approvals, questions, plan mode, Stop, close, suggestions, restart resume,
+// crash recovery, Mission Control's lead context, sub-agent cards, and drill-in, and app-owned
+// harness logins over a fake host setup. Nothing leaves the machine.
+import { dirname, join } from "node:path";
+import { createHash } from "node:crypto";
+import {
+  lstat,
+  mkdir,
+  readFile,
+  readdir,
+  readlink,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import assert from "node:assert/strict";
 import { startProgramServer } from "./programs-fixture.mjs";
 import {
@@ -11,6 +20,7 @@ import {
   createRun,
   crashApplication,
   fixtureRepository,
+  jsonLines,
   outputDirectory,
   stubOpenDialog,
   testEnvironment,
@@ -20,8 +30,110 @@ const output = await outputDirectory("tabs-");
 const repository = join(output, "repository");
 const claudeState = join(output, "claude-fixture.json");
 const codexLog = join(output, "codex-fixture.jsonl");
+const codexState = join(output, "codex-threads.json");
+// A fake host setup: Claude Code and Codex folders the app links from, never writes to.
+const hostClaude = join(output, "host-claude");
+const hostCodex = join(output, "host-codex");
+// Host values that must never reach app state, logs, or snapshots.
+const SECRETS = {
+  token: "sk-ant-oat01-e2e-host-token",
+  mcpEnv: "e2e-mcp-secret-env",
+  mcpHeader: "e2e-mcp-secret-header",
+  credential: "e2e-marker-credential",
+};
+const opencodeLog = join(output, "opencode-fixture.jsonl");
+// OpenCode sees one local Ollama model in place of probing the real servers.
+const opencodeDiscovery = {
+  servers: [
+    {
+      id: "ollama",
+      label: "Ollama",
+      running: true,
+      models: [
+        { id: "qwen3-coder:30b", name: "qwen3-coder:30b", context: 65536 },
+        {
+          id: "gemma3:12b",
+          name: "gemma3:12b",
+          warning:
+            "Served context is unknown; agentic use needs at least 32k. Start Ollama with a larger OLLAMA_CONTEXT_LENGTH (https://docs.ollama.com/context-length).",
+        },
+      ],
+    },
+    { id: "lmstudio", label: "LM Studio", running: false, models: [] },
+  ],
+  providers: [
+    {
+      id: "ollama",
+      name: "Ollama",
+      baseURL: "http://127.0.0.1:11434/v1",
+      models: [
+        { id: "qwen3-coder:30b", name: "qwen3-coder:30b", context: 65536 },
+        { id: "gemma3:12b", name: "gemma3:12b" },
+      ],
+    },
+  ],
+};
 const git = await fixtureRepository(repository, { readme: "Tabs fixture\n" });
-// Claude Code starts signed out to show guidance; the test signs it in later.
+/** Writes a host file, creating its folder. */
+async function seed(path, content) {
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, content);
+}
+await seed(
+  join(hostClaude, "skills", "host-skill", "SKILL.md"),
+  "---\nname: host-skill\ndescription: A host skill\n---\nBody\n",
+);
+await seed(join(hostClaude, "settings.json"), '{"model":"sonnet"}\n');
+await seed(
+  join(hostClaude, "projects", "-host-repo", "memory", "MEMORY.md"),
+  "- host memory\n",
+);
+await seed(join(hostClaude, ".credentials.json"), SECRETS.credential);
+await seed(
+  join(hostClaude, ".claude.json"),
+  JSON.stringify({
+    mcpServers: {
+      "e2e-server": {
+        type: "stdio",
+        command: "e2e-mcp",
+        env: { API_TOKEN: SECRETS.mcpEnv },
+      },
+    },
+    projects: {
+      [repository]: {
+        mcpServers: {
+          "e2e-remote": {
+            type: "http",
+            url: "https://mcp.example.invalid",
+            headers: { Authorization: `Bearer ${SECRETS.mcpHeader}` },
+          },
+        },
+      },
+    },
+  }),
+);
+await mkdir(join(hostCodex, "skills"), { recursive: true });
+await seed(join(hostCodex, "config.toml"), 'model = "fixture-codex"\n');
+await seed(join(hostCodex, "AGENTS.md"), "Host instructions\n");
+/** Every entry under a folder, as a path and its kind, without following links into other folders. */
+const entriesUnder = async (root) =>
+  (await readdir(root, { recursive: true, withFileTypes: true }))
+    .filter((entry) => !entry.isDirectory())
+    .map((entry) => ({ path: join(entry.parentPath, entry.name), entry }));
+/** Every host file with its content hash. */
+async function tree(root) {
+  const files = {};
+  for (const { path } of await entriesUnder(root))
+    files[path.slice(root.length)] = createHash("sha256")
+      .update(await readFile(path))
+      .digest("hex");
+  return files;
+}
+const hostBefore = {
+  claude: await tree(hostClaude),
+  codex: await tree(hostCodex),
+};
+// Claude Code starts signed out; the test signs it in from the tab later.
 await writeFile(claudeState, JSON.stringify({ signedIn: false, sessions: {} }));
 const programs = await startProgramServer(join(output, "manifest.json"));
 programs.corrupt("claude");
@@ -34,8 +146,21 @@ const run = createRun({
     MP_TEST_CLAUDE_FIXTURE: claudeState,
     MP_TEST_HARNESS_MANIFEST: join(output, "manifest.json"),
     MP_FIXTURE_SIGNED_IN: "1",
-    MP_FIXTURE_STATE: join(output, "codex-threads.json"),
+    MP_FIXTURE_STATE: codexState,
     MP_FIXTURE_LOG: codexLog,
+    MP_TEST_OPENCODE_FIXTURE: join(
+      appDirectory,
+      "scripts/opencode-fixture.mjs",
+    ),
+    MP_TEST_OPENCODE_DISCOVERY: JSON.stringify(opencodeDiscovery),
+    MP_OPENCODE_FIXTURE_LOG: opencodeLog,
+    // Stand-ins for the host's own harness folders: Claude Code and Codex tabs run in app homes
+    // and link setup from these, while OpenCode uses its data folder directly.
+    XDG_DATA_HOME: join(output, "xdg-data"),
+    CLAUDE_CONFIG_DIR: hostClaude,
+    CODEX_HOME: hostCodex,
+    // A host shell's Claude Code token never reaches a harness launch (R2).
+    CLAUDE_CODE_OAUTH_TOKEN: SECRETS.token,
   }),
   // Record, rather than perform, anything that would leave the app window.
   prepare: (application) =>
@@ -50,27 +175,28 @@ const run = createRun({
       };
     }),
 });
-const { launch, checkpoint, snapshot, until, send, selectRepository } = run;
+const {
+  launch,
+  checkpoint,
+  snapshot,
+  harness,
+  until,
+  send,
+  selectRepository,
+  newTab,
+  openSettings,
+  closeSettings,
+} = run;
 
 const room = async () => (await snapshot()).rooms[0];
 const tabNamed = async (title) =>
   (await room()).tabs.find((tab) => tab.title === title);
-const harness = async (id) =>
-  (await snapshot()).harnesses.find((item) => item.id === id);
 const tabsPanel = () => run.page.getByRole("region", { name: "AI tabs" });
-const settings = () =>
-  run.page.getByRole("region", { name: "Harness settings" });
 const harnessRow = (label) =>
-  settings().locator(".harness-row").filter({ hasText: label });
-/** Opens Settings on one harness's page; Escape closes it again. */
-async function openSettings(label) {
-  await run.page.getByRole("button", { name: "Settings", exact: true }).click();
-  await run.page
-    .getByRole("dialog", { name: "Settings" })
-    .getByRole("tab", { name: label })
-    .click();
-}
-const closeSettings = () => run.page.keyboard.press("Escape");
+  run.page
+    .getByRole("region", { name: "Harness settings" })
+    .locator(".harness-row")
+    .filter({ hasText: label });
 const mission = () => run.page.getByRole("region", { name: "Mission Control" });
 const leadContext = () =>
   mission().getByRole("region", { name: "Lead context" });
@@ -79,21 +205,17 @@ const agentCard = (description) =>
   agentTasks().locator(".agent-card").filter({ hasText: description });
 const tabChip = (title) =>
   tabsPanel().getByRole("tab", { name: new RegExp(title) });
-
-async function selectTab(title) {
-  await tabsPanel()
-    .getByRole("tab", { name: new RegExp(title) })
-    .click();
-}
+const selectTab = (title) => tabChip(title).click();
 const settled = (title) =>
   run.settled(() => tabNamed(title), `${title} to finish its turn`);
-async function codexRequests(method) {
-  return (await readFile(codexLog, "utf8"))
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => JSON.parse(line))
-    .filter((entry) => entry.type === "request" && entry.method === method);
-}
+const opencodeTab = async () =>
+  (await room()).tabs.find((tab) => tab.loadout.harness === "opencode");
+const opencodeRequests = async (method) =>
+  (await jsonLines(opencodeLog)).filter((entry) => entry.method === method);
+const codexRequests = async (method) =>
+  (await jsonLines(codexLog)).filter(
+    (entry) => entry.type === "request" && entry.method === method,
+  );
 
 await run.execute(
   async () => {
@@ -101,12 +223,7 @@ await run.execute(
     await selectRepository(repository);
 
     // The first Codex tab downloads, verifies, and becomes ready.
-    await tabsPanel()
-      .getByRole("button", { name: "New tab", exact: true })
-      .click();
-    await run.page
-      .getByRole("menuitem", { name: "Codex", exact: true })
-      .click();
+    await newTab("Codex");
     await until(
       async () => (await tabNamed("Codex 1"))?.status === "idle",
       "the Codex tab to become ready",
@@ -147,7 +264,7 @@ await run.execute(
       name: "Message",
       exact: true,
     });
-    const agentSend = tabsPanel().locator('button[type="submit"]');
+    const agentSend = tabsPanel().locator(".composer-footer > button");
     assert.equal(
       await agentDraft.isEnabled(),
       true,
@@ -163,7 +280,17 @@ await run.execute(
     await agentDraft.pressSequentially("Keep this second line.");
     const followUp = await agentDraft.inputValue();
     assert.equal(followUp, "Follow up after approval\nKeep this second line.");
-    assert.equal(await agentSend.isDisabled(), true);
+    assert.equal(await agentSend.isEnabled(), true);
+    assert.equal(await agentSend.getAttribute("aria-label"), "Stop");
+    assert.equal(await agentSend.getAttribute("type"), "button");
+    assert.equal(
+      await tabsPanel()
+        .locator("header")
+        .getByRole("button", { name: "Stop", exact: true })
+        .count(),
+      0,
+      "Stop is only available in the composer",
+    );
     const startedTurns = (await codexRequests("turn/start")).length;
     await agentDraft.press("Enter");
     assert.equal(await agentDraft.inputValue(), followUp);
@@ -185,6 +312,8 @@ await run.execute(
       () => agentSend.isEnabled(),
       "Send to enable after turn completion",
     );
+    assert.equal(await agentSend.getAttribute("aria-label"), "Send");
+    assert.equal(await agentSend.getAttribute("type"), "submit");
     assert.equal(await agentDraft.inputValue(), followUp);
     assert.equal((await codexRequests("turn/start")).length, startedTurns);
     await agentDraft.focus();
@@ -286,12 +415,7 @@ await run.execute(
     await checkpoint("A bad custom executable shows guidance with no download");
 
     // A corrupted download names the failure and offers retry; Claude Code then needs a login.
-    await tabsPanel()
-      .getByRole("button", { name: "New tab", exact: true })
-      .click();
-    await run.page
-      .getByRole("menuitem", { name: "Claude Code", exact: true })
-      .click();
+    await newTab("Claude Code");
     await until(
       async () => (await harness("claude")).program.state === "failed",
       "the corrupted Claude Code download to fail",
@@ -313,24 +437,24 @@ await run.execute(
       "A corrupted download shows the failure and a working retry",
     );
 
-    // Signed-out Claude Code shows guidance, no sign-in button, and the one-time notice.
+    // Signed-out Claude Code offers its own in-app sign-in and the one-time notice.
     await until(
       async () => (await harness("claude")).auth.state === "signed_out",
       "Claude Code sign-in state",
     );
-    await tabsPanel()
-      .getByText(/Sign in once with the Claude Code CLI/)
-      .waitFor();
-    assert.equal(
-      await tabsPanel()
-        .getByRole("button", { name: /Sign in/ })
-        .count(),
-      0,
+    const claudeSignIn = tabsPanel().getByRole("button", {
+      name: "Sign in",
+      exact: true,
+    });
+    await claudeSignIn.waitFor();
+    assert.doesNotMatch(
+      (await harness("claude")).auth.message ?? "",
+      /\/login/,
     );
     const notice = tabsPanel().getByRole("note", {
       name: "Claude Code sign-in notice",
     });
-    await notice.getByText(/never asks for it/).waitFor();
+    await notice.getByText(/never sees your password or token/).waitFor();
     await run.page.screenshot({
       path: join(output, "03-claude-signed-out.png"),
     });
@@ -340,21 +464,18 @@ await run.execute(
       "notice acknowledgement",
     );
     assert.equal(await tabsPanel().getByRole("note").count(), 0);
-    await writeFile(
-      claudeState,
-      JSON.stringify({ signedIn: true, sessions: {} }),
-    );
-    await openSettings("Claude Code");
-    await harnessRow("Claude Code")
-      .getByRole("button", { name: "Refresh Claude Code", exact: true })
-      .click();
-    await closeSettings();
+    // The fixture's `claude auth login` succeeds in the app's own Claude home.
+    await claudeSignIn.click();
     await until(
       async () => (await tabNamed("Claude Code 1"))?.status === "idle",
       "the Claude Code tab to become ready",
     );
+    assert.equal(
+      (await harness("claude")).auth.account,
+      "fixture@example.invalid",
+    );
     await checkpoint(
-      "Signed-out Claude Code shows guidance and the one-time notice only",
+      "Signed-out Claude Code signs in from the tab and shows the one-time notice once",
     );
 
     // A skill's question appears as a card and the answer continues the turn.
@@ -463,7 +584,8 @@ await run.execute(
       "A card opens its sub-agent's transcript and back returns",
     );
 
-    // The background sub-agent asks after the turn; the tab stays idle and usable.
+    // The background sub-agent asks after the turn; drafting stays available,
+    // and the composer keeps its Stop action until the sub-agent finishes.
     const backgroundApproval = tabsPanel().getByRole("region", {
       name: "Approval for sub-agent Run the tests",
     });
@@ -472,8 +594,11 @@ await run.execute(
       .getByRole("img", { name: "A sub-agent needs you" })
       .waitFor();
     assert.equal((await tabNamed("Claude Code 1")).status, "idle");
-    await send("Hello while it waits");
-    await settled("Claude Code 1");
+    await agentDraft.fill("Hello while it waits");
+    assert.equal(await agentSend.getAttribute("aria-label"), "Stop");
+    await agentDraft.press("Enter");
+    assert.equal(await agentDraft.inputValue(), "Hello while it waits");
+    assert.equal((await tabNamed("Claude Code 1")).status, "idle");
     await backgroundApproval
       .getByRole("button", { name: "Approve once", exact: true })
       .click();
@@ -488,6 +613,9 @@ await run.execute(
     await settled("Claude Code 1");
     await agentCard("Run the tests").getByText("All tests passed.").waitFor();
     assert.equal((await tabNamed("Claude Code 1")).runningAgents, undefined);
+    assert.equal(await agentDraft.inputValue(), "Hello while it waits");
+    await send("Hello while it waits");
+    await settled("Claude Code 1");
     assert.equal(
       await tabChip("Claude Code 1")
         .getByText(/running/)
@@ -499,12 +627,7 @@ await run.execute(
     );
 
     // Stop on an idle tab stops its background sub-agent.
-    await tabsPanel()
-      .getByRole("button", { name: "New tab", exact: true })
-      .click();
-    await run.page
-      .getByRole("menuitem", { name: "Claude Code", exact: true })
-      .click();
+    await newTab("Claude Code");
     await until(
       async () => (await tabNamed("Claude Code 2"))?.status === "idle",
       "Claude Code 2",
@@ -541,7 +664,9 @@ await run.execute(
     }, "both tabs to run");
     assert.equal(await agentDraft.isEnabled(), true);
     await agentDraft.fill("Keep this draft after stopping");
-    assert.equal(await agentSend.isDisabled(), true);
+    assert.equal(await agentSend.isEnabled(), true);
+    assert.equal(await agentSend.getAttribute("aria-label"), "Stop");
+    assert.equal(await agentSend.getAttribute("type"), "button");
     await agentDraft.press("Enter");
     assert.equal(
       await agentDraft.inputValue(),
@@ -551,7 +676,12 @@ await run.execute(
       .getByRole("button", { name: "Stop", exact: true })
       .click();
     await settled("Codex 1");
-    await until(() => agentSend.isEnabled(), "Send to enable after Stop");
+    await until(
+      async () =>
+        (await agentSend.getAttribute("aria-label")) === "Send" &&
+        (await agentSend.isEnabled()),
+      "Send to enable after Stop",
+    );
     assert.equal(
       await agentDraft.inputValue(),
       "Keep this draft after stopping",
@@ -566,12 +696,7 @@ await run.execute(
     await checkpoint("Two tabs run turns concurrently and stop independently");
 
     // Closing a running tab asks for confirmation.
-    await tabsPanel()
-      .getByRole("button", { name: "New tab", exact: true })
-      .click();
-    await run.page
-      .getByRole("menuitem", { name: "Codex", exact: true })
-      .click();
+    await newTab("Codex");
     await until(
       async () => (await tabNamed("Codex 2"))?.status === "idle",
       "Codex 2",
@@ -702,12 +827,7 @@ await run.execute(
     );
 
     // A background sub-agent is still running when the app dies.
-    await tabsPanel()
-      .getByRole("button", { name: "New tab", exact: true })
-      .click();
-    await run.page
-      .getByRole("menuitem", { name: "Claude Code", exact: true })
-      .click();
+    await newTab("Claude Code");
     await until(
       async () => (await tabNamed("Claude Code 3"))?.status === "idle",
       "Claude Code 3",
@@ -758,9 +878,297 @@ await run.execute(
       "A sub-agent running at a crash reads interrupted after relaunch",
     );
 
-    // Nothing left the app: no browser, no terminal, no remote requests.
+    // An OpenCode tab downloads its managed program and runs on the local model it found.
+    await newTab("OpenCode");
+    await until(
+      async () => (await opencodeTab())?.status === "idle",
+      "the OpenCode tab to become ready",
+    );
+    const opencodeTitle = (await opencodeTab()).title;
+    assert.equal(programs.requests("opencode"), 1);
+    assert.equal((await harness("opencode")).auth.account, "Local models");
+    assert.equal((await opencodeTab()).loadout.model, "ollama/qwen3-coder:30b");
+    await selectTab(opencodeTitle);
+    await send("Say hello");
+    await settled(opencodeTitle);
+    await tabsPanel().getByText("Hello world.").last().waitFor();
+    await checkpoint("An OpenCode tab completes a streamed turn");
+
+    // Ask mode turns OpenCode's permission request into an approval card.
+    await send("FIXTURE_PERMISSION accept");
+    await tabsPanel()
+      .getByRole("button", { name: "Approve once", exact: true })
+      .click();
+    await settled(opencodeTitle);
+    await tabsPanel().getByText("Approved.").last().waitFor();
+    await send("FIXTURE_PERMISSION decline");
+    await tabsPanel()
+      .getByRole("button", { name: "Decline", exact: true })
+      .click();
+    await settled(opencodeTitle);
+    await tabsPanel().getByText("Declined.").last().waitFor();
+    await tabsPanel()
+      .getByText("Run command: touch made.txt")
+      .first()
+      .waitFor();
+    await checkpoint("An OpenCode approval card accepts and declines");
+
+    // Stop ends a slow turn.
+    await send("FIXTURE_SLOW");
+    await until(
+      async () => (await opencodeTab()).status === "running",
+      "the slow OpenCode turn",
+    );
+    await tabsPanel()
+      .getByRole("button", { name: "Stop", exact: true })
+      .click();
+    await settled(opencodeTitle);
+    await tabsPanel()
+      .getByText(/^Turn stopped by the host\./)
+      .last()
+      .waitFor();
+    assert.ok((await opencodeRequests("session/cancel")).length >= 1);
+    await checkpoint("Stop ends a slow OpenCode turn");
+
+    // Settings lists the local servers and keeps context warnings out of the picker.
+    await run.page.setViewportSize({ width: 1024, height: 720 });
+    await openSettings("OpenCode");
+    await harnessRow("OpenCode").getByText("Ollama · 2 models").waitFor();
+    await harnessRow("OpenCode").getByText("LM Studio · not running").waitFor();
+    await harnessRow("OpenCode")
+      .getByText(/gemma3:12b: Served context is unknown/)
+      .waitFor();
+    await run.page.screenshot({
+      path: join(output, "07-opencode-settings.png"),
+    });
+    await closeSettings();
+    await tabsPanel()
+      .getByRole("button", { name: "Model", exact: true })
+      .click();
+    const modelMenu = tabsPanel().getByRole("menu", { name: "Model" });
+    await modelMenu
+      .getByRole("menuitemradio", { name: /gemma3:12b/ })
+      .waitFor();
+    assert.equal(await modelMenu.getByText(/Served context/).count(), 0);
+    await run.page.screenshot({ path: join(output, "08-opencode-models.png") });
+    await run.page.keyboard.press("Escape");
+    await checkpoint(
+      "OpenCode Settings shows local servers and warnings that stay out of the picker",
+    );
+
+    // A turn running when the app dies reads interrupted, and the next send resumes the session.
+    const opencodeSession = (await opencodeTab()).sessionId;
+    assert.ok(opencodeSession);
+    await send("FIXTURE_PERMISSION before the crash");
+    await tabsPanel()
+      .getByRole("button", { name: "Approve once", exact: true })
+      .waitFor();
+    await crashApplication(run.application);
+    await launch();
+    await selectTab(opencodeTitle);
+    await until(
+      async () => (await opencodeTab())?.status === "interrupted",
+      "the interrupted OpenCode tab",
+    );
+    await tabsPanel()
+      .getByText(/The app restarted during this turn/)
+      .last()
+      .waitFor();
+    await until(
+      async () => (await harness("opencode")).auth.state === "signed_in",
+      "OpenCode to be ready after the restart",
+    );
+    await send("Say hello after the restart");
+    await settled(opencodeTitle);
+    assert.equal(
+      (await opencodeRequests("session/resume")).at(-1).params.sessionId,
+      opencodeSession,
+    );
+    assert.equal((await opencodeTab()).sessionId, opencodeSession);
+    await checkpoint(
+      "A restart marks the OpenCode turn interrupted and the next send resumes its session",
+    );
+
+    // App-owned homes: host setup is linked in; credentials and transcripts are not.
+    const accounts = join(output, "user-data", "accounts");
+    assert.equal(
+      await readlink(join(accounts, "claude", "skills")),
+      join(hostClaude, "skills"),
+    );
+    assert.equal(
+      await readlink(
+        join(accounts, "claude", "projects", "-host-repo", "memory"),
+      ),
+      join(hostClaude, "projects", "-host-repo", "memory"),
+    );
+    assert.ok(
+      (await lstat(join(accounts, "claude", "settings.json"))).isFile(),
+    );
+    for (const name of [".credentials.json", ".claude.json"])
+      await assert.rejects(
+        readlink(join(accounts, "claude", name)),
+        undefined,
+        `${name} is never linked`,
+      );
+    assert.equal(
+      await readlink(join(accounts, "codex", "config.toml")),
+      join(hostCodex, "config.toml"),
+    );
+    // A host skill shows in the Claude Code tab's command list (AE3).
+    await selectTab("Claude Code 1");
+    const claudeTab = await tabNamed("Claude Code 1");
+    const listed = await run.page.evaluate(
+      ([roomId, tabId]) => window.desktop.loadCommands(roomId, tabId),
+      [(await room()).id, claudeTab.id],
+    );
+    assert.ok(
+      listed.commands?.some((command) => command.name === "host-skill"),
+      "The host skill is listed",
+    );
+    await checkpoint(
+      "Harness homes link the host's setup, and a host skill is listed in the Claude Code tab",
+    );
+
+    // Sign out during a running turn stops it and names only the harness (AE5).
+    await send("FIXTURE_SLOW keep running");
+    await until(
+      async () => (await tabNamed("Claude Code 1")).status === "running",
+      "the slow Claude Code turn",
+    );
+    await openSettings("Claude Code");
+    await harnessRow("Claude Code")
+      .getByRole("button", { name: "Sign out", exact: true })
+      .click();
+    await harnessRow("Claude Code")
+      .getByRole("group", { name: "Sign out of Claude Code" })
+      .getByRole("button", { name: "Sign out", exact: true })
+      .click();
+    await until(
+      async () => (await harness("claude")).auth.state === "signed_out",
+      "Claude Code to sign out",
+    );
+    await closeSettings();
+    await until(
+      async () => (await tabNamed("Claude Code 1")).status === "unavailable",
+      "the Claude Code tab to show signed out",
+    );
+    await tabsPanel()
+      .getByText(/Signed out of Claude Code\./)
+      .waitFor();
+    assert.doesNotMatch(
+      await tabsPanel().innerText(),
+      /fixture@example\.invalid/,
+    );
+    // The window was relaunched since the first sign-in, so the locator is made again.
+    await tabsPanel()
+      .getByRole("button", { name: "Sign in", exact: true })
+      .click();
+    await until(
+      async () => (await tabNamed("Claude Code 1")).status === "idle",
+      "Claude Code to sign in again",
+    );
+    await send("Hello after signing in again");
+    await settled("Claude Code 1");
+    await checkpoint(
+      "Sign out stops a running Claude Code turn, and signing in again resumes sending",
+    );
+
+    // A pending Codex sign-in can be cancelled (AE4).
+    await writeFile(`${codexState}.login-hang`, "");
+    await openSettings("Codex");
+    await harnessRow("Codex")
+      .getByRole("button", { name: "Sign out", exact: true })
+      .click();
+    await until(
+      async () => (await harness("codex")).auth.state === "signed_out",
+      "Codex to sign out",
+    );
+    await harnessRow("Codex")
+      .getByRole("button", { name: "Sign in with ChatGPT", exact: true })
+      .click();
+    await until(
+      async () => (await harness("codex")).auth.state === "signing_in",
+      "the Codex sign-in to start",
+    );
+    await harnessRow("Codex")
+      .getByRole("button", { name: "Cancel sign-in", exact: true })
+      .click();
+    await until(
+      async () => (await harness("codex")).auth.state === "signed_out",
+      "the Codex sign-in to cancel",
+    );
+    assert.equal((await harness("codex")).auth.message, "Sign-in cancelled.");
+    assert.deepEqual(
+      (await codexRequests("account/login/cancel")).map(
+        (entry) => entry.params.loginId,
+      ),
+      ["fixture-login"],
+    );
+    await rm(`${codexState}.login-hang`);
+    await harnessRow("Codex")
+      .getByRole("button", { name: "Sign in with ChatGPT", exact: true })
+      .click();
+    await until(
+      async () => (await harness("codex")).auth.state === "signed_in",
+      "Codex to sign in again",
+    );
+    await closeSettings();
+    await checkpoint(
+      "Cancel ends a pending Codex sign-in, and signing in again works",
+    );
+
+    // Launches carry the app's homes and no host credential (R2); nothing leaks (R12).
+    const claudeLaunches = await jsonLines(`${claudeState}.log`);
+    assert.ok(claudeLaunches.length);
+    for (const entry of claudeLaunches) {
+      assert.equal(entry.configDir, join(accounts, "claude"));
+      assert.ok(!entry.envKeys.includes("CLAUDE_CODE_OAUTH_TOKEN"));
+    }
+    const codexLaunches = (await jsonLines(codexLog)).filter(
+      (entry) => entry.type === "launch",
+    );
+    assert.ok(codexLaunches.length);
+    for (const entry of codexLaunches)
+      assert.equal(entry.env.CODEX_HOME, join(accounts, "codex"));
+    const captured = [JSON.stringify(await snapshot())];
+    // Every app file, read without following links into the host's folders.
+    const appFiles = (await entriesUnder(join(output, "user-data")))
+      .filter(({ entry }) => entry.isFile())
+      .map(({ path }) => path);
+    for (const file of [
+      ...appFiles,
+      `${claudeState}.log`,
+      codexLog,
+      opencodeLog,
+      join(output, "latest-snapshot.yml"),
+    ])
+      captured.push((await readFile(file)).toString("latin1"));
+    for (const secret of Object.values(SECRETS))
+      assert.ok(
+        captured.every((text) => !text.includes(secret)),
+        `${secret} must not appear in app state, logs, or snapshots`,
+      );
+    assert.deepEqual(
+      { claude: await tree(hostClaude), codex: await tree(hostCodex) },
+      hostBefore,
+      "The host's Claude Code and Codex folders are unchanged",
+    );
+    await checkpoint(
+      "Launches use app homes without host credentials, nothing leaks, and host folders are unchanged",
+    );
+
+    // Nothing left the app beyond the Codex sign-in page: no terminal, no remote requests.
     const external = await run.application.evaluate(() => globalThis.external);
-    assert.deepEqual(external, []);
+    assert.deepEqual(
+      external.filter(
+        ([kind, url]) =>
+          !(
+            kind === "openExternal" &&
+            url === "https://auth.openai.com/authorize?state=fixture"
+          ),
+      ),
+      [],
+    );
     assert.deepEqual(
       run.network.filter(
         (url) =>

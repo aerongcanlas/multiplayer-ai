@@ -1,0 +1,376 @@
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import type { LaunchContext } from "../contract";
+import { object, string } from "../json";
+import type { Launcher } from "../launcher";
+import { runCommand } from "./process";
+
+type Action = "allow" | "ask" | "deny";
+type Rule = { permission: string; pattern: string; action: Action };
+/** A permission block as OpenCode's config holds it: one action, or patterns in evaluation order. */
+type Block = Record<string, Action | Record<string, Action>>;
+
+/** A local model server's provider block, as discovery found it. */
+export interface LocalProvider {
+  id: "ollama" | "lmstudio";
+  name: string;
+  baseURL: string;
+  models: { id: string; name: string; context?: number }[];
+}
+
+export interface ConfigInput {
+  // OpenCode's own resolved config for the tab's folder (`opencode debug config`).
+  host: Record<string, unknown>;
+  providers: LocalProvider[];
+  // The host's saved default OpenCode model.
+  defaultModel?: string;
+  // Whether the host is logged in to OpenCode's own hosted provider.
+  hostedLogin: boolean;
+  env: Record<string, string>;
+}
+
+// Every key that can act or reach outside the checkout asks; read-only keys keep OpenCode's rules.
+export const ACTING = [
+  "edit",
+  "bash",
+  "webfetch",
+  "websearch",
+  "codesearch",
+  "skill",
+  "external_directory",
+] as const;
+const SINGLE_ACTION = new Set(["webfetch", "websearch"]);
+const READ_ONLY: Block = {
+  read: {
+    "*": "allow",
+    "*.env": "ask",
+    "*.env.*": "ask",
+    "*.env.example": "allow",
+  },
+  glob: "allow",
+  grep: "allow",
+  list: "allow",
+  lsp: "allow",
+  todowrite: "allow",
+};
+
+/** OpenCode's pattern match: `*` is any text, `?` one character, and a trailing ` *` optional. */
+export function matches(text: string, pattern: string) {
+  const value = text.replaceAll("\\", "/");
+  let source = pattern
+    .replaceAll("\\", "/")
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*/g, ".*")
+    .replace(/\?/g, ".");
+  if (source.endsWith(" .*")) source = `${source.slice(0, -3)}( .*)?`;
+  return new RegExp(
+    `^${source}$`,
+    process.platform === "win32" ? "si" : "s",
+  ).test(value);
+}
+
+const ACTIONS = new Set<unknown>(["allow", "ask", "deny"]);
+// `debug config` masks values under secret-looking keys; a masked rule may be a deny, so it is
+// kept as one.
+const action = (value: unknown) =>
+  value === "***" ? "deny" : ACTIONS.has(value) ? (value as Action) : null;
+
+function block(value: unknown): Block {
+  const single = action(value);
+  if (single) return { "*": single };
+  const result: Block = {};
+  for (const [key, rule] of Object.entries(object(value))) {
+    const keyAction = action(rule);
+    if (keyAction) result[key] = keyAction;
+    else if (rule && typeof rule === "object")
+      result[key] = Object.fromEntries(
+        Object.entries(rule).flatMap(([pattern, choice]) => {
+          const patternAction = action(choice);
+          return patternAction ? [[pattern, patternAction]] : [];
+        }),
+      ) as Record<string, Action>;
+  }
+  return result;
+}
+
+const rules = (permission: Block): Rule[] =>
+  Object.entries(permission).flatMap(([key, value]) =>
+    typeof value === "string"
+      ? [{ permission: key, pattern: "*", action: value }]
+      : Object.entries(value).map(([pattern, action]) => ({
+          permission: key,
+          pattern,
+          action,
+        })),
+  );
+
+const wildcard = (key: string) => /[*?]/.test(key);
+// OpenCode names an MCP tool `<server>_<tool>`, with other characters replaced.
+const sanitize = (value: string) => value.replace(/[^a-zA-Z0-9_-]/g, "_");
+
+/**
+ * The rules for one acting key: everything asks, and each host `deny` that covers the key comes
+ * after, so it still wins. Host `allow` and `ask` rules become the blanket ask.
+ */
+function gated(
+  key: string,
+  host: Rule[],
+  start: Record<string, Action> = {},
+): Action | Record<string, Action> {
+  const result: Record<string, Action> = { "*": "ask", ...start };
+  for (const rule of host)
+    if (rule.action === "deny" && matches(key, rule.permission)) {
+      // A later duplicate replaces the earlier one at the end, as in OpenCode's last-match order.
+      delete result[rule.pattern];
+      result[rule.pattern] = "deny";
+    }
+  // OpenCode's schema takes a single action for these keys.
+  if (SINGLE_ACTION.has(key)) return result["*"] === "deny" ? "deny" : "ask";
+  return result;
+}
+
+/** Host keys the MCP server wildcards cover more narrowly, such as one tool of a server. */
+function narrower(servers: string[], host: Rule[]) {
+  const extra: Record<string, Record<string, Action>> = {};
+  for (const key of servers)
+    for (const rule of host)
+      if (
+        rule.action === "deny" &&
+        rule.permission !== key &&
+        matches(rule.permission, key)
+      )
+        // `<key>*` is a new key, so it lands after the blanket ask; it matches the same tool.
+        (extra[`${rule.permission}*`] ??= {})[rule.pattern] = "deny";
+  return extra;
+}
+
+const allowsAsk = (value: Block[string]) =>
+  typeof value === "string"
+    ? value === "allow"
+      ? "ask"
+      : value
+    : Object.fromEntries(
+        Object.entries(value).map(([pattern, action]) => [
+          pattern,
+          action === "allow" ? "ask" : action,
+        ]),
+      );
+
+/**
+ * Rules that place the blanket ask and host denies in evaluation order. A key the host block
+ * already has keeps the host's position, so its gated value goes through a second merge stage.
+ */
+function agentRules(
+  hostBlock: Block,
+  keys: string[],
+  gatedFor: (key: string) => Action | Record<string, Action>,
+  extra: Record<string, Record<string, Action>>,
+) {
+  const first: Block = {};
+  const second: Block = {};
+  const order = Object.keys(hostBlock);
+  const place = (key: string, value: Block[string]) => {
+    if (typeof hostBlock[key] === "object") {
+      first[key] = "ask";
+      second[key] = value;
+    } else first[key] = value;
+  };
+  for (const key of keys) place(key, gatedFor(key));
+  for (const [key, value] of Object.entries(extra)) place(key, value);
+  // A host key after an acting key would overrule it, so its allows become asks: a wildcard key,
+  // or one tool of a gated MCP server.
+  const firstActing = Math.min(
+    ...keys.map((key) => order.indexOf(key)).filter((index) => index >= 0),
+  );
+  for (const [index, key] of order.entries()) {
+    if (index < firstActing || keys.includes(key)) continue;
+    if (
+      !wildcard(key) &&
+      !keys.some((acting) => wildcard(acting) && matches(key, acting))
+    )
+      continue;
+    first[key] = allowsAsk(hostBlock[key]!);
+  }
+  // A read-only key whose last covering host wildcard was changed gets the host's own rules for
+  // it back, after that wildcard (OpenCode's rules for a plain allow), so reads never loosen.
+  for (const [key, value] of Object.entries(READ_ONLY)) {
+    if (key in hostBlock) continue;
+    const last = order.findLast((host) => wildcard(host) && matches(key, host));
+    if (last === undefined || !(last in first)) continue;
+    const host = hostBlock[last]!;
+    if (JSON.stringify(first[last]) !== JSON.stringify(host))
+      first[key] = host === "allow" ? value : host;
+  }
+  return { first, second };
+}
+
+/** OpenCode's data folder, where its own plans and login live. */
+const dataDir = (env: Record<string, string>) =>
+  join(
+    env.XDG_DATA_HOME || join(env.HOME || homedir(), ".local", "share"),
+    "opencode",
+  );
+
+/** Whether the host logged in to OpenCode's own hosted provider (`opencode auth login`). */
+export async function hostedLogin(env: Record<string, string>) {
+  try {
+    const auth = JSON.parse(
+      await readFile(join(dataDir(env), "auth.json"), "utf8"),
+    ) as unknown;
+    return Boolean(object(object(auth).opencode).type);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The host's own OpenCode config resolved in each folder, so project config counts as the host's.
+ * Results are kept until the next refresh.
+ */
+export class HostConfigs {
+  private cache = new Map<string, Promise<Record<string, unknown>>>();
+
+  constructor(private launcher: Launcher) {}
+
+  get(context: LaunchContext, cwd: string) {
+    const key = `${context.executable}\n${cwd}`;
+    const cached = this.cache.get(key);
+    if (cached) return cached;
+    const config = runCommand(context, this.launcher, ["debug", "config"], {
+      cwd,
+      // Any config content keeps OpenCode from seeding a global config file.
+      config: { OPENCODE_CONFIG_CONTENT: "{}" },
+    }).then((output) => {
+      const start = output.indexOf("{");
+      if (start < 0) throw new Error("OpenCode printed no config.");
+      return object(JSON.parse(output.slice(start)));
+    });
+    this.cache.set(key, config);
+    // A failure is retried next time, unless a refresh already replaced it.
+    config.catch(() => {
+      if (this.cache.get(key) === config) this.cache.delete(key);
+    });
+    return config;
+  }
+
+  clear() {
+    this.cache.clear();
+  }
+}
+
+/**
+ * The config injected into every OpenCode process (KTD5–KTD7): permission rules that keep the
+ * tab's access mode, local providers the host does not define, and no silent cloud fallback.
+ * `OPENCODE_CONFIG_CONTENT` carries the config; `OPENCODE_PERMISSION` merges last into the
+ * top-level rules, so their order is ours.
+ */
+export function buildConfig(input: ConfigInput) {
+  const { host } = input;
+  const globalBlock = block(host.permission);
+  const globalRules = rules(globalBlock);
+  const mcp = Object.keys(object(host.mcp)).map(
+    (server) => `${sanitize(server)}_*`,
+  );
+  const keys = [...ACTING, ...mcp];
+
+  // Top level: strings now, ordered objects in the second stage.
+  const permission: Block = { task: "deny" };
+  const topLevel: Block = {};
+  for (const key of keys) {
+    permission[key] = "ask";
+    topLevel[key] = gated(key, globalRules);
+  }
+  Object.assign(topLevel, narrower(mcp, globalRules));
+
+  const hostAgents = object(host.agent);
+  const names = new Set(["build", "plan", ...Object.keys(hostAgents)]);
+  const agent: Record<string, unknown> = {};
+  const mode: Record<string, unknown> = {};
+  const plans = join(dataDir(input.env), "plans", "*");
+  for (const name of names) {
+    const hostAgent = object(hostAgents[name]);
+    if (hostAgent.disable === true) continue;
+    const hostBlock = block(hostAgent.permission);
+    const combined = [...globalRules, ...rules(hostBlock)];
+    // Plan mode stays read-only apart from OpenCode's own plan files.
+    const starts: Record<string, Record<string, Action>> = name === "plan"
+      ? {
+          edit: { "*": "deny", "*opencode/plans/*.md": "ask" },
+          external_directory: { [plans]: "allow" },
+        }
+      : {};
+    const { first, second } = agentRules(
+      hostBlock,
+      keys,
+      (key) => gated(key, combined, starts[key]),
+      narrower(mcp, combined),
+    );
+    agent[name] = { permission: { ...first, task: "deny" } };
+    // The mode-to-agent merge makes an agent primary, so a sub-agent keeps one stage.
+    if (Object.keys(second).length && string(hostAgent.mode) !== "subagent")
+      mode[name] = { permission: second };
+  }
+
+  const hostProviders = object(host.provider);
+  const provider: Record<string, unknown> = {};
+  const local = input.providers.filter((item) => !(item.id in hostProviders));
+  for (const item of local)
+    provider[item.id] = {
+      npm: "@ai-sdk/openai-compatible",
+      name: item.name,
+      options: { baseURL: item.baseURL },
+      models: Object.fromEntries(
+        item.models.map((model) => [
+          model.id,
+          {
+            name: model.name,
+            tool_call: true,
+            ...(model.context
+              ? {
+                  limit: {
+                    context: model.context,
+                    output: Math.min(32_768, Math.floor(model.context / 4)),
+                  },
+                }
+              : {}),
+          },
+        ]),
+      ),
+    };
+  const firstLocal = input.providers
+    .flatMap((item) => item.models.map((model) => `${item.id}/${model.id}`))
+    .at(0);
+  const content: Record<string, unknown> = {
+    permission,
+    agent,
+    ...(Object.keys(mode).length ? { mode } : {}),
+    ...(local.length ? { provider } : {}),
+  };
+  if (!input.hostedLogin) {
+    const disabled = Array.isArray(host.disabled_providers)
+      ? host.disabled_providers.map(string).filter(Boolean)
+      : [];
+    content.disabled_providers = [...new Set([...disabled, "opencode"])];
+  }
+  if (!string(host.model)) {
+    const model = input.defaultModel || firstLocal;
+    if (model) content.model = model;
+  }
+  if (!string(host.small_model)) {
+    const small = firstLocal ?? input.defaultModel;
+    if (small) content.small_model = small;
+  }
+  const env = {
+    OPENCODE_CONFIG_CONTENT: JSON.stringify(content),
+    OPENCODE_PERMISSION: JSON.stringify(topLevel),
+  };
+  const hash = createHash("sha256")
+    .update(env.OPENCODE_CONFIG_CONTENT)
+    .update("\n")
+    .update(env.OPENCODE_PERMISSION)
+    .digest("hex")
+    .slice(0, 16);
+  return { content, permission: topLevel, env, hash };
+}

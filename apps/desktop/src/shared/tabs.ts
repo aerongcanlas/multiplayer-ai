@@ -1,11 +1,26 @@
 import { z } from "zod";
 
-export const HARNESS_IDS = ["codex", "claude"] as const;
+export const HARNESS_IDS = ["codex", "claude", "opencode"] as const;
 export const harnessIdSchema = z.enum(HARNESS_IDS);
 export type HarnessId = z.infer<typeof harnessIdSchema>;
 export const HARNESS_LABELS: Record<HarnessId, string> = {
   codex: "Codex",
   claude: "Claude Code",
+  opencode: "OpenCode",
+};
+// A one-time notice the host acknowledges before the harness's first tab; null for none.
+export const HARNESS_NOTICES: Record<HarnessId, string | null> = {
+  codex:
+    "Codex tabs have their own ChatGPT sign-in, separate from Codex in your terminal, so signing in or out there never signs a tab out. Sign in once from Settings.",
+  claude:
+    "Claude Code tabs have their own sign-in, separate from Claude Code in your terminal, so signing in or out there never signs a tab out. Sign in from Settings: Claude Code opens Anthropic's page in your browser, and this app never sees your password or token.",
+  opencode: null,
+};
+// Bumped when a notice's text changes enough that hosts who acknowledged it should see it again.
+export const HARNESS_NOTICE_VERSIONS: Record<HarnessId, number> = {
+  codex: 1,
+  claude: 2,
+  opencode: 1,
 };
 
 const id = z.uuid();
@@ -264,6 +279,24 @@ export interface HarnessModel {
   // Left out of the model picker by the host; a tab already on it keeps it.
   hidden?: boolean;
 }
+/** A model server on this computer that OpenCode tabs can use. */
+export interface LocalServer {
+  id: "ollama" | "lmstudio";
+  label: string;
+  running: boolean;
+  // Why the server is not checked, such as OLLAMA_HOST pointing at another machine.
+  note?: string;
+  models: {
+    id: string;
+    name: string;
+    // The context the server actually serves, when known.
+    context?: number;
+    // Set when the served context is too small or unknown for agentic use.
+    warning?: string;
+    // The server did not say whether the model supports tools.
+    unverified?: boolean;
+  }[];
+}
 export interface HarnessState {
   id: HarnessId;
   label: string;
@@ -289,10 +322,18 @@ export interface HarnessState {
     account?: string;
     plan?: string;
     message?: string;
+    // A copy-ready terminal command that signs this harness in (OpenCode hosted providers).
+    command?: string;
+    // Linked host config that overrides the app's login, naming the setting, never its value.
+    warning?: string;
+    // Whether the app holds a login it can sign out of.
+    signOut?: boolean;
   };
-  signIn: "in_app" | "guidance";
+  signIn: "in_app" | "guidance" | "command";
   // The newest published version of the program, when the check has answered.
   latestVersion?: string;
+  // A newer version outside the line this app updates within, installable after an app update.
+  laterVersion?: string;
   // The version this app ships with, when the managed program was updated past it.
   bundledVersion?: string;
   models: HarnessModel[];
@@ -303,7 +344,9 @@ export interface HarnessState {
   limits: { name: string; usedPercent: number; resetsAt: number | null }[];
   // Whether the harness reports its sub-agents.
   reportsAgents: boolean;
-  // Claude Code shows a one-time notice about Anthropic's third-party login policy.
+  // OpenCode's view of Ollama and LM Studio on this computer.
+  localServers?: LocalServer[];
+  // A harness with a notice (Claude Code's login policy) shows it once until acknowledged.
   noticePending: boolean;
 }
 
@@ -402,6 +445,15 @@ export const tabCommandSchemas = [
     .strict(),
   z
     .object({ type: z.literal("harness.signIn"), harness: harnessIdSchema })
+    .strict(),
+  z
+    .object({
+      type: z.literal("harness.cancelSignIn"),
+      harness: harnessIdSchema,
+    })
+    .strict(),
+  z
+    .object({ type: z.literal("harness.signOut"), harness: harnessIdSchema })
     .strict(),
   // Main opens a native file dialog; the renderer never supplies a path.
   z

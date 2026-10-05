@@ -504,6 +504,115 @@ test("read-along RPCs keep shared tabs host-only, member-readable, and ordered",
   }
 });
 
+test("read-along publish accepts OpenCode tabs beside Codex and Claude and still refuses unknown harnesses", async () => {
+  const { db, rpc, call } = await sharedDatabase();
+  try {
+    const { roomId } = await rpc(alice, {
+      type: "room.create",
+      name: "Harnesses",
+    });
+    const invite = "e".repeat(64);
+    await rpc(alice, { type: "invite.create", roomId, tokenHash: invite });
+    await rpc(bob, { type: "room.join", tokenHash: invite });
+    const tabs = {
+      codex: "aaaaaaaa-0000-4000-8000-000000000001",
+      claude: "aaaaaaaa-0000-4000-8000-000000000002",
+      opencode: "aaaaaaaa-0000-4000-8000-000000000003",
+    };
+    const record = (harness, patch = {}) => ({
+      tabId: tabs[harness] ?? "aaaaaaaa-0000-4000-8000-000000000009",
+      roomId,
+      deviceId: "alice-desktop-1",
+      title: `A ${harness} tab`,
+      harness,
+      model: "test-model",
+      status: "running",
+      switchOn: true,
+      ...patch,
+    });
+    const entry = {
+      seq: 1,
+      kind: "assistant",
+      share: "full",
+      summary: "Hello",
+      text: "Hello",
+      version: 1,
+    };
+    const publish = (userId, tab) =>
+      call(userId, "desktop_tab_share_publish", {
+        p_tab: tab,
+        p_entries: [entry],
+      });
+
+    // OpenCode publishes like any harness; Codex and Claude keep working.
+    for (const harness of ["opencode", "codex", "claude"]) {
+      assert.deepEqual(await publish(alice, record(harness)), {
+        maxSeq: 1,
+        version: 1,
+        rev: 1,
+      });
+      const pulled = await call(bob, "desktop_tab_share_pull", {
+        p_tab_id: tabs[harness],
+        p_after_rev: 0,
+        p_after_seq: 0,
+        p_before_seq: null,
+        p_limit: 200,
+        p_byte_budget: 1048576,
+      });
+      assert.equal(pulled.record.harness, harness);
+      assert.deepEqual(
+        pulled.entries.map((row) => row.text),
+        ["Hello"],
+      );
+    }
+    const listed = (await rpc(bob)).rooms.find((room) => room.id === roomId);
+    assert.deepEqual(listed.sharedTabs.map((tab) => tab.harness).sort(), [
+      "claude",
+      "codex",
+      "opencode",
+    ]);
+
+    // An unknown harness is refused by the function and by the table check.
+    await assert.rejects(publish(alice, record("cursor")), /record is invalid/);
+    await assert.rejects(
+      db.query(
+        "insert into public.desktop_tab_share(tab_id, room_id, host_id, device_id, title, harness, model, status, switch_on) values ($1, $2, $3, 'alice-desktop-1', 'Raw', 'cursor', 'm', 'idle', false)",
+        ["aaaaaaaa-0000-4000-8000-000000000010", roomId, alice],
+      ),
+      /desktop_tab_share_harness_check/,
+    );
+
+    // Unauthenticated and non-member callers are still refused for OpenCode tabs.
+    await assert.rejects(publish(null, record("opencode")), /Sign in/);
+    await db.query("select set_config('request.jwt.claim.sub', '', false)");
+    await db.exec("set role anon");
+    await assert.rejects(
+      db.query(
+        "select public.desktop_tab_share_publish($1::jsonb, '[]'::jsonb)",
+        [JSON.stringify(record("opencode"))],
+      ),
+      /permission denied/,
+    );
+    await db.exec("reset role");
+    await assert.rejects(
+      publish(
+        eve,
+        record("opencode", {
+          tabId: "aaaaaaaa-0000-4000-8000-000000000011",
+          deviceId: "eve-desktop-1",
+        }),
+      ),
+      /no longer a member/,
+    );
+    await assert.rejects(
+      publish(bob, record("opencode", { deviceId: "bob-desktop-1" })),
+      /Only the host device/,
+    );
+  } finally {
+    await db.close();
+  }
+});
+
 test("read-along RPCs store sub-agent cards and the plan record, and pull them by kind", async () => {
   const { db, rpc, call } = await sharedDatabase();
   try {

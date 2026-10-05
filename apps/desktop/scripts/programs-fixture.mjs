@@ -4,7 +4,7 @@
 import { createServer } from "node:http";
 import { createHash } from "node:crypto";
 import { writeFile } from "node:fs/promises";
-import { zstdCompressSync } from "node:zlib";
+import { gzipSync, zstdCompressSync } from "node:zlib";
 
 const digest = (buffer) => ({
   sha256: createHash("sha256").update(buffer).digest("hex"),
@@ -41,8 +41,12 @@ function platformKey() {
 export async function startProgramServer(manifestPath) {
   const codex = Buffer.from("fixture codex program\n".repeat(4096));
   const claude = Buffer.from("fixture claude program\n".repeat(4096));
+  const opencode = Buffer.from("fixture opencode program\n".repeat(4096));
   const windows = process.platform === "win32";
   const executable = windows ? "bin/codex.exe" : "bin/codex";
+  const opencodeFile = windows
+    ? "package/bin/opencode.exe"
+    : "package/bin/opencode";
   const bodies = {
     codex: zstdCompressSync(
       tar([
@@ -51,6 +55,13 @@ export async function startProgramServer(manifestPath) {
       ]),
     ),
     claude,
+    // An npm platform package, shaped like opencode-<platform>.
+    opencode: gzipSync(
+      tar([
+        ["package/package.json", Buffer.from("{}")],
+        [opencodeFile, opencode],
+      ]),
+    ),
   };
   const corrupt = new Set();
   const requests = [];
@@ -94,6 +105,19 @@ export async function startProgramServer(manifestPath) {
             url: `${url}/claude`,
             file: windows ? "claude.exe" : "claude",
             download: digest(claude),
+          },
+        },
+      },
+      opencode: {
+        version: "1.18.34",
+        platforms: {
+          [platform]: {
+            url: `${url}/opencode`,
+            file: opencodeFile,
+            download: digest(bodies.opencode),
+            compression: "gzip",
+            archive: "tar",
+            binary: digest(opencode),
           },
         },
       },

@@ -4,6 +4,7 @@ import {
   DEFAULT_LOADOUT,
   HARNESS_LABELS,
   tabBusy,
+  type HarnessId,
   type Loadout,
   type SlashCommand,
   type Tab,
@@ -578,6 +579,39 @@ export class TabHost {
     this.counts(roomId, tabId);
   }
 
+  /**
+   * After a sign-out: marks the harness signed out, stops every running turn on it, and closes
+   * every live session, so no tab keeps working on the old login (KTD11). Notices name the
+   * harness only, never the account, because read-along publishes them (R12).
+   */
+  closeHarness(harness: HarnessId) {
+    const label = HARNESS_LABELS[harness];
+    this.registry.markSignedOut(harness, `Signed out of ${label}.`);
+    for (const key of this.commandLists.keys())
+      if (key.startsWith(`${harness}\n`)) this.commandLists.delete(key);
+    for (const room of this.store.read().rooms)
+      for (const tab of room.tabs) {
+        if (tab.loadout.harness !== harness) continue;
+        const live = this.live.get(tab.id);
+        if (!live) continue;
+        const turn = live.turn && !live.turn.finished ? live.turn : undefined;
+        if (!live.session && !turn) continue;
+        if (turn) {
+          turn.stopping = true;
+          this.cancelRequests(live);
+        }
+        this.dropSession(room.id, tab.id, "stopped");
+        if (turn) this.finish(tab.id, turn, "stopped");
+        this.writer.append(room.id, tab.id, {
+          turnId: null,
+          kind: "notice",
+          notice: "signed_out",
+          summary: `Signed out of ${label}. Sign in again from Settings, then send a follow-up.`,
+        });
+        this.writer.release(tab.id);
+      }
+  }
+
   private resetSession(roomId: string, tabId: string) {
     const { tab } = findTab(this.store.read(), roomId, tabId);
     if (tabBusy(tab.status)) throw new Error("Stop the running turn first.");
@@ -1048,9 +1082,7 @@ export class TabHost {
     const turn = live.turn && !live.turn.finished ? live.turn : undefined;
     if (turn ? turn.stopping : live.stopTimer) return;
     if (turn) turn.stopping = true;
-    for (const entryId of live.requests.keys())
-      this.writer.update(entryId, { state: "cancelled" });
-    live.requests.clear();
+    this.cancelRequests(live);
     this.writer.flush();
     this.counts(roomId, tabId);
     void live.session?.stop().catch(() => {});
@@ -1070,6 +1102,13 @@ export class TabHost {
     timer.unref?.();
     if (turn) turn.stopTimer = timer;
     else live.stopTimer = timer;
+  }
+
+  /** Cancels every pending approval and question on the tab, the lead's and its sub-agents'. */
+  private cancelRequests(live: Live) {
+    for (const entryId of live.requests.keys())
+      this.writer.update(entryId, { state: "cancelled" });
+    live.requests.clear();
   }
 
   private finish(tabId: string, turn: Turn, outcome: "completed" | "stopped") {

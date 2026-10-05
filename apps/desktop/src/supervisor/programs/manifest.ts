@@ -212,4 +212,137 @@ export const HARNESS_MANIFEST: ProgramManifest = {
       },
     },
   },
+  opencode: {
+    version: "1.18.34",
+    platforms: {
+      "darwin-arm64": {
+        url: "https://registry.npmjs.org/opencode-darwin-arm64/-/opencode-darwin-arm64-1.18.34.tgz",
+        file: "package/bin/opencode",
+        download: {
+          sha256:
+            "9a336191ee84c8f54364b5d1990ec87abb2acbb00dea189f11dda5e968d7bf05",
+          size: 45264760,
+        },
+        compression: "gzip",
+        archive: "tar",
+        binary: {
+          sha256:
+            "7b63b34fafabded7d9231f6a9032755d0cdeaf8b9d2b70df8e25535471469eea",
+          size: 144257280,
+        },
+      },
+      "darwin-x64": {
+        url: "https://registry.npmjs.org/opencode-darwin-x64/-/opencode-darwin-x64-1.18.34.tgz",
+        file: "package/bin/opencode",
+        download: {
+          sha256:
+            "bda35c563697ca66b2b5c5b51f6f731376de4b007d9134a52cfe6b8216acba0a",
+          size: 48879002,
+        },
+        compression: "gzip",
+        archive: "tar",
+        binary: {
+          sha256:
+            "f97abb1fb2e701b4a4bcc06361e41c81d1837d9e60c3e7d65dfaca9827422ac3",
+          size: 151188432,
+        },
+      },
+      "linux-arm64": {
+        url: "https://registry.npmjs.org/opencode-linux-arm64/-/opencode-linux-arm64-1.18.34.tgz",
+        file: "package/bin/opencode",
+        download: {
+          sha256:
+            "6f212b830b26bf72012f1665559ddb5fd7e928294971d3d1c99a0f9097a3d311",
+          size: 60094599,
+        },
+        compression: "gzip",
+        archive: "tar",
+        binary: {
+          sha256:
+            "415487fcd9b3f06addd6877435783f3d5a236c029066b0dd6597d64980b15351",
+          size: 185116816,
+        },
+      },
+      "linux-x64": {
+        url: "https://registry.npmjs.org/opencode-linux-x64/-/opencode-linux-x64-1.18.34.tgz",
+        file: "package/bin/opencode",
+        download: {
+          sha256:
+            "b83e8ac66d752d05ead4b6a439d3a2cfa32bcd9817c708825a389b5d5cba4f19",
+          size: 60309530,
+        },
+        compression: "gzip",
+        archive: "tar",
+        binary: {
+          sha256:
+            "9ca0b9953d49997601655e54f846a3efa464f237e47c6f1b04716d0f2e64c4c2",
+          size: 185632896,
+        },
+      },
+      "linux-arm64-musl": {
+        url: "https://registry.npmjs.org/opencode-linux-arm64-musl/-/opencode-linux-arm64-musl-1.18.34.tgz",
+        file: "package/bin/opencode",
+        download: {
+          sha256:
+            "f2c712c6279960802615e8e1c2db150dbfd0c7aec02003001813b9d58b623a6d",
+          size: 62202895,
+        },
+        compression: "gzip",
+        archive: "tar",
+        binary: {
+          sha256:
+            "0fc925d7f8f9562c90cd9d684ac96baadedb360e75602f074942a484bcecfa75",
+          size: 194621304,
+        },
+      },
+      "linux-x64-musl": {
+        url: "https://registry.npmjs.org/opencode-linux-x64-musl/-/opencode-linux-x64-musl-1.18.34.tgz",
+        file: "package/bin/opencode",
+        download: {
+          sha256:
+            "60b301c9918d9a30ef42dab7096d5528e8c0dc5028bd70eb86864082177a12d5",
+          size: 62664505,
+        },
+        compression: "gzip",
+        archive: "tar",
+        binary: {
+          sha256:
+            "4fa437184846977f1849ffb65fc19d32686dec85a455df3d37f69a2993f22182",
+          size: 196049184,
+        },
+      },
+      "win32-arm64": {
+        url: "https://registry.npmjs.org/opencode-windows-arm64/-/opencode-windows-arm64-1.18.34.tgz",
+        file: "package/bin/opencode.exe",
+        download: {
+          sha256:
+            "b9dfab4ffcd5df5a9286d613359701dd6c8d3d880f0c426ba7a7c37eb5a7aeeb",
+          size: 58544117,
+        },
+        compression: "gzip",
+        archive: "tar",
+        binary: {
+          sha256:
+            "f229c557fa54e3b2c79d78e31dc14b4e1447047b04a339ec62353e3586a7ab0f",
+          size: 176494984,
+        },
+      },
+      "win32-x64": {
+        url: "https://registry.npmjs.org/opencode-windows-x64/-/opencode-windows-x64-1.18.34.tgz",
+        file: "package/bin/opencode.exe",
+        download: {
+          sha256:
+            "b4f4ae37a9ecbd6eceecf3a452573a5abdeab88ba50f93a9ad40762d7a10bae9",
+          size: 60230073,
+        },
+        compression: "gzip",
+        archive: "tar",
+        binary: {
+          sha256:
+            "5283c2cd5b4285855daa97e6f7d17bf48146227cdf2a940e79e0f2b7869fd06e",
+          size: 180599176,
+        },
+      },
+    },
+  },
 };

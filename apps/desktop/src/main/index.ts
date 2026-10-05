@@ -21,6 +21,7 @@ import {
   TRANSCRIPT_CHANNEL,
   SHARED_TRANSCRIPT_CHANNEL,
   type Result,
+  type SupervisorTesting,
 } from "../shared/contracts";
 import { HARNESS_LABELS } from "../shared/tabs";
 import { loginAllowed } from "./supervisor-messages";
@@ -59,6 +60,15 @@ if (!app.isPackaged && !profileDirectory) {
 if (profileDirectory) app.setPath("userData", resolve(profileDirectory));
 if (testing && process.env.MP_TEST_USER_DATA)
   app.setPath("userData", resolve(process.env.MP_TEST_USER_DATA));
+// Harness sign-ins live in app-owned homes (KTD3). Dev checkouts share one root so each new
+// worktree profile does not need its own sign-in; packaged, explicit-profile, and E2E runs keep
+// theirs inside the profile.
+const accountsRoot =
+  app.isPackaged ||
+  profileDirectory ||
+  (testing && process.env.MP_TEST_USER_DATA)
+    ? join(app.getPath("userData"), "accounts")
+    : join(app.getPath("appData"), "Multiplayer AI Dev", "accounts");
 const devUrl = !app.isPackaged ? process.env.ELECTRON_RENDERER_URL : undefined;
 if (devUrl && !isLocalDevUrl(devUrl))
   throw new Error("Development UI must be served from 127.0.0.1.");
@@ -183,7 +193,6 @@ else {
         coordinator?.acceptLocal(snapshot);
       },
       (health) => window?.webContents.send(HEALTH_CHANNEL, health),
-      testing ? process.env.MP_TEST_CODEX_FIXTURE : undefined,
       {
         // Read-along taps validated batches before the window guard; transcripts reach the
         // renderer only in the trusted main frame of the app window.
@@ -198,11 +207,23 @@ else {
         openLogin: (harness, url) => {
           if (loginAllowed(harness, url)) void shell.openExternal(url);
         },
+        accountsRoot,
         // Test fixtures and a local download manifest apply only to unpackaged E2E runs.
-        claudeFixture: testing ? process.env.MP_TEST_CLAUDE_FIXTURE : undefined,
-        harnessManifest: testing
-          ? process.env.MP_TEST_HARNESS_MANIFEST
-          : undefined,
+        ...(testing
+          ? {
+              testing: {
+                codexFixture: process.env.MP_TEST_CODEX_FIXTURE,
+                claudeFixture: process.env.MP_TEST_CLAUDE_FIXTURE,
+                opencodeFixture: process.env.MP_TEST_OPENCODE_FIXTURE,
+                opencodeDiscovery: process.env.MP_TEST_OPENCODE_DISCOVERY
+                  ? (JSON.parse(
+                      process.env.MP_TEST_OPENCODE_DISCOVERY,
+                    ) as SupervisorTesting["opencodeDiscovery"])
+                  : undefined,
+                harnessManifest: process.env.MP_TEST_HARNESS_MANIFEST,
+              },
+            }
+          : {}),
       },
     );
     // Harnesses launch with the host's login-shell environment; the supervisor strips provider

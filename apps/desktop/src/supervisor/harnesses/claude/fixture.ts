@@ -1,5 +1,12 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+} from "node:fs";
+import { join } from "node:path";
 import type {
   Options,
   PermissionResult,
@@ -7,7 +14,8 @@ import type {
   SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import type { ClaudeOptions, ClaudeQuery } from "./adapter";
-import type { AuthStatus } from "./auth";
+import type { AuthStatus, LoginProcess } from "./auth";
+import type { LaunchContext } from "../contract";
 import { EventQueue } from "../queue";
 
 // A scripted Claude Agent SDK query for tests and MP_E2E only. It never starts Claude Code or
@@ -18,11 +26,14 @@ import { EventQueue } from "../queue";
 // FIXTURE_BACKGROUND (a background sub-agent and a background shell command that outlive the
 // turn; after the turn the sub-agent asks to run a command, then completes and Claude Code replies
 // on its own, and `finishShell` ends the shell command). Sessions persist in the state file so a
-// restarted app can resume them.
+// restarted app can resume them. `login` scripts the next sign-in (it succeeds by default), and
+// with a state file every launch is logged to `<state>.log` with its CLAUDE_CONFIG_DIR and the
+// names of its environment variables. Skills in the app home's `skills/` are listed as commands.
 
 interface FixtureState {
   signedIn: boolean;
   sessions: Record<string, number>;
+  login?: "succeed" | "fail" | "hang";
 }
 
 interface FixtureRecord {
@@ -71,6 +82,54 @@ export function claudeFixture(
     if (statePath) writeFileSync(statePath, JSON.stringify(state));
   };
   const record: FixtureRecord = { options: [], calls: [] };
+  const log = (type: string, env: Record<string, string | undefined> = {}) => {
+    record.calls.push(`${type}:${env.CLAUDE_CONFIG_DIR ?? ""}`);
+    if (statePath)
+      appendFileSync(
+        `${statePath}.log`,
+        `${JSON.stringify({ type, configDir: env.CLAUDE_CONFIG_DIR, envKeys: Object.keys(env).sort() })}\n`,
+      );
+  };
+  // Skills the app home links in, so a host skill shows up in the command list.
+  const skills = (env: Record<string, string | undefined> = {}) => {
+    try {
+      return readdirSync(join(env.CLAUDE_CONFIG_DIR ?? "", "skills")).map(
+        (name) => ({ name, description: "Skill", argumentHint: "" }),
+      );
+    } catch {
+      return [];
+    }
+  };
+  const login = (context: LaunchContext): LoginProcess => {
+    log("login", context.env);
+    const behavior = load().login ?? "succeed";
+    let cancel = () => {};
+    const done = new Promise<void>((resolve, reject) => {
+      const timer =
+        behavior === "hang"
+          ? undefined
+          : setTimeout(() => {
+              if (behavior === "fail")
+                return reject(
+                  new Error(
+                    "Login failed: invalid_grant at https://claude.ai/oauth/callback?code=fixture-secret-code-0123456789",
+                  ),
+                );
+              save({ ...load(), signedIn: true });
+              resolve();
+            }, 50);
+      cancel = () => {
+        clearTimeout(timer);
+        record.calls.push("login.cancel");
+        reject(new Error("Sign-in cancelled."));
+      };
+    });
+    return { done, cancel };
+  };
+  const logout = async (context: LaunchContext) => {
+    log("logout", context.env);
+    save({ ...load(), signedIn: false });
+  };
   // The latest query's output and background tasks, for scripted events after a turn.
   let current:
     | {
@@ -104,6 +163,7 @@ export function claudeFixture(
   }): ClaudeQuery => {
     const { options } = params;
     record.options.push(options);
+    log("query", options.env);
     let mode = options.permissionMode ?? "default";
     let model = options.model ?? "default";
     let interrupted: (() => void) | undefined;
@@ -527,6 +587,7 @@ export function claudeFixture(
         available_output_styles: ["default", "Explanatory", "Learning"],
       }),
       supportedCommands: async () => [
+        ...skills(options.env),
         {
           name: "review",
           description: "Review the current changes",
@@ -590,6 +651,11 @@ export function claudeFixture(
       applyFlagSettings: async (settings) => {
         record.calls.push(`flags:${JSON.stringify(settings)}`);
       },
+      setMcpServers: async (servers) => {
+        const names = Object.keys(servers).sort();
+        record.calls.push(`mcp:${names.join(",")}`);
+        return { added: names, removed: [], errors: {} };
+      },
       close: () => {
         record.calls.push("close");
         closed = true;
@@ -613,6 +679,7 @@ export function claudeFixture(
     /** Ends the query's output as if Claude Code exited. */
     exit: () => current!.outbox.end(),
     setSignedIn: (signedIn: boolean) => save({ ...load(), signedIn }),
-    options: { startQuery, authStatus } satisfies ClaudeOptions,
+    setLogin: (login: FixtureState["login"]) => save({ ...load(), login }),
+    options: { startQuery, authStatus, login, logout } satisfies ClaudeOptions,
   };
 }

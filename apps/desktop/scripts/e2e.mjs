@@ -64,6 +64,13 @@ const run = createRun({
                   MP_TEST_HARNESS_MANIFEST: join(output, "manifest.json"),
                   MP_FIXTURE_SIGNED_IN: "1",
                   MP_FIXTURE_STATE: join(output, "codex-threads.json"),
+                  // OpenCode finds no local server and has no login of its own here.
+                  MP_TEST_OPENCODE_FIXTURE: join(
+                      appDirectory,
+                      "scripts/opencode-fixture.mjs",
+                  ),
+                  MP_OPENCODE_FIXTURE_LOG: join(output, "opencode.jsonl"),
+                  XDG_DATA_HOME: join(output, "xdg-data"),
               }),
     }),
     timeout: 12_000,
@@ -145,6 +152,8 @@ await run.execute(
                 "answerQuestion",
                 "refreshHarness",
                 "signInHarness",
+                "cancelHarnessSignIn",
+                "signOutHarness",
                 "chooseHarnessExecutable",
                 "useManagedHarness",
                 "acknowledgeHarnessNotice",
@@ -336,12 +345,7 @@ await run.execute(
         if (packaged) {
             // The Claude Code harness state exists only once the supervisor has loaded the Claude Agent
             // SDK, so reaching it proves the SDK loads from the packaged build.
-            await page
-                .getByRole("button", { name: "New tab", exact: true })
-                .click();
-            await page
-                .getByRole("menuitem", { name: "Claude Code", exact: true })
-                .click();
+            await run.newTab("Claude Code");
             await page.getByRole("tab", { name: /Claude Code 1/ }).waitFor();
             const state = await snapshot();
             assert.equal(state.rooms[1].tabs[0].status, "unavailable");
@@ -422,12 +426,7 @@ await run.execute(
         await page.screenshot({ path: join(output, "02-new-tab-menu.png") });
         await page.keyboard.press("Escape");
         assert.equal(await picker.count(), 0);
-        await page
-            .getByRole("button", { name: "New tab", exact: true })
-            .click();
-        await page
-            .getByRole("menuitem", { name: "Codex", exact: true })
-            .click();
+        await run.newTab("Codex");
         await page.getByRole("tab", { name: /Codex 1/ }).waitFor();
         for (let attempt = 0; attempt < 100; attempt++) {
             if ((await snapshot()).rooms[1].tabs[0].status === "idle") break;
@@ -598,9 +597,33 @@ await run.execute(
         await settingsDialog
             .getByRole("button", { name: "Refresh Claude Code", exact: true })
             .waitFor();
+        if (!packaged) {
+            // With no usable model OpenCode says so and shows how to get one.
+            await settingsDialog.getByRole("tab", { name: "OpenCode" }).click();
+            await settingsDialog
+                .getByRole("button", { name: "Refresh OpenCode", exact: true })
+                .click();
+            const opencode = settingsDialog.getByRole("region", {
+                name: "Harness settings",
+            });
+            await opencode
+                .getByText("No models available", { exact: true })
+                .waitFor({ timeout: 30_000 });
+            await opencode.getByText(/ollama launch opencode/).waitFor();
+            await opencode.getByText("Ollama · not running").waitFor();
+            assert.equal(
+                await opencode.getByRole("button", { name: /Sign in/ }).count(),
+                0,
+            );
+            await page.screenshot({ path: join(output, "03-opencode-no-models.png") });
+        }
         await page.keyboard.press("Escape");
         assert.equal(await settingsDialog.count(), 0);
-        await checkpoint("Settings shows harness connections and models");
+        await checkpoint(
+            packaged
+                ? "Settings shows harness connections and models"
+                : "Settings shows harness connections and models, and OpenCode with none says so",
+        );
 
         await page.keyboard.press("Control+b");
         assert.equal(

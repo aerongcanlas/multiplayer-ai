@@ -1289,6 +1289,10 @@ summary:focus-visible {
   color: #fbe3d6;
   background: #6a3c2a;
 }
+.tab-picker-mark.harness-opencode {
+  color: #f1ecec;
+  background: #3a3a3a;
+}
 .tab-picker-text {
   display: flex;
   flex: 1;
@@ -1315,9 +1319,6 @@ summary:focus-visible {
 }
 .tab-picker-chevron {
   color: #8c8c97;
-}
-.tab-stop {
-  margin-left: auto;
 }
 .tab-rename input {
   width: 150px;
@@ -1388,6 +1389,35 @@ summary:focus-visible {
   color: #c3c3d0;
   line-height: 1.5;
 }
+.harness-command,
+.harness-confirm {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+.harness-command code {
+  max-width: 100%;
+  padding: 6px 8px;
+  overflow-x: auto;
+  border: 1px solid #ffffff14;
+  border-radius: 6px;
+  background: #1b1b22;
+  color: #d6d6e0;
+  font-size: 11px;
+  white-space: pre;
+}
+.harness-command-actions {
+  display: flex;
+  gap: 6px;
+}
+.harness-confirm p {
+  margin: 0;
+  color: #c9c9d2;
+  line-height: 1.5;
+}
 .harness-downloading {
   padding: 6px 16px;
   color: #a9b8d4;
@@ -1408,6 +1438,23 @@ summary:focus-visible {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+.harness-servers {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.harness-servers li {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+.harness-line.harness-warning {
+  color: #e2b45c;
+  white-space: normal;
 }
 .harness-line {
   color: #a3a3a3;
@@ -1435,13 +1482,23 @@ summary:focus-visible {
 .panel-composer .composer-footer > div {
   flex: 1;
 }
-.panel-composer .composer-footer > button[type="submit"] {
+/* The send control turns into Stop while the tab runs; both share the white circle. */
+.panel-composer .composer-footer > button:last-child {
   flex-shrink: 0;
   width: 30px;
   height: 30px;
   color: #171717;
   background: #fff;
   border-radius: 50%;
+  transition:
+    background-color 120ms ease,
+    opacity 120ms ease;
+}
+.panel-composer .composer-footer > button:last-child:hover:not(:disabled) {
+  background: #e5e5e5;
+}
+.panel-composer .composer-footer > button[type="button"]:last-child:disabled {
+  opacity: 0.6;
 }
 .loadout-bar {
   display: flex;

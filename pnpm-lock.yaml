@@ -63,6 +63,9 @@ importers:
 
   apps/desktop:
     dependencies:
+      '@agentclientprotocol/sdk':
+        specifier: 1.7.0
+        version: 1.7.0(zod@4.4.3)
       '@anthropic-ai/claude-agent-sdk':
         specifier: 0.3.286
         version: 0.3.286(@anthropic-ai/sdk@0.128.0(zod@4.4.3))(@modelcontextprotocol/sdk@1.30.0(supports-color@7.2.0)(zod@4.4.3))(zod@4.4.3)
@@ -471,6 +474,11 @@ importers:
         version: 7.3.6(@types/node@24.13.4)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.12)(yaml@2.9.0)
 
 packages:
+
+  '@agentclientprotocol/sdk@1.7.0':
+    resolution: {integrity: sha512-ZORuxsuEnLjRly7t6Ad7zAsWitjWsyprswyPUHz/yycPb+tTm3DGa8XheaHhRXqX8LS9snuxaYavXSRA50TlHw==}
+    peerDependencies:
+      zod: ^3.25.0 || ^4.0.0
 
   '@ai-sdk/gateway@4.0.52':
     resolution: {integrity: sha512-SXUM8jzzuTUJRq+EOgPd5to6DSx0EKslVn+IVZHbUEX6k/3vCPNrvjckbK26HnNxHU/STxm+zTSJteqrO+7Z0w==}
@@ -6302,6 +6310,10 @@ packages:
     resolution: {integrity: sha512-bXE4cR/kVZhKZX/RjPEflHaKVhUVl85noU3v6b8apfQEc1x4A+zBxjZ4lN8LqGd6WZ3dl98pY4o717VFmoPp+A==}
 
 snapshots:
+
+  '@agentclientprotocol/sdk@1.7.0(zod@4.4.3)':
+    dependencies:
+      zod: 4.4.3
 
   '@ai-sdk/gateway@4.0.52(zod@4.4.3)':
     dependencies:

@@ -2,6 +2,7 @@ import { utilityProcess, type UtilityProcess } from "electron";
 import { randomUUID } from "node:crypto";
 import type {
     Health,
+    SupervisorTesting,
     Result,
     Snapshot,
     SupervisorMessage,
@@ -34,12 +35,13 @@ export class SupervisorClient {
         directory: string,
         private onSnapshot: (snapshot: Snapshot) => void,
         private onHealth: (health: Health) => void,
-        codexFixture?: string,
         private tabs: {
             onTranscript?: (batches: TranscriptBatch[]) => void;
             openLogin?: (harness: HarnessId, url: string) => void;
-            claudeFixture?: string;
-            harnessManifest?: string;
+            // Where each harness keeps its app-owned login and history.
+            accountsRoot?: string;
+            // Harness fixtures and a local download manifest for unpackaged E2E runs.
+            testing?: SupervisorTesting;
         } = {},
     ) {
         // Credentials and provider keys from the launching terminal are not inherited by the supervisor.
@@ -52,11 +54,11 @@ export class SupervisorClient {
         );
         this.child = utilityProcess.fork(
             entry,
+            // Test settings travel as one named JSON argument, so none depends on its position.
             [
                 directory,
-                codexFixture ?? "",
-                tabs.claudeFixture ?? "",
-                tabs.harnessManifest ?? "",
+                JSON.stringify(tabs.testing ?? {}),
+                tabs.accountsRoot ?? "",
             ],
             {
                 serviceName: "Multiplayer AI Supervisor",

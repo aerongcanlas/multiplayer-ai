@@ -166,6 +166,8 @@ export function useDesktop() {
       return () => listeners.delete(listener);
     },
     () => state,
+    // Static renders (component tests) read the same view.
+    () => state,
   );
 }
 

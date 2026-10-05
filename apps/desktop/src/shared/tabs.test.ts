@@ -5,6 +5,7 @@ import { commandSchema } from "./contracts";
 import {
   SHARE_LEVELS,
   TRANSCRIPT_KINDS,
+  loadoutSchema,
   tabSchema,
   transcriptEntrySchema,
 } from "./tabs";
@@ -191,6 +192,19 @@ test("tab commands validate size, identity, and scope", () => {
       approvalId: randomUUID(),
       decision: "accept",
     }).success,
+    false,
+  );
+});
+
+test("loadouts accept every harness id and reject unknown ones", () => {
+  const loadout = { model: "", planMode: false, access: "ask" };
+  for (const harness of ["codex", "claude", "opencode"])
+    assert.equal(
+      loadoutSchema.safeParse({ ...loadout, harness }).success,
+      true,
+    );
+  assert.equal(
+    loadoutSchema.safeParse({ ...loadout, harness: "cursor" }).success,
     false,
   );
 });

@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { findRelease } from "./release";
+import { findRelease, OPENCODE_PACKAGES, opencodeLine } from "./release";
+import { HARNESS_MANIFEST } from "./manifest";
 
 const sha = "a".repeat(64);
 const answering = (bodies: Record<string, unknown>) =>
@@ -86,4 +87,78 @@ test("a release without a digest, a missing release, or a non-release version is
   await assert.rejects(
     findRelease("codex", "0.162.0-alpha.1", "linux-x64", answering({})),
   );
+});
+
+test("an OpenCode update takes npm's integrity and builds its download URL from the fixed registry", async () => {
+  const line = opencodeLine();
+  const version = `${line}99`;
+  const integrity = `sha512-${"A".repeat(86)}==`;
+  const release = await findRelease(
+    "opencode",
+    version,
+    "win32-x64",
+    answering({
+      [`https://registry.npmjs.org/opencode-windows-x64/${version}`]: {
+        version,
+        dist: {
+          integrity,
+          // A response pointing elsewhere does not move the download.
+          tarball: "https://elsewhere.invalid/opencode.tgz",
+        },
+      },
+    }),
+  );
+  assert.deepEqual(release, {
+    version,
+    asset: {
+      url: `https://registry.npmjs.org/opencode-windows-x64/-/opencode-windows-x64-${version}.tgz`,
+      file: "package/bin/opencode.exe",
+      download: { integrity },
+      compression: "gzip",
+      archive: "tar",
+    },
+  });
+  await assert.rejects(
+    findRelease(
+      "opencode",
+      version,
+      "darwin-arm64",
+      answering({
+        [`https://registry.npmjs.org/opencode-darwin-arm64/${version}`]: {
+          version,
+          dist: { shasum: "abc" },
+        },
+      }),
+    ),
+    /no verified build/,
+  );
+  // A newer minor line needs an app update.
+  const [major, minor] = line.split(".").map(Number);
+  await assert.rejects(
+    findRelease(
+      "opencode",
+      `${major}.${minor! + 1}.0`,
+      "darwin-arm64",
+      answering({}),
+    ),
+    /after an app update/,
+  );
+});
+
+test("the embedded manifest pins OpenCode with both digests for every packaged platform", () => {
+  const platforms = Object.keys(OPENCODE_PACKAGES);
+  assert.equal(platforms.length, 8);
+  for (const platform of platforms) {
+    const asset =
+      HARNESS_MANIFEST.opencode.platforms[
+        platform as keyof typeof OPENCODE_PACKAGES
+      ];
+    assert.ok(asset, `OpenCode has no build for ${platform}`);
+    assert.match(asset.download.sha256 ?? "", /^[0-9a-f]{64}$/);
+    assert.match(asset.binary?.sha256 ?? "", /^[0-9a-f]{64}$/);
+    assert.equal(asset.compression, "gzip");
+    assert.equal(asset.archive, "tar");
+    assert.ok(asset.url.startsWith("https://registry.npmjs.org/opencode-"));
+  }
+  assert.ok(HARNESS_MANIFEST.opencode.version.startsWith(opencodeLine()));
 });

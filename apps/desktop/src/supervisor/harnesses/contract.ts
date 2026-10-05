@@ -7,16 +7,27 @@ import type {
   HarnessQuestion,
   HarnessState,
   Loadout,
+  LocalServer,
   PlanStep,
   SlashCommand,
 } from "../../shared/tabs";
+import type { AccountSpec, HostPaths } from "./accounts";
 
 /** The resolved program and launch environment an adapter runs with. */
 export interface LaunchContext {
   executable: string;
   env: Record<string, string>;
+  /**
+   * The app-owned home folder `env` names for this harness (its login and session history);
+   * empty for a harness that runs in the host's own folders (OpenCode).
+   */
+  home: string;
+  /** The host's own home and harness folder variables, for finding host setup. Never launched with. */
+  hostPaths: HostPaths;
   /** The host's output style for new sessions, where the harness has output styles. */
   outputStyle?: string;
+  /** The host's saved default model, for harnesses that need a model before a tab picks one. */
+  defaultModel?: string;
 }
 
 export interface SuggestionRequest extends LaunchContext {
@@ -29,6 +40,8 @@ export interface Inspection {
   models: HarnessModel[];
   limits: HarnessState["limits"];
   outputStyles?: string[];
+  // Model servers on this computer the harness found.
+  localServers?: LocalServer[];
 }
 
 // `agent` names the sub-agent card an event belongs to; lead events leave it unset.
@@ -153,16 +166,32 @@ export interface OpenRequest extends LaunchContext {
   listener?: (event: SessionEvent) => void;
 }
 
+/** A started sign-in: already signed in, or waiting on the host to finish it in the browser. */
+export type SignInStart =
+  | { state: "signed_in" }
+  // `done` settles when the harness reports the sign-in finished, or rejects with why it failed.
+  | { state: "pending"; url?: string; done: Promise<void> };
+
 export interface HarnessAdapter {
   readonly id: HarnessId;
-  readonly signIn: "in_app" | "guidance";
+  // In the app, by guidance only, or through a copy-ready terminal command.
+  readonly signIn: "in_app" | "guidance" | "command";
+  /**
+   * The app-owned home this harness launches with, and the host setup carried into it. Left out,
+   * the harness uses the host's own folders.
+   */
+  readonly account?: AccountSpec;
   /** Whether sessions report sub-agents on the session listener. */
   readonly reportsAgents: boolean;
   /** Checks that a custom executable speaks the harness protocol. Returns its version. */
   handshake(context: LaunchContext): Promise<{ version: string | null }>;
   inspect(context: LaunchContext): Promise<Inspection>;
-  /** Starts an in-app sign-in and returns the URL to open, or null when already signed in. */
-  startSignIn?(context: LaunchContext): Promise<string | null>;
+  /** Starts an in-app sign-in. Only one is pending per harness at a time. */
+  startSignIn?(context: LaunchContext): Promise<SignInStart>;
+  /** Ends a pending sign-in, ending any program it started. */
+  cancelSignIn?(): Promise<void>;
+  /** Signs the app's own login out with the harness's own command; never the host's. */
+  signOut?(context: LaunchContext): Promise<void>;
   open(request: OpenRequest): Promise<HarnessSession>;
   /** The slash commands and skills a session in `cwd` would offer. */
   commands?(request: LaunchContext & { cwd: string }): Promise<SlashCommand[]>;

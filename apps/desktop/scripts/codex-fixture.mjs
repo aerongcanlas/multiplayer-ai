@@ -8,6 +8,9 @@
 // work for that sub-agent), and FIXTURE_EXIT_LATER (the process exits after the turn).
 // MP_FIXTURE_STATE persists threads so a restarted fixture can resume them; MP_FIXTURE_LOG records
 // every request, the launch arguments, and the environment for tests to inspect.
+// MP_FIXTURE_LOGIN_HANG=1, or a `<state>.login-hang` file, keeps a ChatGPT sign-in pending until it
+// is cancelled. With a state file, sign-in and sign-out persist in `<state>.signed-in` across
+// restarts of the fixture, as Codex keeps its login in CODEX_HOME.
 import { randomUUID } from "node:crypto";
 import {
     appendFileSync,
@@ -42,7 +45,15 @@ log({
 });
 
 const pending = new Map();
-let signedIn = process.env.MP_FIXTURE_SIGNED_IN === "1";
+const signedInPath = statePath ? `${statePath}.signed-in` : null;
+let signedIn =
+    signedInPath && existsSync(signedInPath)
+        ? readFileSync(signedInPath, "utf8") === "1"
+        : process.env.MP_FIXTURE_SIGNED_IN === "1";
+const setSignedIn = (value) => {
+    signedIn = value;
+    if (signedInPath) writeFileSync(signedInPath, value ? "1" : "0");
+};
 const send = (value) => process.stdout.write(JSON.stringify(value) + "\n");
 const notify = (method, params) => send({ method, params });
 const models = [
@@ -573,17 +584,22 @@ createInterface({ input: process.stdin })
                     process.env.MP_FIXTURE_LOGIN_URL ??
                     "https://auth.openai.com/authorize?state=fixture",
             });
-            setTimeout(() => {
-                signedIn = true;
-                notify("account/login/completed", {
-                    loginId: "fixture-login",
-                    success: true,
-                    error: null,
-                });
-            }, 100);
+            // MP_FIXTURE_LOGIN_HANG leaves the login waiting on the browser.
+            if (
+                process.env.MP_FIXTURE_LOGIN_HANG !== "1" &&
+                !(statePath && existsSync(`${statePath}.login-hang`))
+            )
+                setTimeout(() => {
+                    setSignedIn(true);
+                    notify("account/login/completed", {
+                        loginId: "fixture-login",
+                        success: true,
+                        error: null,
+                    });
+                }, 100);
         } else if (method === "account/login/cancel") result({});
         else if (method === "account/logout") {
-            signedIn = false;
+            setSignedIn(false);
             result({});
         } else if (method === "thread/start") {
             const threadId = randomUUID();

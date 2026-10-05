@@ -1,5 +1,7 @@
 import {
   HARNESS_LABELS,
+  HARNESS_NOTICE_VERSIONS,
+  HARNESS_NOTICES,
   newerVersion,
   type HarnessId,
   type HarnessModel,
@@ -12,6 +14,13 @@ import {
   type LaunchContext,
 } from "./contract";
 import { launchEnvironment } from "./environment";
+import {
+  assertHome,
+  hostPaths,
+  type Accounts,
+  type HostPaths,
+} from "./accounts";
+import type { LatestRelease } from "../programs/latest";
 import type { ProgramRelease } from "../programs/release";
 import type { PlatformKey } from "../programs/types";
 
@@ -22,12 +31,42 @@ interface Settings {
 
 const executableKey = (harness: HarnessId) => `harness.${harness}.executable`;
 const noticeKey = (harness: HarnessId) =>
-  `harness.${harness}.noticeAcknowledged`;
+  HARNESS_NOTICE_VERSIONS[harness] > 1
+    ? `harness.${harness}.noticeAcknowledged.v${HARNESS_NOTICE_VERSIONS[harness]}`
+    : `harness.${harness}.noticeAcknowledged`;
 const defaultKey = (harness: HarnessId) => `harness.${harness}.default`;
 const releaseKey = (harness: HarnessId) => `harness.${harness}.release`;
 const hiddenKey = (harness: HarnessId) => `harness.${harness}.hiddenModels`;
 const styleKey = (harness: HarnessId) => `harness.${harness}.outputStyle`;
 const NEW_TAB_KEY = "harness.newTab";
+const SIGN_IN_TIMEOUT_MS = 10 * 60_000;
+
+/**
+ * A login program's last error line, safe to show: it is untrusted, so links and token-like
+ * strings are removed and it is capped (KTD9).
+ */
+export function signInReason(error: unknown) {
+  const text = error instanceof Error ? error.message : String(error ?? "");
+  const line =
+    text
+      .split(/\r?\n/)
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .at(-1) ?? "";
+  const clean = line
+    .replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, "[link]")
+    .replace(
+      /\b(?=[A-Za-z0-9._~+/=-]*\d)[A-Za-z0-9._~+/=-]{24,}/g,
+      "[redacted]",
+    )
+    .slice(0, 200);
+  return clean || "Sign-in did not finish.";
+}
+
+/** A pending sign-in and its timeout. */
+type PendingSignIn = { timer?: ReturnType<typeof setTimeout> };
+/** The launch environment without host credentials, and where the host keeps its own setup. */
+type Environment = { env: Record<string, string>; host: HostPaths };
 
 /** The host's own default model, and the effort each model starts at. */
 interface DefaultChoice {
@@ -71,8 +110,9 @@ export class HarnessRegistry {
   private generations = new Map<HarnessId, number>();
   // Custom executables that passed the handshake, so turns do not repeat it.
   private handshaken = new Map<HarnessId, string>();
-  private environment: Promise<Record<string, string>>;
-  private provideEnvironment!: (env: Record<string, string>) => void;
+  private signingIn = new Map<HarnessId, PendingSignIn>();
+  private environment: Promise<Environment>;
+  private provideEnvironment!: (value: Environment) => void;
   private fallback?: ReturnType<typeof setTimeout>;
   private closed = false;
 
@@ -80,11 +120,13 @@ export class HarnessRegistry {
     private options: {
       adapters: HarnessAdapter[];
       programs: ProgramManager;
+      // App-owned harness homes; every launch, check, and sign-in runs in one (R15).
+      accounts: Accounts;
       settings: Settings;
       changed: () => void;
       openLogin?: (harness: HarnessId, url: string) => void;
       // Reads the newest published program version; left out, no update check runs.
-      latest?: (harness: HarnessId) => Promise<string | null>;
+      latest?: (harness: HarnessId) => Promise<LatestRelease | null>;
       // Finds a published version's download and digest; left out, updates are unavailable.
       release?: (
         harness: HarnessId,
@@ -94,13 +136,15 @@ export class HarnessRegistry {
       // Main sends the login-shell environment; until then (or after the timeout) the
       // supervisor's own environment is used.
       environmentTimeoutMs?: number;
+      // How long a sign-in may wait on the browser before it ends (R8).
+      signInTimeoutMs?: number;
     },
   ) {
     this.environment = new Promise((resolve) => {
       this.provideEnvironment = resolve;
     });
     this.fallback = setTimeout(
-      () => this.provideEnvironment(launchEnvironment(process.env)),
+      () => this.provideEnvironment(this.split(process.env)),
       options.environmentTimeoutMs ?? 15_000,
     );
     this.fallback.unref?.();
@@ -118,6 +162,9 @@ export class HarnessRegistry {
       const customPath = options.settings.getSetting<string>(
         executableKey(adapter.id),
       );
+      const outputStyle = options.settings.getSetting<string>(
+        styleKey(adapter.id),
+      );
       this.states.set(adapter.id, {
         id: adapter.id,
         label: HARNESS_LABELS[adapter.id],
@@ -134,17 +181,11 @@ export class HarnessRegistry {
           ? { bundledVersion: options.programs.bundled(adapter.id) }
           : {}),
         models: [],
-        ...(options.settings.getSetting<string>(styleKey(adapter.id))
-          ? {
-              outputStyle: options.settings.getSetting<string>(
-                styleKey(adapter.id),
-              ),
-            }
-          : {}),
+        ...(outputStyle ? { outputStyle } : {}),
         modelsRefreshedAt: null,
         limits: [],
         noticePending:
-          adapter.signIn === "guidance" &&
+          HARNESS_NOTICES[adapter.id] !== null &&
           !options.settings.getSetting<boolean>(noticeKey(adapter.id)),
       });
       adapter.onChange?.(() => void this.refresh(adapter.id));
@@ -169,7 +210,11 @@ export class HarnessRegistry {
 
   setEnvironment(env: Record<string, string>) {
     clearTimeout(this.fallback);
-    this.provideEnvironment(launchEnvironment(env));
+    this.provideEnvironment(this.split(env));
+  }
+
+  private split(env: Record<string, string | undefined>): Environment {
+    return { env: launchEnvironment(env), host: hostPaths(env) };
   }
 
   snapshot(): HarnessState[] {
@@ -221,7 +266,32 @@ export class HarnessRegistry {
     const adapter = this.adapter(harness);
     const custom = this.customPath(harness);
     const update = this.updater(harness);
-    const env = await this.environment;
+    const { env: hostEnv, host } = await this.environment;
+    // A harness with an app home never falls back to the host's own folders (R15).
+    let home = "";
+    let env = hostEnv;
+    if (adapter.account) {
+      try {
+        home = await this.options.accounts.prepare(
+          harness,
+          adapter.account,
+          host,
+        );
+      } catch (error) {
+        // Accounts.prepare only throws AccountError.
+        const { message } = error as Error;
+        update((state) => {
+          state.auth = { state: "unknown", message };
+        });
+        throw new HarnessError("unavailable", message);
+      }
+      env = { ...hostEnv, [adapter.account.variable]: home };
+      assertHome(
+        { env, home },
+        adapter.account.variable,
+        this.options.accounts,
+      );
+    }
     try {
       if (!custom)
         update((state) => {
@@ -235,10 +305,16 @@ export class HarnessRegistry {
       const outputStyle = this.options.settings.getSetting<string>(
         styleKey(harness),
       );
-      const context = {
+      const defaultModel = this.options.settings.getSetting<DefaultChoice>(
+        defaultKey(harness),
+      )?.model;
+      const context: LaunchContext = {
         executable: program.path,
         env,
+        home,
+        hostPaths: host,
         ...(outputStyle ? { outputStyle } : {}),
+        ...(defaultModel ? { defaultModel } : {}),
       };
       if (
         program.source === "custom" &&
@@ -308,10 +384,14 @@ export class HarnessRegistry {
     }
   }
 
-  /** Acquires the program if needed and re-reads sign-in and models. */
-  refresh(harness: HarnessId): Promise<void> {
+  /**
+   * Acquires the program if needed and re-reads sign-in and models. `fresh` waits out a read
+   * already in flight, which may predate a sign-in or sign-out, and then reads again.
+   */
+  refresh(harness: HarnessId, fresh = false): Promise<void> {
     const running = this.refreshing.get(harness);
-    if (running) return running;
+    if (running)
+      return fresh ? running.then(() => this.refresh(harness)) : running;
     const update = this.updater(harness);
     this.checkLatest(harness);
     const job: Promise<void> = (async () => {
@@ -328,6 +408,8 @@ export class HarnessRegistry {
           state.models = this.shown(harness, inspection.models);
           if (inspection.outputStyles)
             state.outputStyles = inspection.outputStyles;
+          if (inspection.localServers)
+            state.localServers = inspection.localServers;
           state.limits = inspection.limits;
           state.modelsRefreshedAt = new Date().toISOString();
         });
@@ -362,29 +444,111 @@ export class HarnessRegistry {
     this.latestCheckedAt.set(harness, Date.now());
     void latest(harness)
       .catch(() => null)
-      .then((version) => {
-        if (!version) return this.latestCheckedAt.delete(harness);
+      .then((latest) => {
+        if (!latest) return this.latestCheckedAt.delete(harness);
         this.update(harness, (state) => {
-          state.latestVersion = version;
+          state.latestVersion = latest.version;
+          if (latest.later) state.laterVersion = latest.later;
+          else delete state.laterVersion;
         });
       });
   }
 
+  /**
+   * Starts the harness's own sign-in. A second request while one is pending does nothing; a
+   * failure, timeout, or cancel returns the harness to signed out (R8).
+   */
   async signIn(harness: HarnessId) {
     const adapter = this.adapter(harness);
     if (adapter.signIn !== "in_app" || !adapter.startSignIn)
       throw new Error(
-        `${HARNESS_LABELS[harness]} uses the sign-in already on this computer. See Settings for guidance.`,
+        `${HARNESS_LABELS[harness]} signs in outside the app. See Settings for how.`,
       );
-    const url = await adapter.startSignIn(await this.context(harness));
-    if (!url) return this.refresh(harness);
-    this.update(harness, (state) => {
-      state.auth = {
-        state: "signing_in",
-        message: "Complete the sign-in in your browser.",
-      };
-    });
-    this.options.openLogin?.(harness, url);
+    if (this.signingIn.has(harness)) return;
+    const pending: PendingSignIn = {};
+    this.signingIn.set(harness, pending);
+    try {
+      const started = await adapter.startSignIn(await this.context(harness));
+      if (this.signingIn.get(harness) !== pending) {
+        // Cancelled or closed while the login program was starting: end that program too, unless
+        // a newer sign-in now owns the adapter's login.
+        if (started.state === "pending" && !this.signingIn.has(harness))
+          void adapter.cancelSignIn?.().catch(() => {});
+        return;
+      }
+      if (started.state === "signed_in") {
+        this.forget(harness, pending);
+        return this.refresh(harness, true);
+      }
+      this.update(harness, (state) => {
+        state.auth = {
+          state: "signing_in",
+          message: "Complete the sign-in in your browser.",
+        };
+      });
+      pending.timer = setTimeout(
+        () => void this.endSignIn(harness, pending, "Sign-in timed out."),
+        this.options.signInTimeoutMs ?? SIGN_IN_TIMEOUT_MS,
+      );
+      pending.timer.unref?.();
+      if (started.url) this.options.openLogin?.(harness, started.url);
+      started.done.then(
+        () => {
+          if (this.forget(harness, pending)) void this.refresh(harness, true);
+        },
+        (error: unknown) => {
+          if (this.forget(harness, pending))
+            this.markSignedOut(harness, signInReason(error));
+        },
+      );
+    } catch (error) {
+      if (!this.forget(harness, pending)) return;
+      // A harness whose app folder could not be prepared keeps that reason (R15).
+      if (error instanceof HarnessError && error.kind === "unavailable")
+        throw error;
+      this.markSignedOut(harness, signInReason(error));
+    }
+  }
+
+  /** Drops `pending` while it is still the harness's sign-in; false once something else ended it. */
+  private forget(harness: HarnessId, pending: PendingSignIn) {
+    if (this.signingIn.get(harness) !== pending) return false;
+    clearTimeout(pending.timer);
+    this.signingIn.delete(harness);
+    return true;
+  }
+
+  /** Ends a pending sign-in and its program. */
+  cancelSignIn(harness: HarnessId) {
+    const pending = this.signingIn.get(harness);
+    if (pending) return this.endSignIn(harness, pending, "Sign-in cancelled.");
+  }
+
+  private async endSignIn(
+    harness: HarnessId,
+    pending: PendingSignIn,
+    message: string,
+  ) {
+    if (!this.forget(harness, pending)) return;
+    this.markSignedOut(harness, message);
+    await this.adapter(harness)
+      .cancelSignIn?.()
+      .catch(() => {
+        /* The sign-in already ended. */
+      });
+  }
+
+  /**
+   * Prepares a sign-out and returns the step that runs the harness's own command against the app
+   * home. The home is prepared first, so a missing folder runs nothing against the host (R15).
+   */
+  async prepareSignOut(harness: HarnessId) {
+    const adapter = this.adapter(harness);
+    if (!adapter.signOut)
+      throw new Error(`${HARNESS_LABELS[harness]} has no app sign-in to end.`);
+    await this.cancelSignIn(harness);
+    const context = await this.context(harness);
+    return () => adapter.signOut!(context);
   }
 
   setExecutable(harness: HarnessId, path: string | null) {
@@ -556,6 +720,14 @@ export class HarnessRegistry {
   close() {
     this.closed = true;
     clearTimeout(this.fallback);
+    // Quitting ends any pending sign-in program (R8).
+    for (const [harness, pending] of this.signingIn) {
+      clearTimeout(pending.timer);
+      void this.adapter(harness)
+        .cancelSignIn?.()
+        .catch(() => {});
+    }
+    this.signingIn.clear();
     for (const adapter of this.adapters.values()) adapter.close();
   }
 }

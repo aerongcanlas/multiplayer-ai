@@ -35,6 +35,11 @@ export interface ComposerProps {
   onAccepted?(revision: number, result: SubmissionResult): void;
   disabled?: boolean;
   busy?: boolean;
+  /** When provided, the send control stops the active agent instead. */
+  onStop?(): void;
+  stopDisabled?: boolean;
+  /** A stop request is still in flight; the Stop control waits for it. */
+  stopping?: boolean;
   placeholder?: string;
   label?: string;
   submitLabel?: string;
@@ -65,6 +70,9 @@ export function Composer({
   onAccepted,
   disabled = false,
   busy = false,
+  onStop,
+  stopDisabled = false,
+  stopping = false,
   placeholder = "What should the agent do?",
   label = "Message the agent",
   submitLabel = "Send message",
@@ -122,7 +130,7 @@ export function Composer({
 
   async function submit() {
     const submission = submissionFromDraft(draftRef.current, {
-      busy: busy || inFlight.current.has(targetKey),
+      busy: busy || Boolean(onStop) || inFlight.current.has(targetKey),
       disabled,
       composing,
       maxLength,
@@ -169,6 +177,7 @@ export function Composer({
     composing ||
     validationError !== null ||
     !value.trim();
+  const buttonLabel = onStop ? "Stop" : submitLabel;
   return (
     <form
       data-slot="composer"
@@ -279,14 +288,34 @@ export function Composer({
             ) : null)}
         </div>
         <Button
-          aria-label={submitLabel}
-          aria-busy={busy || pendingTargets.has(targetKey)}
-          title={submitLabel}
-          disabled={sendDisabled}
+          aria-label={buttonLabel}
+          aria-busy={onStop ? stopping : busy || pendingTargets.has(targetKey)}
+          title={buttonLabel}
+          disabled={onStop ? stopDisabled || stopping : sendDisabled}
           size={compact ? "icon-sm" : "icon"}
-          type="submit"
+          type={onStop ? "button" : "submit"}
+          onClick={onStop}
         >
-          <ArrowUp size={compact ? 16 : undefined} />
+          {onStop ? (
+            // A solid rounded square, the same footprint as the arrow it replaces.
+            <svg
+              viewBox="0 0 16 16"
+              width={compact ? 16 : 18}
+              height={compact ? 16 : 18}
+              aria-hidden="true"
+            >
+              <rect
+                x="3.5"
+                y="3.5"
+                width="9"
+                height="9"
+                rx="2"
+                fill="currentColor"
+              />
+            </svg>
+          ) : (
+            <ArrowUp size={compact ? 16 : undefined} />
+          )}
         </Button>
       </div>
     </form>

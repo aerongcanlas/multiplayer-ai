@@ -9,8 +9,9 @@ import {
   ShieldCheck,
   Star,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import type { HarnessId, HarnessState, Loadout } from "../../../shared/tabs";
+import { modelGroups } from "../../lib/harness-status";
 
 const ACCESS_MODES: {
   id: Loadout["access"];
@@ -32,14 +33,9 @@ const ACCESS_MODES: {
   },
 ];
 
-/** The mark of the harness a model comes from. */
-export function HarnessIcon({ id }: { id: HarnessId }) {
-  return id === "codex" ? (
-    <svg
-      className="loadout-harness-icon"
-      viewBox="0 0 16 16"
-      aria-hidden="true"
-    >
+const HARNESS_MARKS: Record<HarnessId, ReactNode> = {
+  codex: (
+    <>
       <circle cx="8" cy="8" r="8" fill="#6f6bf2" />
       <path
         d="M4.6 6l2.2 2-2.2 2M8.4 10.2h3"
@@ -49,20 +45,42 @@ export function HarnessIcon({ id }: { id: HarnessId }) {
         strokeLinecap="round"
         strokeLinejoin="round"
       />
-    </svg>
-  ) : (
+    </>
+  ),
+  claude: (
+    <path
+      d="M8 1v14M1 8h14M3 3l10 10M13 3L3 13"
+      fill="none"
+      stroke="#d97757"
+      strokeWidth="2"
+      strokeLinecap="round"
+    />
+  ),
+  opencode: (
+    <>
+      <rect x="1" y="1" width="14" height="14" rx="3" fill="#2b2b2b" />
+      <rect
+        x="4.5"
+        y="4.5"
+        width="7"
+        height="7"
+        fill="none"
+        stroke="#f1ecec"
+        strokeWidth="1.6"
+      />
+    </>
+  ),
+};
+
+/** The mark of the harness a model comes from. */
+export function HarnessIcon({ id }: { id: HarnessId }) {
+  return (
     <svg
       className="loadout-harness-icon"
       viewBox="0 0 16 16"
       aria-hidden="true"
     >
-      <path
-        d="M8 1v14M1 8h14M3 3l10 10M13 3L3 13"
-        fill="none"
-        stroke="#d97757"
-        strokeWidth="2"
-        strokeLinecap="round"
-      />
+      {HARNESS_MARKS[id]}
     </svg>
   );
 }
@@ -95,6 +113,7 @@ export function LoadoutBar({
   // A model that disappeared from the harness's list must be chosen again.
   const missing = Boolean(models.length && !model);
   const efforts = model?.efforts ?? [];
+  const groups = modelGroups(models);
   const isDefault = Boolean(
     model?.isDefault &&
     (!model.defaultEffort || model.defaultEffort === loadout.effort),
@@ -256,43 +275,53 @@ export function LoadoutBar({
                   {loadout.model} is unavailable — choose a model
                 </p>
               )}
-              {models.map((item) => {
-                const selected = item.id === loadout.model;
-                if (item.hidden && !selected) return null;
-                const effort = selected
-                  ? loadout.effort
-                  : (item.defaultEffort ?? item.efforts[0]);
-                return (
-                  <button
-                    type="button"
-                    role="menuitemradio"
-                    aria-checked={selected}
-                    key={item.id}
-                    className="loadout-menu-item"
-                    onClick={() => {
-                      // A model starts at the effort its row shows.
-                      const next = item.defaultEffort ?? item.efforts[0];
-                      onChange({
-                        ...loadout,
-                        model: item.id,
-                        ...(next ? { effort: next } : { effort: undefined }),
-                      });
-                      setModelOpen(false);
-                    }}
-                  >
-                    <HarnessIcon id={loadout.harness} />
-                    <span className="loadout-model-name">{item.name}</span>
-                    {effort && <span className="loadout-effort">{effort}</span>}
-                    {selected && (
-                      <Check
-                        size={14}
-                        className="loadout-menu-end"
-                        aria-hidden="true"
-                      />
-                    )}
-                  </button>
-                );
-              })}
+              {groups.map((group) => (
+                <Fragment key={group.provider}>
+                  {/* Provider headings appear once models come from more than one provider. */}
+                  {group.label && groups.length > 1 && (
+                    <p className="loadout-menu-heading">{group.label}</p>
+                  )}
+                  {group.models.map((item) => {
+                    const selected = item.id === loadout.model;
+                    if (item.hidden && !selected) return null;
+                    const effort = selected
+                      ? loadout.effort
+                      : (item.defaultEffort ?? item.efforts[0]);
+                    return (
+                      <button
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={selected}
+                        key={item.id}
+                        className="loadout-menu-item"
+                        onClick={() => {
+                          // A model starts at the effort its row shows.
+                          const next = item.defaultEffort ?? item.efforts[0];
+                          onChange({
+                            ...loadout,
+                            model: item.id,
+                            effort: next || undefined,
+                          });
+                          setModelOpen(false);
+                        }}
+                      >
+                        <HarnessIcon id={loadout.harness} />
+                        <span className="loadout-model-name">{item.name}</span>
+                        {effort && (
+                          <span className="loadout-effort">{effort}</span>
+                        )}
+                        {selected && (
+                          <Check
+                            size={14}
+                            className="loadout-menu-end"
+                            aria-hidden="true"
+                          />
+                        )}
+                      </button>
+                    );
+                  })}
+                </Fragment>
+              ))}
               {efforts.length > 0 && (
                 <>
                   <hr />

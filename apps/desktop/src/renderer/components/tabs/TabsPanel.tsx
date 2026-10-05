@@ -1,9 +1,8 @@
-import { ArrowLeft, Bot, CircleStop, Eye, Plus, X } from "lucide-react";
+import { ArrowLeft, Bot, Eye, Plus, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { ReadAlongStatus } from "../../../shared/collaboration";
 import type { Room, Suggestion } from "../../../shared/contracts";
 import {
-  HARNESS_IDS,
   HARNESS_LABELS,
   tabBusy,
   type ApprovalDecision,
@@ -422,22 +421,6 @@ export function TabsPanel({
           disabled={disabled}
           onPick={(id) => void open(id)}
         />
-        {tab && stoppable && !sharedTabId && (
-          <Button
-            size="xs"
-            variant="outline"
-            className="tab-stop"
-            disabled={stale || stopping}
-            onClick={() =>
-              void perform(() => window.desktop.stopTab(room.id, tab.id), {
-                key: `tab.stop:${tab.id}`,
-              })
-            }
-          >
-            <CircleStop size={13} />
-            Stop
-          </Button>
-        )}
       </header>
       {closingTab && (
         <div
@@ -481,7 +464,8 @@ export function TabsPanel({
               this room&apos;s repository.
             </p>
             <div className="card-actions">
-              {HARNESS_IDS.map((id) => (
+              {/* Only harnesses this build registered are offered. */}
+              {harnesses.map(({ id, label }) => (
                 <Button
                   key={id}
                   size="xs"
@@ -489,7 +473,7 @@ export function TabsPanel({
                   onClick={() => void open(id)}
                 >
                   <Plus size={12} />
-                  {HARNESS_LABELS[id]}
+                  {label}
                 </Button>
               ))}
             </div>
@@ -575,6 +559,17 @@ export function TabsPanel({
                   modelMissing
                 }
                 onSubmit={send}
+                onStop={
+                  stoppable
+                    ? () =>
+                        void perform(
+                          () => window.desktop.stopTab(room.id, tab.id),
+                          { key: `tab.stop:${tab.id}` },
+                        )
+                    : undefined
+                }
+                stopDisabled={stale}
+                stopping={stopping}
                 commands={{
                   key: `${room.id}:${tab.loadout.harness}`,
                   load: async () => {

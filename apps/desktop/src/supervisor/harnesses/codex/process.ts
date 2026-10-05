@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import type { LaunchContext } from "../contract";
 import { object, string } from "../json";
+import type { Launcher } from "../launcher";
 import type { CodexAdapter } from "./adapter";
 import type { InitializeParams } from "./generated/InitializeParams";
 import type { CodexSession } from "./session";
@@ -8,17 +9,10 @@ import { JsonRpcTransport, type RpcNotification } from "./transport";
 
 export const ARGS = ["app-server", "--listen", "stdio://"];
 
-/** Test fixtures replace how the executable is launched. */
-export type Launcher = (
-  executable: string,
-  args: string[],
-  env: Record<string, string>,
-) => { executable: string; args: string[]; env: Record<string, string> };
-
 export const versionOf = (userAgent: string) =>
   /\/(\d+\.\d+\.\d+)/.exec(userAgent)?.[1] ?? null;
 
-/** One shared app-server process per executable. */
+/** One shared app-server process per executable and app home. */
 export class CodexProcess {
   readonly transport: JsonRpcTransport;
   readonly ready: Promise<void>;

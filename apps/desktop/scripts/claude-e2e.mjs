@@ -1,10 +1,14 @@
 // Live Claude Code release check (manual): `node scripts/claude-e2e.mjs --repository <path>`.
-// Uses the managed Claude Code download and the machine's existing Claude Code login. It covers
-// models, a project skill that asks a question, continuing from native plan mode, and resuming the
-// session after an app restart. Writes are declined, so the repository must stay unchanged apart
-// from the skill this script adds under an ignored path.
+// Uses the managed Claude Code download and its own app-owned login: the run starts signed out,
+// you finish one real sign-in on Anthropic's page in your browser, and the run signs out at the end
+// so no keychain item is left. A throwaway folder stands in for the host's Claude Code folder, so
+// your real ~/.claude and its login are never touched. It covers AE1 (a host logout leaves the tab
+// signed in), models, a project skill that asks a question, continuing from native plan mode, two
+// tabs at once, and resuming the session after an app restart. Writes are declined, so the
+// repository must stay unchanged apart from the skill this script adds under an ignored path.
+import { execFileSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readdir, writeFile } from "node:fs/promises";
 import { setTimeout as wait } from "node:timers/promises";
 import assert from "node:assert/strict";
 import {
@@ -20,6 +24,17 @@ if (argument < 0)
   throw new Error("Pass --repository <path> to a disposable checkout.");
 const repository = resolve(process.argv[argument + 1]);
 const output = await outputDirectory("claude-live-");
+// `--user-data <path>` reuses an earlier run's profile, which may already be signed in.
+const reuse = process.argv.indexOf("--user-data");
+const userData =
+  reuse < 0 ? join(output, "user-data") : resolve(process.argv[reuse + 1]);
+// The stand-in host folder: a skill to carry over, and its own (empty) login.
+const hostClaude = join(output, "host-claude");
+await mkdir(join(hostClaude, "skills", "host-check"), { recursive: true });
+await writeFile(
+  join(hostClaude, "skills", "host-check", "SKILL.md"),
+  "---\nname: host-check\ndescription: Reply with the word carried.\n---\nReply with the single word: carried.\n",
+);
 
 // A project skill loads through Claude Code's project settings and asks through AskUserQuestion.
 const skill = join(repository, ".claude/skills/pick-color/SKILL.md");
@@ -44,42 +59,112 @@ const before = await fingerprint(repository);
 const run = createRun({
   output,
   environment: testEnvironment(
-    { MP_TEST_USER_DATA: join(output, "user-data") },
-    ["ANTHROPIC_API_KEY"],
+    { MP_TEST_USER_DATA: userData, CLAUDE_CONFIG_DIR: hostClaude },
+    ["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"],
   ),
   timeout: 60_000,
   untilTimeout: 5 * 60_000,
   poll: 500,
   consoleErrors: false,
 });
-const { launch, checkpoint, snapshot, until, send, selectRepository } = run;
-const claude = async () =>
-  (await snapshot()).harnesses.find((item) => item.id === "claude");
+const {
+  launch,
+  checkpoint,
+  snapshot,
+  harness,
+  until,
+  send,
+  selectRepository,
+  newTab,
+  openSettings,
+  closeSettings,
+} = run;
+const claude = () => harness("claude");
 const tab = async () => (await snapshot()).rooms[0].tabs[0];
 const panel = () => run.page.getByRole("region", { name: "AI tabs" });
 const settled = () => run.settled(tab);
+/** The managed Claude Code the app downloaded for this run. */
+async function managedClaude() {
+  const root = join(userData, "harnesses", "claude");
+  const [version] = await readdir(root);
+  return join(root, version, "claude");
+}
+const claudeCli = async (args, configDir) =>
+  execFileSync(await managedClaude(), args, {
+    encoding: "utf8",
+    env: {
+      PATH: process.env.PATH,
+      HOME: process.env.HOME,
+      CLAUDE_CONFIG_DIR: configDir,
+    },
+  });
+/** Re-reads sign-in in Settings, as the app itself sees it, and waits for that read to land. */
+async function refreshClaude() {
+  const { modelsRefreshedAt } = await claude();
+  const settings = await openSettings("Claude Code");
+  await settings
+    .getByRole("button", { name: "Refresh Claude Code", exact: true })
+    .click();
+  await closeSettings();
+  // A successful read stamps the refresh time; a failed one reports the state as unknown.
+  await until(async () => {
+    const current = await claude();
+    return (
+      current.modelsRefreshedAt !== modelsRefreshedAt ||
+      current.auth.state === "unknown"
+    );
+  }, "Claude Code's sign-in to be re-read");
+}
 
 await run.execute(async () => {
   await launch();
-  await selectRepository(repository);
-  await panel().getByRole("button", { name: "New tab", exact: true }).click();
-  await run.page
-    .getByRole("menuitem", { name: "Claude Code", exact: true })
-    .click();
+  // A reused profile already has its repository and Claude Code tab.
+  if (!(await snapshot()).rooms[0]?.workspace)
+    await selectRepository(repository);
+  if (!(await snapshot()).rooms[0]?.tabs.length) await newTab("Claude Code");
   await until(
     async () => (await claude()).program.state === "ready",
     "the managed download",
     20 * 60_000,
   );
   await until(
+    async () =>
+      ["signed_out", "signed_in"].includes((await claude()).auth.state),
+    "the app's own Claude Code home to report its sign-in",
+  );
+  if ((await claude()).auth.state === "signed_out") {
+    console.log(
+      "ACTION: Claude Code opens Anthropic's sign-in page in your browser. Finish signing in there.",
+    );
+    await panel().getByRole("button", { name: "Sign in", exact: true }).click();
+  }
+  await until(
     async () => (await tab()).status === "idle",
     "a signed-in Claude Code tab",
+    10 * 60_000,
   );
   const harness = await claude();
   assert.equal(harness.auth.state, "signed_in");
+  assert.ok(harness.auth.account);
   assert.ok(harness.models.length > 0);
   await checkpoint(
-    `Managed Claude Code ${harness.program.version} is ready with the existing login (${harness.auth.plan ?? "subscription"}), ${harness.models.length} models`,
+    `Managed Claude Code ${harness.program.version} signed in through Anthropic's page (${harness.auth.plan ?? "subscription"}), ${harness.models.length} models`,
+  );
+
+  // AE1: Claude Code in a terminal logging out of the host folder leaves the tab signed in.
+  await claudeCli(["auth", "logout"], hostClaude);
+  await refreshClaude();
+  assert.equal((await claude()).auth.state, "signed_in");
+  assert.equal((await claude()).auth.account, harness.auth.account);
+  await send("/host-check");
+  await settled();
+  await panel()
+    .locator(".turn-assistant")
+    .filter({ hasText: /carried/i })
+    .last()
+    .waitFor();
+  await checkpoint(
+    "A logout in the host's Claude Code folder leaves the tab signed in, and a host skill carries over (AE1, AE3)",
   );
 
   await send("/pick-color");
@@ -132,6 +217,29 @@ await run.execute(async () => {
   assert.equal((await tab()).loadout.planMode, false);
   await checkpoint("Native plan mode continues into execution from its card");
 
+  // Two tabs run at once without either signing out.
+  await newTab("Claude Code");
+  const tabs = async () => (await snapshot()).rooms[0].tabs;
+  await until(
+    async () => (await tabs())[1]?.status === "idle",
+    "a second Claude Code tab",
+  );
+  await send("Reply with the single word: second.");
+  await panel()
+    .getByRole("tab", { name: new RegExp((await tabs())[0].title) })
+    .click();
+  await send("Reply with the single word: first.");
+  await until(
+    async () =>
+      (await tabs()).every(
+        (item) => !["running", "awaiting_host"].includes(item.status),
+      ),
+    "both tabs to finish",
+  );
+  assert.ok((await tabs()).every((item) => item.status === "idle"));
+  assert.equal((await claude()).auth.state, "signed_in");
+  await checkpoint("Two Claude Code tabs run at once and both stay signed in");
+
   const sessionId = (await tab()).sessionId;
   assert.ok(sessionId);
   await run.application.close();
@@ -159,5 +267,20 @@ await run.execute(async () => {
   assert.deepEqual(run.errors, []);
   await checkpoint(
     "The repository is unchanged and the renderer reported no errors",
+  );
+
+  // Sign out runs Claude Code's own logout in the app's home, so no keychain item is left.
+  const settings = await openSettings("Claude Code");
+  await settings.getByRole("button", { name: "Sign out", exact: true }).click();
+  await until(
+    async () => (await claude()).auth.state === "signed_out",
+    "Claude Code to sign out",
+  );
+  await closeSettings();
+  // The app re-runs Claude Code's own `auth status` against its folder.
+  await refreshClaude();
+  assert.equal((await claude()).auth.state, "signed_out");
+  await checkpoint(
+    "Sign out leaves the app's Claude Code home signed out with no stored login",
   );
 });
