@@ -6,6 +6,7 @@ import { setTimeout as wait } from "node:timers/promises";
 import { Journal } from "./journal";
 import { SupervisorService } from "./service";
 import { inspectWorkspace } from "./workspace";
+import { Accounts } from "./harnesses/accounts";
 import { HarnessRegistry } from "./harnesses/registry";
 import { FakeHarness } from "./harnesses/fake";
 import type { HarnessAdapter } from "./harnesses/contract";
@@ -70,6 +71,7 @@ export async function start(
   const registry = new HarnessRegistry({
     adapters: [fake, ...others],
     programs: new ProgramManager({ root: dir, manifest: HARNESS_MANIFEST }),
+    accounts: new Accounts(join(dir, "accounts")),
     settings: journal,
     changed: () => changed(),
     environmentTimeoutMs: 0,

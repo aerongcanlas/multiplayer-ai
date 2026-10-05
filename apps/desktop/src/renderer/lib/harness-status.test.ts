@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import type { HarnessState } from "../../shared/tabs";
 import {
+  accountActions,
   authLabel,
   modelGroups,
   readiness,
@@ -97,5 +98,58 @@ test("the model picker groups OpenCode models by provider and leaves others in o
       (group) => group.label,
     ),
     [null],
+  );
+});
+
+const harness = (
+  id: HarnessState["id"],
+  signIn: HarnessState["signIn"],
+  auth: HarnessState["auth"],
+): HarnessState => ({ ...opencode(), id, signIn, auth });
+
+test("each sign-in state offers its own control (R6, R7)", () => {
+  assert.deepEqual(
+    accountActions(harness("claude", "in_app", { state: "signing_in" })),
+    ["cancel"],
+  );
+  assert.deepEqual(
+    accountActions(harness("codex", "in_app", { state: "signed_out" })),
+    ["sign_in"],
+  );
+  for (const id of ["claude", "codex"] as const)
+    assert.deepEqual(
+      accountActions(
+        harness(id, "in_app", {
+          state: "signed_in",
+          account: "me@example.invalid",
+          signOut: true,
+        }),
+      ),
+      ["sign_out"],
+    );
+  assert.deepEqual(
+    accountActions(
+      harness("opencode", "command", {
+        state: "signed_out",
+        command: "XDG_DATA_HOME='/app' '/bin/opencode' auth login",
+      }),
+    ),
+    ["command"],
+  );
+});
+
+test("OpenCode on local models alone reads Local models and offers no Sign out (AE7)", () => {
+  const local = harness("opencode", "command", {
+    state: "signed_in",
+    account: "Local models",
+    command: "XDG_DATA_HOME='/app' '/bin/opencode' auth login",
+  });
+  assert.equal(authLabel(local), "Local models");
+  assert.ok(!accountActions(local).includes("sign_out"));
+  assert.ok(
+    accountActions({
+      ...local,
+      auth: { ...local.auth, signOut: true },
+    }).includes("sign_out"),
   );
 });

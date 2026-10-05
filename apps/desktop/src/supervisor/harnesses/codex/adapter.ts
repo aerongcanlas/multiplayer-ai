@@ -13,6 +13,7 @@ import {
   type Inspection,
   type LaunchContext,
   type OpenRequest,
+  type SignInStart,
   type SuggestionRequest,
 } from "../contract";
 import { slashCommands } from "../commands";
@@ -31,6 +32,8 @@ import {
   type RpcNotification,
   type RpcRequest,
 } from "./transport";
+import { assertHome } from "../accounts";
+import { CODEX_ACCOUNT } from "./account";
 
 const IDLE_MS = 10 * 60_000;
 const LOGIN_HOSTS = ["auth.openai.com", "chatgpt.com"];
@@ -53,12 +56,19 @@ const loginUrlAllowed = (value: string) => {
 export class CodexAdapter implements HarnessAdapter {
   readonly id = "codex" as const;
   readonly signIn = "in_app" as const;
+  readonly account = CODEX_ACCOUNT;
   readonly reportsAgents = true;
   closed = false;
   readonly idleMs: number;
   private processes = new Map<string, CodexProcess>();
   private listeners: (() => void)[] = [];
   private resetsAt: number | null = null;
+  // The pending ChatGPT sign-in, which holds its process open until it settles.
+  private login?: {
+    loginId: string;
+    process: CodexProcess;
+    settle: (error?: Error) => void;
+  };
 
   constructor(private options: { launcher?: Launcher; idleMs?: number } = {}) {
     this.idleMs = options.idleMs ?? IDLE_MS;
@@ -68,14 +78,19 @@ export class CodexAdapter implements HarnessAdapter {
     return this.options.launcher ?? direct;
   }
 
-  /** The shared process for an executable, started on first use. */
+  /**
+   * The shared process for an executable and home, started on first use. A process started for
+   * another home is never reused (KTD7).
+   */
   async process(context: LaunchContext): Promise<CodexProcess> {
     if (this.closed)
       throw new HarnessError("failed", "The app is shutting down.");
-    let process = this.processes.get(context.executable);
+    assertHome(context, "CODEX_HOME");
+    const key = `${context.executable}\n${context.home}`;
+    let process = this.processes.get(key);
     if (!process || !process.alive) {
       process = new CodexProcess(context, this.launcher, this);
-      this.processes.set(context.executable, process);
+      this.processes.set(key, process);
       const current = process;
       process.transport.on("request", (rpc: RpcRequest) => {
         const threadId = string(rpc.params.threadId);
@@ -120,6 +135,19 @@ export class CodexAdapter implements HarnessAdapter {
       message.method === "account/login/completed" ||
       message.method === "account/updated"
     ) {
+      const login = this.login;
+      if (
+        message.method === "account/login/completed" &&
+        login &&
+        string(message.params.loginId) === login.loginId
+      )
+        login.settle(
+          message.params.success === true
+            ? undefined
+            : new Error(
+                string(message.params.error) || "Codex sign-in did not finish.",
+              ),
+        );
       for (const listener of this.listeners) listener();
       return;
     }
@@ -197,6 +225,7 @@ export class CodexAdapter implements HarnessAdapter {
   }
 
   async handshake(context: LaunchContext) {
+    assertHome(context, "CODEX_HOME");
     const launch = this.launcher(context.executable, ARGS, context.env);
     const transport = new JsonRpcTransport({
       ...launch,
@@ -289,6 +318,7 @@ export class CodexAdapter implements HarnessAdapter {
           ...(string(account.planType)
             ? { plan: string(account.planType) }
             : {}),
+          signOut: true,
         },
         models,
         limits,
@@ -307,8 +337,9 @@ export class CodexAdapter implements HarnessAdapter {
     }
   }
 
-  async startSignIn(context: LaunchContext): Promise<string | null> {
+  async startSignIn(context: LaunchContext): Promise<SignInStart> {
     const process = await this.process(context);
+    let held = false;
     try {
       const account = object(
         object(
@@ -317,7 +348,7 @@ export class CodexAdapter implements HarnessAdapter {
           }),
         ).account,
       );
-      if (account.type === "chatgpt") return null;
+      if (account.type === "chatgpt") return { state: "signed_in" };
       const result = object(
         await process.transport.request("account/login/start", {
           type: "chatgpt",
@@ -326,9 +357,49 @@ export class CodexAdapter implements HarnessAdapter {
       const url = string(result.authUrl);
       if (!loginUrlAllowed(url))
         throw new Error("Codex returned an unsupported sign-in URL.");
-      return url;
+      const loginId = string(result.loginId);
+      const done = new Promise<void>((resolve, reject) => {
+        const login = {
+          loginId,
+          process,
+          settle: (error?: Error) => {
+            if (this.login !== login) return;
+            this.login = undefined;
+            process.release();
+            if (error) reject(error);
+            else resolve();
+          },
+        };
+        this.login?.settle(new Error("A newer sign-in started."));
+        this.login = login;
+      });
+      held = true;
+      return { state: "pending", url, done };
+    } finally {
+      if (!held) process.release();
+    }
+  }
+
+  async cancelSignIn() {
+    const login = this.login;
+    if (!login) return;
+    login.settle(new Error("Sign-in cancelled."));
+    await login.process.transport
+      .request("account/login/cancel", { loginId: login.loginId })
+      .catch(() => {
+        /* The login already ended. */
+      });
+  }
+
+  /** Signs the app's Codex home out, then closes its process so no session keeps the login. */
+  async signOut(context: LaunchContext) {
+    await this.cancelSignIn();
+    const process = await this.process(context);
+    try {
+      await process.transport.request("account/logout");
     } finally {
       process.release();
+      process.close();
     }
   }
 

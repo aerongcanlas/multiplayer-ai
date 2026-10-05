@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -14,6 +14,7 @@ import {
   type SessionEvent,
 } from "../contract";
 import { launchEnvironment } from "../environment";
+import { Accounts } from "../accounts";
 import { HarnessRegistry } from "../registry";
 import { ProgramManager } from "../../programs/manager";
 import { HARNESS_MANIFEST } from "../../programs/manifest";
@@ -31,13 +32,19 @@ async function setup(options: { idleMs?: number } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "multiplayer-claude-"));
   const fixture = claudeFixture(join(dir, "state.json"));
   const make = () => new ClaudeAdapter({ ...fixture.options, ...options });
+  const home = join(dir, "accounts", "claude");
   const context = {
     executable: "/managed/claude",
-    env: launchEnvironment({
-      PATH: process.env.PATH,
-      HOME: "/home/host",
-      ANTHROPIC_API_KEY: "sk-ant-should-not-leak",
-    }),
+    env: {
+      ...launchEnvironment({
+        PATH: process.env.PATH,
+        HOME: "/home/host",
+        ANTHROPIC_API_KEY: "sk-ant-should-not-leak",
+      }),
+      CLAUDE_CONFIG_DIR: home,
+    },
+    home,
+    hostPaths: { HOME: join(dir, "host") },
   };
   const open = (
     adapter: ClaudeAdapter,
@@ -247,11 +254,13 @@ test("reopening passes the stored session to resume, and an unknown session is a
   }
 });
 
-test("inspect reuses the machine's login, and a signed-out machine gets guidance only", () =>
+test("inspect reads the app home's login, and a signed-out home offers the in-app sign-in", () =>
   withAdapter(async (adapter, { fixture, context }) => {
     const signedIn = await adapter.inspect(context);
     assert.equal(signedIn.auth.state, "signed_in");
     assert.equal(signedIn.auth.account, "fixture@example.invalid");
+    assert.equal(signedIn.auth.plan, "max");
+    assert.equal(signedIn.auth.signOut, true);
     assert.deepEqual(signedIn.models[0].efforts, ["low", "medium", "high"]);
     assert.deepEqual(
       signedIn.models.map((model) => [model.id, model.efforts.length]),
@@ -261,12 +270,15 @@ test("inspect reuses the machine's login, and a signed-out machine gets guidance
         ["haiku", 0],
       ],
     );
-    assert.equal(adapter.signIn, "guidance");
-    assert.equal("startSignIn" in adapter, false);
+    assert.equal(adapter.signIn, "in_app");
     fixture.setSignedIn(false);
     const signedOut = await adapter.inspect(context);
     assert.equal(signedOut.auth.state, "signed_out");
-    assert.match(signedOut.auth.message ?? "", /\/login/);
+    assert.doesNotMatch(signedOut.auth.message ?? "", /\/login|run claude/i);
+    assert.match(
+      signedOut.auth.message ?? "",
+      /Sign in to Claude Code from Settings/,
+    );
     assert.deepEqual(signedOut.models, []);
   }));
 
@@ -349,6 +361,7 @@ test("a missing custom binary is reported as program state without a download", 
         throw new Error("no network");
       }) as typeof fetch,
     }),
+    accounts: new Accounts(join(dir, "accounts")),
     settings: {
       getSetting: <T>(key: string) => settings.get(key) as T,
       setSetting: (key, value) => settings.set(key, value),
@@ -783,4 +796,199 @@ test("inspection reports output styles, and a session starts with the host's cho
       outputStyle: "Explanatory",
     });
     styled.close();
+  }));
+
+test("sessions, checks, commands, login, and logout all run in the app's Claude home", () =>
+  withAdapter(async (adapter, { fixture, open, context }) => {
+    const session = await open(adapter);
+    await run(session, "Hello");
+    await adapter.inspect(context);
+    await adapter.commands({ ...context, cwd: context.home });
+    for (const options of fixture.record.options) {
+      assert.equal(options.env?.CLAUDE_CONFIG_DIR, context.home);
+      assert.equal(options.env?.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB, "1");
+      assert.equal(options.env?.CLAUDE_CODE_OAUTH_TOKEN, undefined);
+    }
+    fixture.setSignedIn(false);
+    const started = await adapter.startSignIn(context);
+    assert.equal(started.state, "pending");
+    assert.ok(started.state === "pending" && !started.url);
+    if (started.state === "pending") await started.done;
+    await adapter.signOut(context);
+    assert.ok(fixture.record.calls.includes(`login:${context.home}`));
+    assert.ok(fixture.record.calls.includes(`logout:${context.home}`));
+    // A launch whose environment does not name the app home never starts.
+    await assert.rejects(
+      adapter.inspect({
+        ...context,
+        env: { ...context.env, CLAUDE_CONFIG_DIR: "/home/host/.claude" },
+      }),
+      /not ready/,
+    );
+  }));
+
+test("a pending Claude sign-in can be cancelled", () =>
+  withAdapter(async (adapter, { fixture, context }) => {
+    fixture.setSignedIn(false);
+    fixture.setLogin("hang");
+    const started = await adapter.startSignIn(context);
+    assert.ok(started.state === "pending");
+    await adapter.cancelSignIn();
+    await assert.rejects(started.done, /cancelled/);
+    assert.ok(fixture.record.calls.includes("login.cancel"));
+  }));
+
+async function claudeRegistry(
+  fixture: ReturnType<typeof claudeFixture>,
+  dir: string,
+) {
+  const executable = join(dir, "claude");
+  await writeFile(executable, "#!/bin/sh\n", { mode: 0o755 });
+  const settings = new Map<string, unknown>([
+    ["harness.claude.executable", executable],
+  ]);
+  const registry = new HarnessRegistry({
+    adapters: [new ClaudeAdapter(fixture.options)],
+    programs: new ProgramManager({ root: dir, manifest: HARNESS_MANIFEST }),
+    accounts: new Accounts(join(dir, "accounts")),
+    settings: {
+      getSetting: <T>(key: string) => settings.get(key) as T,
+      setSetting: (key, value) => settings.set(key, value),
+    },
+    changed: () => {},
+    environmentTimeoutMs: 0,
+  });
+  registry.setEnvironment({
+    PATH: process.env.PATH ?? "",
+    HOME: join(dir, "host"),
+    CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-host-token",
+  });
+  return registry;
+}
+
+test("signing in through the app ends signed in with the account and plan (AE2)", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "multiplayer-claude-"));
+  const fixture = claudeFixture(join(dir, "state.json"), { signedIn: false });
+  const registry = await claudeRegistry(fixture, dir);
+  try {
+    await registry.refresh("claude");
+    assert.equal(registry.state("claude").auth.state, "signed_out");
+    await registry.signIn("claude");
+    assert.equal(registry.state("claude").auth.state, "signing_in");
+    for (
+      let i = 0;
+      i < 100 && registry.state("claude").auth.state !== "signed_in";
+      i++
+    )
+      await wait(10);
+    const auth = registry.state("claude").auth;
+    assert.equal(auth.state, "signed_in");
+    assert.equal(auth.account, "fixture@example.invalid");
+    assert.equal(auth.plan, "max");
+    assert.doesNotMatch(
+      JSON.stringify(registry.snapshot()) +
+        (await readFile(join(dir, "state.json.log"), "utf8")),
+      /sk-ant-oat01-host-token/,
+    );
+  } finally {
+    registry.close();
+  }
+});
+
+test("a login that fails returns to signed out with a redacted reason", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "multiplayer-claude-"));
+  const fixture = claudeFixture(join(dir, "state.json"), {
+    signedIn: false,
+    login: "fail",
+  });
+  const registry = await claudeRegistry(fixture, dir);
+  try {
+    await registry.refresh("claude");
+    await registry.signIn("claude");
+    for (
+      let i = 0;
+      i < 100 && registry.state("claude").auth.state === "signing_in";
+      i++
+    )
+      await wait(10);
+    const auth = registry.state("claude").auth;
+    assert.equal(auth.state, "signed_out");
+    assert.match(auth.message ?? "", /Login failed: invalid_grant/);
+    assert.doesNotMatch(auth.message ?? "", /https:|fixture-secret-code/);
+  } finally {
+    registry.close();
+  }
+});
+
+test("host MCP servers reach Claude Code by name only, never on its command line", () =>
+  withAdapter(async (adapter, { fixture, open, context, dir }) => {
+    const host = context.hostPaths.HOME!;
+    await mkdir(host, { recursive: true });
+    await writeFile(
+      join(host, ".claude.json"),
+      JSON.stringify({
+        mcpServers: {
+          a: {
+            type: "stdio",
+            command: "server",
+            env: { API_TOKEN: "fixture-mcp-secret-env" },
+          },
+        },
+        projects: {
+          [dir]: {
+            mcpServers: {
+              b: {
+                type: "http",
+                url: "https://mcp.example.invalid",
+                headers: { Authorization: "Bearer fixture-mcp-secret-header" },
+              },
+            },
+          },
+        },
+      }),
+    );
+    const session = await open(adapter);
+    await run(session, "Hello");
+    const commands = await adapter.commands({ ...context, cwd: dir });
+    const inspection = await adapter.inspect(context);
+    assert.deepEqual(
+      fixture.record.calls.filter((call) => call.startsWith("mcp:")),
+      ["mcp:a,b", "mcp:a,b"],
+    );
+    const seen =
+      JSON.stringify(commands) +
+      JSON.stringify(inspection) +
+      JSON.stringify(
+        fixture.record.options.map((options) => options.mcpServers),
+      ) +
+      fixture.record.calls.join("\n");
+    assert.doesNotMatch(seen, /fixture-mcp-secret/);
+  }));
+
+test("a pre-upgrade tab's session is copied from the host folder before it resumes (AE6)", () =>
+  withAdapter(async (adapter, { fixture, open, context, dir }) => {
+    const sessionId = randomUUID();
+    // Claude Code (the fixture) knows the session; the app home does not have it yet.
+    await writeFile(
+      join(dir, "state.json"),
+      JSON.stringify({ signedIn: true, sessions: { [sessionId]: 1 } }),
+    );
+    const folder = join(
+      context.hostPaths.HOME!,
+      ".claude",
+      "projects",
+      "-repo",
+    );
+    await mkdir(folder, { recursive: true });
+    await writeFile(join(folder, `${sessionId}.jsonl`), "{}\n");
+    const session = await open(adapter, {}, sessionId);
+    await run(session, "Continue");
+    assert.equal(fixture.record.options.at(-1)?.resume, sessionId);
+    assert.equal(
+      await readFile(
+        join(context.home, "projects", "-repo", `${sessionId}.jsonl`),
+        "utf8",
+      ),
+      "{}\n",
+    );
   }));

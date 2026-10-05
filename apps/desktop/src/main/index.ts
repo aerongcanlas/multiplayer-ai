@@ -60,6 +60,15 @@ if (!app.isPackaged && !profileDirectory) {
 if (profileDirectory) app.setPath("userData", resolve(profileDirectory));
 if (testing && process.env.MP_TEST_USER_DATA)
   app.setPath("userData", resolve(process.env.MP_TEST_USER_DATA));
+// Harness sign-ins live in app-owned homes (KTD3). Dev checkouts share one root so each new
+// worktree profile does not need its own sign-in; packaged, explicit-profile, and E2E runs keep
+// theirs inside the profile.
+const accountsRoot =
+  app.isPackaged ||
+  profileDirectory ||
+  (testing && process.env.MP_TEST_USER_DATA)
+    ? join(app.getPath("userData"), "accounts")
+    : join(app.getPath("appData"), "Multiplayer AI Dev", "accounts");
 const devUrl = !app.isPackaged ? process.env.ELECTRON_RENDERER_URL : undefined;
 if (devUrl && !isLocalDevUrl(devUrl))
   throw new Error("Development UI must be served from 127.0.0.1.");
@@ -198,6 +207,7 @@ else {
         openLogin: (harness, url) => {
           if (loginAllowed(harness, url)) void shell.openExternal(url);
         },
+        accountsRoot,
         // Test fixtures and a local download manifest apply only to unpackaged E2E runs.
         ...(testing
           ? {

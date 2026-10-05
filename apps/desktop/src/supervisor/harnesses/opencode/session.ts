@@ -46,7 +46,7 @@ export function promptError(error: unknown): HarnessError {
     const provider = string(object(error.data).providerId);
     return new HarnessError(
       "signed_out",
-      `OpenCode needs a login${provider ? ` for ${provider}` : ""}. Run \`opencode auth login\` in a terminal, then send a follow-up.`,
+      `OpenCode needs a login${provider ? ` for ${provider}` : ""}. Sign it in with the command in Settings, then send a follow-up.`,
     );
   }
   const detail = error instanceof Error ? clip(error.message, 300) : "";

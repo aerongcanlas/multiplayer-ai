@@ -38,6 +38,8 @@ export class SupervisorClient {
         private tabs: {
             onTranscript?: (batches: TranscriptBatch[]) => void;
             openLogin?: (harness: HarnessId, url: string) => void;
+            // Where each harness keeps its app-owned login and history.
+            accountsRoot?: string;
             // Harness fixtures and a local download manifest for unpackaged E2E runs.
             testing?: SupervisorTesting;
         } = {},
@@ -53,7 +55,11 @@ export class SupervisorClient {
         this.child = utilityProcess.fork(
             entry,
             // Test settings travel as one named JSON argument, so none depends on its position.
-            [directory, JSON.stringify(tabs.testing ?? {})],
+            [
+                directory,
+                JSON.stringify(tabs.testing ?? {}),
+                tabs.accountsRoot ?? "",
+            ],
             {
                 serviceName: "Multiplayer AI Supervisor",
                 stdio: "pipe",

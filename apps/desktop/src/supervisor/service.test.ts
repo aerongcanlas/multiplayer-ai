@@ -326,7 +326,12 @@ test("fixtures are chosen by name, so leaving out OpenCode's shifts no other har
         );
         const context = {
             executable: "/nonexistent/harness",
-            env: { PATH: process.env.PATH ?? "" },
+            env: {
+                PATH: process.env.PATH ?? "",
+                CODEX_HOME: "/nonexistent/home",
+            },
+            home: "/nonexistent/home",
+            hostPaths: {},
         };
         // Codex answers from its fixture; OpenCode tries the real (missing) program.
         assert.ok((await adapters[0]!.handshake(context)).version);

@@ -1,17 +1,23 @@
+import { useState } from "react";
 import {
   ArrowUpCircle,
+  Copy,
   FolderOpen,
   LogIn,
+  LogOut,
   RefreshCw,
   RotateCcw,
+  X,
 } from "lucide-react";
 import {
   HARNESS_NOTICES,
+  tabBusy,
   type HarnessId,
   type HarnessState,
 } from "../../shared/tabs";
-import { perform } from "../lib/desktop-store";
+import { perform, useDesktop } from "../lib/desktop-store";
 import {
+  accountActions,
   authLabel,
   programFailed,
   programLabel,
@@ -20,7 +26,7 @@ import {
 } from "../lib/harness-status";
 import { Button } from "./ui/Button";
 
-// The in-app sign-in each harness offers; guidance harnesses show their setup message instead.
+// The in-app sign-in each harness offers; other harnesses show their setup message instead.
 const SIGN_IN_LABELS: Record<HarnessId, string> = {
   codex: "Sign in with ChatGPT",
   claude: "Sign in",
@@ -39,6 +45,7 @@ export function HarnessStatus({
 }) {
   const { program, auth } = harness;
   const failed = programFailed(program);
+  const actions = accountActions(harness);
   return (
     <div
       className={`harness-status ${compact ? "harness-status-compact" : ""}`}
@@ -70,23 +77,46 @@ export function HarnessStatus({
             : "Retry download"}
         </Button>
       )}
-      {auth.state === "signed_out" &&
-        (harness.signIn === "in_app" ? (
-          <Button
-            size="xs"
-            disabled={disabled}
-            onClick={() =>
-              void perform(() => window.desktop.signInHarness(harness.id), {
-                key: `harness.signIn:${harness.id}`,
-              })
-            }
-          >
-            <LogIn size={12} />
-            {SIGN_IN_LABELS[harness.id]}
-          </Button>
-        ) : (
-          <p className="harness-guidance">{auth.message}</p>
-        ))}
+      {auth.state === "signed_out" && auth.message && (
+        <p className="harness-guidance">{auth.message}</p>
+      )}
+      {actions.includes("sign_in") && (
+        <Button
+          size="xs"
+          disabled={disabled}
+          onClick={() =>
+            void perform(() => window.desktop.signInHarness(harness.id), {
+              key: `harness.signIn:${harness.id}`,
+            })
+          }
+        >
+          <LogIn size={12} />
+          {SIGN_IN_LABELS[harness.id]}
+        </Button>
+      )}
+      {actions.includes("cancel") && (
+        <Button
+          size="xs"
+          variant="outline"
+          disabled={disabled}
+          onClick={() =>
+            void perform(() => window.desktop.cancelHarnessSignIn(harness.id), {
+              key: `harness.signIn:${harness.id}`,
+            })
+          }
+        >
+          <X size={12} />
+          Cancel sign-in
+        </Button>
+      )}
+      {actions.includes("command") && !compact && (
+        <SignInCommand harness={harness} disabled={disabled} />
+      )}
+      {auth.warning && (
+        <p className="harness-line harness-warning" role="note">
+          {auth.warning}
+        </p>
+      )}
       {auth.state === "unknown" && auth.message && (
         <p className="subtle">{auth.message}</p>
       )}
@@ -113,6 +143,125 @@ export function HarnessStatus({
         </div>
       )}
     </div>
+  );
+}
+
+/** A copy-ready terminal command that signs the harness in, then a refresh to pick it up. */
+function SignInCommand({
+  harness,
+  disabled,
+}: {
+  harness: HarnessState;
+  disabled: boolean;
+}) {
+  const [copied, setCopied] = useState(false);
+  const command = harness.auth.command ?? "";
+  return (
+    <div
+      className="harness-command"
+      role="group"
+      aria-label={`${harness.label} sign-in command`}
+    >
+      <span className="harness-line">
+        To use a hosted provider, run this in a terminal, then refresh:
+      </span>
+      <code>{command}</code>
+      <div className="harness-command-actions">
+        <Button
+          size="xs"
+          variant="outline"
+          onClick={() =>
+            void navigator.clipboard
+              .writeText(command)
+              .then(() => setCopied(true))
+              .catch(() => setCopied(false))
+          }
+        >
+          <Copy size={12} />
+          {copied ? "Copied" : "Copy"}
+        </Button>
+        <Button
+          size="xs"
+          variant="ghost"
+          disabled={disabled}
+          onClick={() =>
+            void perform(() => window.desktop.refreshHarness(harness.id), {
+              key: `harness.refresh:${harness.id}`,
+            })
+          }
+        >
+          <RefreshCw size={12} />
+          Refresh
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** Ends the app's own login for a harness, confirming first when its tabs are running. */
+function SignOut({
+  harness,
+  disabled,
+}: {
+  harness: HarnessState;
+  disabled: boolean;
+}) {
+  const rooms = useDesktop().snapshot?.rooms ?? [];
+  const running = rooms.some((room) =>
+    room.tabs.some(
+      (tab) =>
+        tab.loadout.harness === harness.id &&
+        (tabBusy(tab.status) || Boolean(tab.runningAgents)),
+    ),
+  );
+  const [confirming, setConfirming] = useState(false);
+  const signOut = () => {
+    setConfirming(false);
+    void perform(() => window.desktop.signOutHarness(harness.id), {
+      key: `harness.signOut:${harness.id}`,
+    });
+  };
+  if (confirming)
+    return (
+      <div
+        className="harness-confirm"
+        role="group"
+        aria-label={`Sign out of ${harness.label}`}
+      >
+        <p>
+          Sign out of {harness.label}? Its running turns stop and its tabs close
+          their sessions.
+        </p>
+        <div className="harness-command-actions">
+          <Button
+            size="xs"
+            variant="destructive"
+            disabled={disabled}
+            onClick={signOut}
+          >
+            <LogOut size={12} />
+            Sign out
+          </Button>
+          <Button
+            size="xs"
+            variant="ghost"
+            onClick={() => setConfirming(false)}
+          >
+            Keep signed in
+          </Button>
+        </div>
+      </div>
+    );
+  return (
+    <Button
+      size="xs"
+      variant="outline"
+      disabled={disabled}
+      onClick={() => (running ? setConfirming(true) : signOut())}
+    >
+      <LogOut size={12} />
+      Sign out
+    </Button>
   );
 }
 
@@ -256,6 +405,9 @@ export function HarnessConnection({
         </ul>
       )}
       <HarnessStatus harness={harness} disabled={disabled} />
+      {accountActions(harness).includes("sign_out") && (
+        <SignOut harness={harness} disabled={disabled} />
+      )}
       <details className="harness-program">
         <summary>Program</summary>
         <Button

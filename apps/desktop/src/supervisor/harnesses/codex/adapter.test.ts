@@ -67,7 +67,9 @@ test("context generation preserves drafts and errors even when its temporary dir
       await assert.rejects(
         adapter.suggest({
           ...request,
-          messages: [{ ...messages[0], text: `${text} FIXTURE_SUGGESTION_LOCK` }],
+          messages: [
+            { ...messages[0], text: `${text} FIXTURE_SUGGESTION_LOCK` },
+          ],
         }),
         error,
       );
@@ -75,7 +77,12 @@ test("context generation preserves drafts and errors even when its temporary dir
   }));
 
 async function setup(
-  options: { signedIn?: boolean; loginUrl?: string; idleMs?: number } = {},
+  options: {
+    signedIn?: boolean;
+    loginUrl?: string;
+    idleMs?: number;
+    loginHang?: boolean;
+  } = {},
 ) {
   const dir = await mkdtemp(join(tmpdir(), "multiplayer-codex-"));
   const logFile = join(dir, "log.jsonl");
@@ -94,18 +101,25 @@ async function setup(
           ...(options.loginUrl
             ? { MP_FIXTURE_LOGIN_URL: options.loginUrl }
             : {}),
+          ...(options.loginHang ? { MP_FIXTURE_LOGIN_HANG: "1" } : {}),
         },
       }),
     });
+  const home = join(dir, "accounts", "codex");
   const context = {
     executable: "/managed/codex",
     // The registry strips provider credentials before any adapter sees the environment.
-    env: launchEnvironment({
-      PATH: process.env.PATH,
-      SSH_AUTH_SOCK: "/tmp/agent.sock",
-      OPENAI_API_KEY: "sk-should-not-leak",
-      CODEX_API_KEY: "should-not-leak",
-    }),
+    env: {
+      ...launchEnvironment({
+        PATH: process.env.PATH,
+        SSH_AUTH_SOCK: "/tmp/agent.sock",
+        OPENAI_API_KEY: "sk-should-not-leak",
+        CODEX_API_KEY: "should-not-leak",
+      }),
+      CODEX_HOME: home,
+    },
+    home,
+    hostPaths: {},
   };
   const log = async () =>
     (await readFile(logFile, "utf8").catch(() => ""))
@@ -478,11 +492,15 @@ test("in-app sign-in returns only allowlisted URLs and reports completion", asyn
       (await adapter.inspect(setup_.context)).auth.state,
       "signed_out",
     );
+    const started = await adapter.startSignIn(setup_.context);
+    assert.equal(started.state, "pending");
+    assert.ok(started.state === "pending");
     assert.equal(
-      await adapter.startSignIn(setup_.context),
+      started.url,
       "https://auth.openai.com/authorize?state=fixture",
     );
-    await wait(300);
+    // The fixture reports the login as completed shortly after it starts.
+    await started.done;
     assert.ok(changes >= 1);
     assert.equal(
       (await adapter.inspect(setup_.context)).auth.state,
@@ -645,8 +663,7 @@ test("native spawn activities register children before routing their approvals a
       decision: "accept",
     });
     assert.ok(
-      "error" in
-        ((await setup_.answers("stray approval"))[0].result as object),
+      "error" in ((await setup_.answers("stray approval"))[0].result as object),
     );
   }));
 
@@ -737,4 +754,70 @@ test("enabled skills list as slash commands, and a leading /skill attaches the s
       [{ type: "text", text: "/unknown stays as typed", text_elements: [] }],
     ]);
     session.close();
+  }));
+
+test("Codex launches with the app's CODEX_HOME, never the host's", () =>
+  withAdapter(async (adapter, setup_) => {
+    await adapter.inspect(setup_.context);
+    const launches = (await setup_.log()).filter(
+      (entry) => entry.type === "launch",
+    ) as { env: Record<string, string> }[];
+    assert.ok(launches.length);
+    for (const launch of launches)
+      assert.equal(launch.env.CODEX_HOME, setup_.context.home);
+    await assert.rejects(
+      adapter.inspect({
+        ...setup_.context,
+        env: { ...setup_.context.env, CODEX_HOME: "/home/host/.codex" },
+      }),
+      /not ready/,
+    );
+  }));
+
+test("one app-server runs per executable and home", () =>
+  withAdapter(async (adapter, setup_) => {
+    const other = join(setup_.dir, "accounts", "other");
+    await adapter.inspect(setup_.context);
+    await adapter.inspect(setup_.context);
+    await adapter.inspect({
+      ...setup_.context,
+      home: other,
+      env: { ...setup_.context.env, CODEX_HOME: other },
+    });
+    const homes = (
+      (await setup_.log()).filter((entry) => entry.type === "launch") as {
+        env: Record<string, string>;
+      }[]
+    ).map((launch) => launch.env.CODEX_HOME);
+    assert.deepEqual(homes, [setup_.context.home, other]);
+  }));
+
+test("Cancel during a ChatGPT sign-in sends account/login/cancel with its loginId (AE4)", () =>
+  withAdapter({ signedIn: false, loginHang: true }, async (adapter, setup_) => {
+    const started = await adapter.startSignIn(setup_.context);
+    assert.ok(started.state === "pending");
+    const ended = assert.rejects(started.done, /cancelled/);
+    await adapter.cancelSignIn();
+    await ended;
+    assert.deepEqual(
+      (await setup_.requests("account/login/cancel")).map(
+        (entry) => entry.params?.loginId,
+      ),
+      ["fixture-login"],
+    );
+  }));
+
+test("Sign out logs the app home out and closes its app-server", () =>
+  withAdapter(async (adapter, setup_) => {
+    const signedIn = (await adapter.inspect(setup_.context)).auth;
+    assert.equal(signedIn.state, "signed_in");
+    assert.equal(signedIn.signOut, true);
+    await adapter.signOut(setup_.context);
+    assert.equal((await setup_.requests("account/logout")).length, 1);
+    // The next use starts a new process, which reports the logout the fixture recorded.
+    await adapter.inspect(setup_.context);
+    assert.equal(
+      (await setup_.log()).filter((entry) => entry.type === "launch").length,
+      2,
+    );
   }));

@@ -10,10 +10,17 @@ export const HARNESS_LABELS: Record<HarnessId, string> = {
 };
 // A one-time notice the host acknowledges before the harness's first tab; null for none.
 export const HARNESS_NOTICES: Record<HarnessId, string | null> = {
-  codex: null,
+  codex:
+    "Codex tabs have their own ChatGPT sign-in, separate from Codex in your terminal, so signing in or out there never signs a tab out. Sign in once from Settings.",
   claude:
-    "Claude Code tabs use the Claude Code login already on this computer. Anthropic does not allow third-party apps to offer claude.ai sign-in, so this app never asks for it.",
+    "Claude Code tabs have their own sign-in, separate from Claude Code in your terminal, so signing in or out there never signs a tab out. Sign in from Settings: Claude Code opens Anthropic's page in your browser, and this app never sees your password or token.",
   opencode: null,
+};
+// Bumped when a notice's text changes enough that hosts who acknowledged it should see it again.
+export const HARNESS_NOTICE_VERSIONS: Record<HarnessId, number> = {
+  codex: 1,
+  claude: 2,
+  opencode: 1,
 };
 
 const id = z.uuid();
@@ -315,8 +322,14 @@ export interface HarnessState {
     account?: string;
     plan?: string;
     message?: string;
+    // A copy-ready terminal command that signs this harness in (OpenCode hosted providers).
+    command?: string;
+    // Linked host config that overrides the app's login, naming the setting, never its value.
+    warning?: string;
+    // Whether the app holds a login it can sign out of.
+    signOut?: boolean;
   };
-  signIn: "in_app" | "guidance";
+  signIn: "in_app" | "guidance" | "command";
   // The newest published version of the program, when the check has answered.
   latestVersion?: string;
   // A newer version outside the line this app updates within, installable after an app update.
@@ -432,6 +445,15 @@ export const tabCommandSchemas = [
     .strict(),
   z
     .object({ type: z.literal("harness.signIn"), harness: harnessIdSchema })
+    .strict(),
+  z
+    .object({
+      type: z.literal("harness.cancelSignIn"),
+      harness: harnessIdSchema,
+    })
+    .strict(),
+  z
+    .object({ type: z.literal("harness.signOut"), harness: harnessIdSchema })
     .strict(),
   // Main opens a native file dialog; the renderer never supplies a path.
   z

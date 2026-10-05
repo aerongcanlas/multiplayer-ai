@@ -47,7 +47,10 @@ async function setup(idleMs = 60_000) {
       MP_FIXTURE_LOG: log,
       OPENAI_API_KEY: "sk-host",
       ANTHROPIC_API_KEY: "sk-ant",
+      XDG_DATA_HOME: join(dir, "data"),
     },
+    home: "",
+    hostPaths: {},
   };
   const spawn = (key = "a") =>
     new OpenCodeProcess(

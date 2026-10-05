@@ -26,6 +26,7 @@ import {
   type ProcessOwner,
 } from "./process";
 import { choose, OpenCodeSession } from "./session";
+import { loginCommand } from "./account";
 
 const IDLE_MS = 10 * 60_000;
 const EFFORT = /^[a-z][a-z0-9_-]{0,23}$/;
@@ -35,7 +36,7 @@ const PROVIDER_NAMES: Record<string, string> = {
   lmstudio: "LM Studio",
 };
 export const NO_MODELS =
-  "No models available. Start Ollama or LM Studio with a tool-capable model and at least 32k of context (OLLAMA_CONTEXT_LENGTH for Ollama), run `ollama launch opencode`, or log in a provider with `opencode auth login`, then refresh.";
+  "No models available. Start Ollama or LM Studio with a tool-capable model and at least 32k of context (OLLAMA_CONTEXT_LENGTH for Ollama), run `ollama launch opencode`, or sign in a hosted provider with the command shown in Settings, then refresh.";
 
 /** Parses `opencode models --verbose`: an id line, then that model's JSON. */
 export function parseModels(output: string): HarnessModel[] {
@@ -86,7 +87,9 @@ export interface OpenCodeOptions {
 /** OpenCode tabs over ACP, with local models from Ollama and LM Studio (KTD1–KTD12). */
 export class OpenCodeAdapter implements HarnessAdapter, ProcessOwner {
   readonly id = "opencode" as const;
-  readonly signIn = "guidance" as const;
+  // Hosted providers sign in with a copy-ready terminal command; local models need none. OpenCode
+  // keeps using the host's own data folder: isolating it would reach tool shells (see docs).
+  readonly signIn = "command" as const;
   // OpenCode's ACP does not report sub-agents, and app sessions deny its task tool.
   readonly reportsAgents = false;
   readonly idleMs: number;
@@ -295,6 +298,7 @@ export class OpenCodeAdapter implements HarnessAdapter, ProcessOwner {
     const providers = [
       ...new Set(models.map((model) => model.id.split("/")[0]!)),
     ];
+    const command = loginCommand(context.executable);
     return {
       auth: models.length
         ? {
@@ -302,8 +306,9 @@ export class OpenCodeAdapter implements HarnessAdapter, ProcessOwner {
             account: providers.every((id) => LOCAL.has(id))
               ? "Local models"
               : providers.map((id) => PROVIDER_NAMES[id] ?? id).join(", "),
+            command,
           }
-        : { state: "signed_out", message: NO_MODELS },
+        : { state: "signed_out", message: NO_MODELS, command },
       models,
       limits: [],
       localServers: config.found.servers,

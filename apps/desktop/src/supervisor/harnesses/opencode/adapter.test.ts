@@ -14,6 +14,7 @@ import {
   type SessionEvent,
 } from "../contract";
 import { launchEnvironment } from "../environment";
+import { Accounts } from "../accounts";
 import { HarnessRegistry } from "../registry";
 import { ProgramManager } from "../../programs/manager";
 import { HARNESS_MANIFEST } from "../../programs/manifest";
@@ -82,6 +83,8 @@ async function setup(
       XDG_DATA_HOME: join(dir, "data"),
       OPENAI_API_KEY: "sk-should-not-leak",
     }),
+    home: "",
+    hostPaths: {},
   };
   const log = async () =>
     (await readFile(logFile, "utf8").catch(() => ""))
@@ -485,7 +488,7 @@ test("an auth error is signed_out, a provider error fails, and max_tokens comple
       run(session, "FIXTURE_AUTH"),
       (error: HarnessError) =>
         error.kind === "signed_out" &&
-        /opencode auth login/.test(error.message),
+        /command in Settings/.test(error.message),
     );
     await assert.rejects(
       run(session, "FIXTURE_FAIL"),
@@ -509,7 +512,7 @@ test("inspect reports no models with guidance when nothing is usable (AE3, AE8)"
     assert.equal(inspection.auth.state, "signed_out");
     assert.match(
       inspection.auth.message!,
-      /No models available.*ollama launch opencode.*opencode auth login/,
+      /No models available.*ollama launch opencode.*command shown in Settings/,
     );
     assert.deepEqual(inspection.models, []);
     const content = JSON.parse(
@@ -593,6 +596,7 @@ test("the registry snapshot carries OpenCode's local servers", async () => {
       root: fixture.dir,
       manifest: HARNESS_MANIFEST,
     }),
+    accounts: new Accounts(join(fixture.dir, "accounts")),
     settings: {
       getSetting: <T>(key: string) => settings.get(key) as T | undefined,
       setSetting: (key, value) => settings.set(key, value),
@@ -605,7 +609,7 @@ test("the registry snapshot carries OpenCode's local servers", async () => {
     await registry.refresh("opencode");
     const state = registry.snapshot()[0]!;
     assert.equal(state.auth.state, "signed_in");
-    assert.equal(state.signIn, "guidance");
+    assert.equal(state.signIn, "command");
     assert.equal(state.reportsAgents, false);
     assert.equal(state.noticePending, false);
     assert.deepEqual(state.localServers?.[0]?.models[0]?.id, "qwen3-coder:30b");
@@ -677,3 +681,14 @@ test("parseModels reads ids and variants from the verbose list", () => {
     ],
   );
 });
+
+test("local models need no sign-in, and OpenCode offers a copy-ready command, never a Sign out (AE7)", () =>
+  withAdapter(async (adapter, fixture) => {
+    const local = await adapter.inspect(fixture.context);
+    assert.equal(local.auth.state, "signed_in");
+    assert.equal(local.auth.account, "Local models");
+    assert.equal(local.auth.signOut, undefined);
+    assert.match(local.auth.command ?? "", /'\/managed\/opencode' auth login$/);
+    assert.equal("account" in adapter, false);
+    assert.equal("signOut" in adapter, false);
+  }));

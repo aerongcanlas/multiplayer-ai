@@ -205,7 +205,9 @@ test("a project's own provider suppresses injection only for tabs in that projec
   const configs = new HostConfigs(launcher);
   const context = {
     executable: "/opt/opencode",
-    env: { PATH: process.env.PATH ?? "" },
+    env: { PATH: process.env.PATH ?? "", XDG_DATA_HOME: join(root, "data") },
+    home: "",
+    hostPaths: {},
   };
   const inProject = await configs.get(context, project);
   const elsewhere = await configs.get(context, other);

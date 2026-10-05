@@ -95,6 +95,9 @@ const bridge: DesktopBridge = {
     invoke({ type: "question.answer", roomId, tabId, questionId, answers }),
   refreshHarness: (harness) => invoke({ type: "harness.refresh", harness }),
   signInHarness: (harness) => invoke({ type: "harness.signIn", harness }),
+  cancelHarnessSignIn: (harness) =>
+    invoke({ type: "harness.cancelSignIn", harness }),
+  signOutHarness: (harness) => invoke({ type: "harness.signOut", harness }),
   chooseHarnessExecutable: (harness) =>
     invoke({ type: "harness.chooseExecutable", harness }),
   useManagedHarness: (harness) =>
